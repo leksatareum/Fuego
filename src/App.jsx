@@ -3,7 +3,8 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 // Fonctionne dans l'artifact Claude, dans Vite, partout.
 // Utilise directement l'API REST Supabase via fetch.
 
-import { SUPABASE_URL, SUPABASE_ANON } from "./config.js";
+const SUPABASE_URL  = "REMPLACE_PAR_TON_URL";
+const SUPABASE_ANON = "REMPLACE_PAR_TA_ANON_KEY";
 // Client REST Supabase léger — pas besoin du SDK
 const sbFetch = async (table, opts={}) => {
   if (!SUPABASE_URL || SUPABASE_URL.includes("REMPLACE")) return { data: null, error: "not_configured" };
@@ -46,7 +47,7 @@ const DB = {
     const today = todayStr();
     const [
       ru, rhs, rft, rfr, rrec, rcool, rreh, roil,
-      rcl, rtr, rlb, rtm, rtr2, rpe, rrc, rcat, rtk, rre
+      rcl, rtr, rlb, rtm, rtr2, rpe, rrc, rcat, rtk, rre, rpr
     ] = await Promise.all([
       sbGet("users",           qs(q.order("id"),q.select())),
       sbGet("haccp_settings",  qs(q.limit(1),q.select())),
@@ -66,6 +67,7 @@ const DB = {
       sbGet("task_categories", qs(q.order("sort_order"),q.select())),
       sbGet("tasks",           qs(q.order("created_at",false),q.limit(500),q.select())),
       sbGet("restaurant",      qs(q.limit(1),q.select())),
+      sbGet("products",        qs(q.order("name"),q.select())),
     ]);
     const users   = ru.data   || [];
     const hs      = rhs.data?.[0] || {};
@@ -85,6 +87,7 @@ const DB = {
     const cats    = rcat.data || [];
     const tasks   = rtk.data  || [];
     const resto   = (rre.data || [{}])[0] || {};
+    const products= rpr.data || [];
 
     return {
       restaurant: resto,
@@ -109,6 +112,7 @@ const DB = {
       recipes: recipes.map(r=>({id:r.id,name:r.name,emoji:r.emoji,type:r.type,category:r.category,price:r.price,portions:r.portions,yield:r.yield_qty?{qty:r.yield_qty,unit:r.yield_unit}:undefined,components:r.components||[],steps:r.steps||[],allergens:r.allergens||[]})),
       taskCategories: cats.map(c=>({id:c.id,name:c.name,icon:c.icon,color:c.color})),
       tasks: tasks.map(t=>({id:t.id,categoryId:t.category_id,task:t.task,resp:t.resp,qty:t.qty,done:t.done,prio:t.prio})),
+      products: products.map(p=>({id:p.id,name:p.name,price:p.price,unit:p.unit})),
     };
   },
 
@@ -148,6 +152,9 @@ const DB = {
     if(fallbackId)await sbPatch("tasks",{category_id:fallbackId},qs(`category_id=eq.${id}`));
     return sbDelete("task_categories",qs(`id=eq.${id}`));
   },
+  async addProduct(p){return sbPost("products",{name:p.name,price:p.price,unit:p.unit});},
+  async updateProduct(id,p){return sbPatch("products",{name:p.name,price:p.price,unit:p.unit},qs(`id=eq.${id}`));},
+  async deleteProduct(id){return sbDelete("products",qs(`id=eq.${id}`));},
   async saveHaccpSettings(s){return sbPatch("haccp_settings",{cooling_max:s.coolingMax,reheat_min:s.reheatMin,reheat_max_time:s.reheatMaxTime,oil_polar_max:s.oilPolarMax,test_meal_days:s.testMealDays,label_dlc_default:s.labelDlcDefault},qs("id=eq.1"));},
   async saveRestaurant(r){const id=r.id;const body={name:r.name,address:r.address,phone:r.phone,siret:r.siret};if(id)return sbPatch("restaurant",body,qs(`id=eq.${id}`));return sbPost("restaurant",body);},
   async addFridgeTarget(f){return sbPost("fridge_targets",{name:f.name,icon:f.icon,target:f.target,type:f.type,sort_order:99});},
@@ -183,12 +190,13 @@ const S = `
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
   :focus-visible{outline:2px solid #FF6B00;outline-offset:2px;border-radius:4px;}
   @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;}}
-  html,body,#root{height:100%;}
+  html,body,#root{height:100%;position:fixed;inset:0;overflow:hidden;overscroll-behavior:none;-webkit-user-select:none;}
+  #root{display:flex;flex-direction:column;}
   body{font-family:'Inter',sans-serif;background:${T.bg0};color:${T.text};font-size:15px;-webkit-font-smoothing:antialiased;overscroll-behavior:none;}
   button{font-family:inherit;cursor:pointer;user-select:none;-webkit-user-select:none;touch-action:manipulation;}
   .tabular{font-variant-numeric:tabular-nums;letter-spacing:-0.01em;}
 
-  .shell{display:flex;flex-direction:column;height:100vh;max-width:480px;margin:0 auto;background:${T.bg0};position:relative;overflow:hidden;}
+  .shell{display:flex;flex-direction:column;height:100vh;height:100dvh;max-width:480px;margin:0 auto;background:${T.bg0};position:relative;overflow:hidden;}
   .topbar{background:${T.bg1};padding:calc(12px + env(safe-area-inset-top)) 18px 12px;border-bottom:1px solid ${T.border};flex-shrink:0;display:flex;align-items:center;justify-content:space-between;}
   .topbar-back{width:36px;height:36px;border-radius:50%;background:${T.bg2};border:none;display:flex;align-items:center;justify-content:center;font-size:20px;color:${T.text};transition:transform .15s;}
   .topbar-back:active{transform:scale(.92);}
@@ -384,7 +392,7 @@ const S = `
   .scan-title{font-size:15px;font-weight:700;color:${T.text};margin-bottom:3px;}
   .scan-sub{font-size:12px;color:${T.textDim};}
 
-  .login-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:32px 20px;background:${T.bg0};width:100%;max-width:480px;margin:0 auto;}
+  .login-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;min-height:100dvh;padding:32px 20px;background:${T.bg0};width:100%;max-width:480px;margin:0 auto;}
   .login-logo{font-family:'Inter',sans-serif;font-size:44px;font-weight:900;letter-spacing:.28em;text-transform:uppercase;margin-bottom:6px;text-align:center;width:100%;}
   .login-logo .flame{background:linear-gradient(135deg,#FF6B00 0%,#E8390A 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;color:transparent;}
   .login-tagline{font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:${T.textDim};margin-bottom:44px;text-align:center;width:100%;}
@@ -428,18 +436,32 @@ const S = `
 `;
 
 // ─── HOOKS & MICRO-UX ────────────────────────────────────────────────────────
-function useLongPress(onLongPress, ms=500){
+function useLongPress(onLongPress, ms=550){
   const [pressing,setPressing]=useState(false);
-  let timer=null, fired=false;
-  const start=()=>{fired=false;setPressing(true);timer=setTimeout(()=>{fired=true;setPressing(false);onLongPress();},ms);};
-  const cancel=()=>{setPressing(false);if(timer)clearTimeout(timer);};
+  const timerRef=useRef(null);
+  const firedRef=useRef(false);
+  const movedRef=useRef(false);
+  const startPos=useRef({x:0,y:0});
+  const start=(e)=>{
+    firedRef.current=false; movedRef.current=false; setPressing(true);
+    const pt = e.touches ? e.touches[0] : e;
+    startPos.current = { x: pt.clientX, y: pt.clientY };
+    timerRef.current=setTimeout(()=>{ if(!movedRef.current){ firedRef.current=true; setPressing(false); onLongPress(); } }, ms);
+  };
+  const move=(e)=>{
+    const pt = e.touches ? e.touches[0] : e;
+    const dx=Math.abs(pt.clientX-startPos.current.x), dy=Math.abs(pt.clientY-startPos.current.y);
+    // Un léger tremblement de doigt ne doit pas annuler ; seul un vrai glissement (scroll) annule
+    if(dx>10||dy>10){ movedRef.current=true; cancel(); }
+  };
+  const cancel=()=>{ setPressing(false); if(timerRef.current){ clearTimeout(timerRef.current); timerRef.current=null; } };
   return {
     pressing,
     handlers:{
-      onTouchStart:start, onTouchEnd:cancel, onTouchMove:cancel,
-      onMouseDown:start, onMouseUp:cancel, onMouseLeave:cancel,
+      onTouchStart:start, onTouchEnd:cancel, onTouchMove:move, onTouchCancel:cancel,
+      onMouseDown:start, onMouseUp:cancel, onMouseLeave:cancel, onMouseMove:move,
     },
-    didFire:()=>fired,
+    didFire:()=>firedRef.current,
   };
 }
 
@@ -524,6 +546,13 @@ const INIT={
     {id:3,name:"Théo Blanc",role:"Commis",haccpExp:"10/04/2026",visaExp:"15/04/2026"},
   ],
   pests:[{id:1,date:"01/05",type:"Visite contrat",company:"Hygiène 3D Pro",result:"RAS",nextVisit:"01/06"}],
+  // Bibliothèque de matières premières : prix d'achat par unité, réutilisée dans toutes les fiches techniques.
+  products:[
+    {id:1,name:"Citron vert",price:3.20,unit:"kg"},
+    {id:2,name:"Lait de coco",price:2.10,unit:"L"},
+    {id:3,name:"Gingembre",price:6.00,unit:"kg"},
+    {id:4,name:"Coriandre",price:12.00,unit:"kg"},
+  ],
   recipes:[
     {id:1,name:"Leche de Tigre",emoji:"🌶️",type:"mere",category:"Bases",yield:{qty:1000,unit:"ml"},
      components:[{kind:"ingredient",item:"Citron vert",qty:300,unit:"ml",cost:1.50},{kind:"ingredient",item:"Lait de coco",qty:400,unit:"ml",cost:1.40},{kind:"ingredient",item:"Gingembre",qty:50,unit:"g",cost:0.30},{kind:"ingredient",item:"Coriandre",qty:30,unit:"g",cost:0.36},{kind:"ingredient",item:"Sel, sucre, ail",qty:1,unit:"u",cost:0.20}],
@@ -570,6 +599,15 @@ const DAYS=["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
 function tempStatus(v,target){if(target==="-18")return v<=-15?"good":v>-12?"bad":"warn";const[lo,hi]=target.split("–").map(Number);return v>=lo&&v<=hi?"good":v>hi+2?"bad":"warn";}
 function tempCenter(target){if(target==="-18")return -18;const[lo,hi]=target.split("–").map(Number);return Math.round((lo+hi)/2);}
 function getReleve(data,fridgeId,period,date){return data.fridgeReleves.find(r=>r.fridgeId===fridgeId&&r.period===period&&r.date===(date||todayStr()));}
+// Convertit une quantité (qty, unit) vers l'unité d'achat du produit (kg, L, pce) pour calculer le coût.
+// ex: 300 g d'un produit acheté au kg → 0.3 kg × prix/kg
+const UNIT_TO_BASE = { g:{base:"kg",factor:0.001}, kg:{base:"kg",factor:1}, ml:{base:"L",factor:0.001}, L:{base:"L",factor:1}, pce:{base:"pce",factor:1}, u:{base:"pce",factor:1} };
+function computeIngredientCost(qty, unit, product){
+  if(!product || !qty) return 0;
+  const conv = UNIT_TO_BASE[unit] || {base:unit,factor:1};
+  if(conv.base !== product.unit) return null; // unités incompatibles (ex: g vs pièce) → coût non calculable automatiquement
+  return qty * conv.factor * product.price;
+}
 function recipeTotalCost(recipe,allRecipes){return recipe.components.reduce((sum,c)=>{if(c.kind==="ingredient")return sum+(c.cost||0);if(c.kind==="subrecipe"){const sub=allRecipes.find(r=>r.id===c.subrecipeId);if(!sub)return sum;const subTotalCost=recipeTotalCost(sub,allRecipes);const subYield=sub.yield?sub.yield.qty:1;return sum+(subTotalCost*(c.qty/subYield));}return sum;},0);}
 function recipeCostPerPortion(recipe,allRecipes){const total=recipeTotalCost(recipe,allRecipes);if(recipe.type==="plat")return total/(recipe.portions||1);return recipe.yield?total/recipe.yield.qty:total;}
 function recipeMargin(recipe,allRecipes){if(recipe.type!=="plat")return null;const cost=recipeCostPerPortion(recipe,allRecipes);return Math.round(((recipe.price-cost)/recipe.price)*100);}
@@ -998,7 +1036,7 @@ function HaccpHub({data,go}){
   </div>);
 }
 
-function Temperatures({data,setData,user}){
+function Temperatures({data,setData,user,db,reload}){
   const[editing,setEditing]=useState(null);const[pickedTemp,setPickedTemp]=useState(null);
   function openSlot(f,p){const e=getReleve(data,f.id,p);setEditing({fridge:f,period:p});setPickedTemp(e?e.temp:tempCenter(f.target));}
   async function save(){if(!editing||pickedTemp===null)return;const date=todayStr();await db.saveReleve({fridgeId:editing.fridge.id,date,period:editing.period,temp:pickedTemp,time:nowTime(),operatorId:user.id});await reload();setEditing(null);setPickedTemp(null);}
@@ -1032,7 +1070,7 @@ function Temperatures({data,setData,user}){
   </div>);
 }
 
-function Reception({data,setData,user}){
+function Reception({data,setData,user,db,reload}){
   const[show,setShow]=useState(false);const[temp,setTemp]=useState(3);const[aspect,setAspect]=useState("OK");const[emb,setEmb]=useState("OK");
   const[form,setForm]=useState({supplier:"",product:"",qty:"",dlc:"",lot:""});
   async function save(){if(!form.product)return;await db.addReception({date:todayStr(),supplier:form.supplier,product:form.product,qty:form.qty,dlc:form.dlc,lot:form.lot,temp,tempOk:temp<=4,aspect,emballage:emb,signed:user.name});await reload();setShow(false);setTemp(3);setAspect("OK");setEmb("OK");setForm({supplier:"",product:"",qty:"",dlc:"",lot:""});}
@@ -1472,7 +1510,7 @@ function RecipeDetail({recipe,allRecipes,onBack,onEdit}){
   </div>);
 }
 
-function RecipeEditor({recipe,allRecipes,onSave,onCancel}){
+function RecipeEditor({recipe,allRecipes,products=[],onSave,onCancel}){
   const isEditing=!!recipe;
   const[type,setType]=useState(recipe?.type||"plat");
   const[name,setName]=useState(recipe?.name||"");
@@ -1486,15 +1524,36 @@ function RecipeEditor({recipe,allRecipes,onSave,onCancel}){
   const[steps,setSteps]=useState(recipe?.steps||[]);
   const[allergensStr,setAllergensStr]=useState((recipe?.allergens||[]).join(", "));
   const otherRecipes=allRecipes.filter(r=>r.type==="mere"&&(!recipe||r.id!==recipe.id));
-  function addIngredient(){setComponents([...components,{kind:"ingredient",item:"",qty:0,unit:"g",cost:0}]);}
-  function addSubrecipe(){if(!otherRecipes.length)return alert("Créez d'abord une recette mère");setComponents([...components,{kind:"subrecipe",subrecipeId:otherRecipes[0].id,qty:0,unit:otherRecipes[0].yield.unit}]);}
+  function addIngredient(){setComponents([...components,{kind:"ingredient",item:"",qty:"",unit:"g",cost:"",productId:null}]);}
+  function addSubrecipe(){if(!otherRecipes.length)return alert("Créez d'abord une recette mère");setComponents([...components,{kind:"subrecipe",subrecipeId:otherRecipes[0].id,qty:"",unit:otherRecipes[0].yield.unit}]);}
   function updateComp(i,patch){setComponents(components.map((c,idx)=>idx===i?{...c,...patch}:c));}
   function removeComp(i){setComponents(components.filter((_,idx)=>idx!==i));}
   function addStep(){setSteps([...steps,""]);}
   function updateStep(i,val){setSteps(steps.map((s,idx)=>idx===i?val:s));}
   function removeStep(i){setSteps(steps.filter((_,idx)=>idx!==i));}
-  function save(){if(!name)return alert("Nom requis");const rec={id:recipe?.id,name,emoji,type,category,components:components.filter(c=>c.kind==="ingredient"?c.item&&c.qty>0:c.qty>0),steps:steps.filter(s=>s.trim()),allergens:allergensStr.split(",").map(a=>a.trim()).filter(Boolean)};if(type==="plat"){rec.price=parseFloat(price)||0;rec.portions=parseInt(portions)||1;}else{rec.yield={qty:parseFloat(yieldQty)||0,unit:yieldUnit};}onSave(rec);}
-  const preview={components,type,price:parseFloat(price)||0,portions:parseInt(portions)||1,yield:{qty:parseFloat(yieldQty)||1,unit:yieldUnit},allergens:[],id:-1};
+  function save(){if(!name)return alert("Nom requis");
+    const normComponents=components.map(c=>{
+      const qty=parseFloat(String(c.qty).replace(",","."))||0;
+      if(c.kind==="ingredient"&&c.productId){
+        const prod=products.find(p=>p.id===c.productId);
+        const autoCost=computeIngredientCost(qty,c.unit,prod);
+        return {...c,qty,cost:autoCost!=null?autoCost:(parseFloat(String(c.cost).replace(",","."))||0)};
+      }
+      return {...c,qty,cost:c.cost!=null?parseFloat(String(c.cost).replace(",","."))||0:undefined};
+    });
+    const rec={id:recipe?.id,name,emoji,type,category,components:normComponents.filter(c=>c.kind==="ingredient"?c.item&&c.qty>0:c.qty>0),steps:steps.filter(s=>s.trim()),allergens:allergensStr.split(",").map(a=>a.trim()).filter(Boolean)};
+    if(type==="plat"){rec.price=parseFloat(price)||0;rec.portions=parseInt(portions)||1;}else{rec.yield={qty:parseFloat(yieldQty)||0,unit:yieldUnit};}
+    onSave(rec);}
+  const normForPreview=components.map(c=>{
+    const qty=parseFloat(String(c.qty).replace(",","."))||0;
+    if(c.kind==="ingredient"&&c.productId){
+      const prod=products.find(p=>p.id===c.productId);
+      const autoCost=computeIngredientCost(qty,c.unit,prod);
+      return {...c,qty,cost:autoCost!=null?autoCost:0};
+    }
+    return {...c,qty,cost:parseFloat(String(c.cost).replace(",","."))||0};
+  });
+  const preview={components:normForPreview,type,price:parseFloat(price)||0,portions:parseInt(portions)||1,yield:{qty:parseFloat(yieldQty)||1,unit:yieldUnit},allergens:[],id:-1};
   const previewCost=recipeCostPerPortion(preview,allRecipes);
   const previewMargin=type==="plat"&&price?Math.round(((parseFloat(price)-previewCost)/parseFloat(price))*100):null;
   return(<div className="page"><div className="between mb14"><button className="btn btn-ghost btn-sm" style={{width:"auto"}} onClick={onCancel}>← Annuler</button><button className="btn btn-primary btn-sm" style={{width:"auto"}} onClick={save}>✓ {isEditing?"Mettre à jour":"Créer"}</button></div>
@@ -1507,11 +1566,39 @@ function RecipeEditor({recipe,allRecipes,onSave,onCancel}){
       {type==="plat"?<div className="row gap8"><div style={{flex:1}}><label className="label">Prix (€)</label><input className="input input-sm" type="number" step="0.5" value={price} onChange={e=>setPrice(e.target.value)}/></div><div style={{flex:1}}><label className="label">Portions</label><input className="input input-sm" type="number" value={portions} onChange={e=>setPortions(e.target.value)}/></div></div>:<div className="row gap8"><div style={{flex:1}}><label className="label">Rendement</label><input className="input input-sm" type="number" value={yieldQty} onChange={e=>setYieldQty(e.target.value)}/></div><div style={{flex:0,width:80}}><label className="label">Unité</label><select className="input input-sm" value={yieldUnit} onChange={e=>setYieldUnit(e.target.value)}><option>ml</option><option>L</option><option>g</option><option>kg</option><option>pce</option></select></div></div>}
     </div>
     <div className="card" style={{background:T.bg3}}><div className="bucket-label mb8">Aperçu coûts</div>
-      <div className="row gap12" style={{flexWrap:"wrap"}}>{type==="plat"?<><div><div className="text-xs text-dim">Coût/portion</div><div className="fw7 tabular" style={{color:T.text}}>{previewCost.toFixed(2)} €</div></div>{price&&<div><div className="text-xs text-dim">Marge</div><div className="fw7 tabular" style={{color:previewMargin>=70?T.good:previewMargin>=50?T.info:T.bad}}>{previewMargin}%</div></div>}</>:<><div><div className="text-xs text-dim">Coût total</div><div className="fw7 tabular" style={{color:T.text}}>{components.reduce((a,c)=>a+(c.cost||0),0).toFixed(2)} €</div></div></>}</div>
+      <div className="row gap12" style={{flexWrap:"wrap"}}>{type==="plat"?<><div><div className="text-xs text-dim">Coût/portion</div><div className="fw7 tabular" style={{color:T.text}}>{previewCost.toFixed(2)} €</div></div>{price&&<div><div className="text-xs text-dim">Marge</div><div className="fw7 tabular" style={{color:previewMargin>=70?T.good:previewMargin>=50?T.info:T.bad}}>{previewMargin}%</div></div>}</>:<><div><div className="text-xs text-dim">Coût total</div><div className="fw7 tabular" style={{color:T.text}}>{normForPreview.reduce((a,c)=>a+(c.cost||0),0).toFixed(2)} €</div></div></>}</div>
     </div>
     <div className="card"><div className="between mb8"><div className="bucket-label">Ingrédients</div><div className="row gap6"><button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={addIngredient}>+ Ingrédient</button>{otherRecipes.length>0&&<button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={addSubrecipe}>+ 🧪</button>}</div></div>
       {components.length===0&&<div className="text-xs text-dim center" style={{padding:"10px 0"}}>Aucun ingrédient</div>}
-      {components.map((c,i)=><div key={i} style={{padding:"10px 0",borderBottom:i<components.length-1?`1px solid ${T.border}`:"none"}}>{c.kind==="ingredient"?<><input className="input input-sm mb6" value={c.item} onChange={e=>updateComp(i,{item:e.target.value})} placeholder="Nom"/><div className="row gap6"><input className="input input-sm" style={{flex:1}} type="number" step="0.1" value={c.qty} onChange={e=>updateComp(i,{qty:parseFloat(e.target.value)||0})} placeholder="Qté"/><select className="input input-sm" style={{flex:0,width:60}} value={c.unit} onChange={e=>updateComp(i,{unit:e.target.value})}><option>g</option><option>kg</option><option>ml</option><option>L</option><option>pce</option><option>u</option></select><input className="input input-sm" style={{flex:1}} type="number" step="0.01" value={c.cost} onChange={e=>updateComp(i,{cost:parseFloat(e.target.value)||0})} placeholder="€"/><button style={{width:34,height:34,borderRadius:9,background:T.badBg,color:T.bad,border:"none",fontSize:16,flexShrink:0}} onClick={()=>removeComp(i)}>×</button></div></>:<><div className="row gap6 mb6"><span style={{fontSize:16}}>🧪</span><select className="input input-sm" style={{flex:1}} value={c.subrecipeId} onChange={e=>{const sub=allRecipes.find(r=>r.id===parseInt(e.target.value));updateComp(i,{subrecipeId:parseInt(e.target.value),unit:sub.yield.unit});}}>{otherRecipes.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}</select></div><div className="row gap6"><input className="input input-sm" style={{flex:1}} type="number" value={c.qty} onChange={e=>updateComp(i,{qty:parseFloat(e.target.value)||0})}/><span style={{padding:"9px 12px",color:T.textDim,fontSize:13}}>{c.unit}</span><button style={{width:34,height:34,borderRadius:9,background:T.badBg,color:T.bad,border:"none",fontSize:16,flexShrink:0}} onClick={()=>removeComp(i)}>×</button></div></>}</div>)}
+      {components.map((c,i)=>{
+        if(c.kind!=="ingredient")return(<div key={i} style={{padding:"10px 0",borderBottom:i<components.length-1?`1px solid ${T.border}`:"none"}}><div className="row gap6 mb6"><span style={{fontSize:16}}>🧪</span><select className="input input-sm" style={{flex:1}} value={c.subrecipeId} onChange={e=>{const sub=allRecipes.find(r=>r.id===parseInt(e.target.value));updateComp(i,{subrecipeId:parseInt(e.target.value),unit:sub.yield.unit});}}>{otherRecipes.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}</select></div><div className="row gap6"><input className="input input-sm" style={{flex:1}} type="text" inputMode="decimal" value={c.qty} onChange={e=>{const v=e.target.value;if(/^\d*[.,]?\d*$/.test(v))updateComp(i,{qty:v.replace(",",".")});}}/><span style={{padding:"9px 12px",color:T.textDim,fontSize:13}}>{c.unit}</span><button style={{width:34,height:34,borderRadius:9,background:T.badBg,color:T.bad,border:"none",fontSize:16,flexShrink:0}} onClick={()=>removeComp(i)}>×</button></div></div>);
+        // Ligne ingrédient : soit lié à un produit du catalogue (coût auto), soit saisie libre
+        const linkedProduct=c.productId?products.find(p=>p.id===c.productId):null;
+        const autoCost=linkedProduct?computeIngredientCost(parseFloat(String(c.qty).replace(",","."))||0,c.unit,linkedProduct):null;
+        const unitMismatch=linkedProduct&&autoCost===null;
+        return(<div key={i} style={{padding:"10px 0",borderBottom:i<components.length-1?`1px solid ${T.border}`:"none"}}>
+          <div className="field" style={{marginBottom:6}}>
+            <select className="input input-sm" value={c.productId||""} onChange={e=>{
+              const pid=e.target.value?parseInt(e.target.value):null;
+              const prod=pid?products.find(p=>p.id===pid):null;
+              updateComp(i,{productId:pid,item:prod?prod.name:c.item});
+            }}>
+              <option value="">— Saisie libre —</option>
+              {products.map(p=><option key={p.id} value={p.id}>{p.name} ({p.price.toFixed(2)}€/{p.unit})</option>)}
+            </select>
+          </div>
+          {!c.productId&&<input className="input input-sm mb6" value={c.item} onChange={e=>updateComp(i,{item:e.target.value})} placeholder="Nom de l'ingrédient"/>}
+          <div className="row gap6">
+            <input className="input input-sm" style={{flex:1}} type="text" inputMode="decimal" value={c.qty} onChange={e=>{const v=e.target.value;if(/^\d*[.,]?\d*$/.test(v))updateComp(i,{qty:v.replace(",",".")});}} placeholder="Qté"/>
+            <select className="input input-sm" style={{flex:0,width:60}} value={c.unit} onChange={e=>updateComp(i,{unit:e.target.value})}><option>g</option><option>kg</option><option>ml</option><option>L</option><option>pce</option><option>u</option></select>
+            {c.productId
+              ? <div className="input input-sm" style={{flex:1,display:"flex",alignItems:"center",color:unitMismatch?T.bad:T.good,fontWeight:700,background:T.bg3}}>{unitMismatch?"⚠ unité":`${(autoCost||0).toFixed(2)} €`}</div>
+              : <input className="input input-sm" style={{flex:1}} type="text" inputMode="decimal" value={c.cost} onChange={e=>{const v=e.target.value;if(/^\d*[.,]?\d*$/.test(v))updateComp(i,{cost:v.replace(",",".")});}} placeholder="€"/>}
+            <button style={{width:34,height:34,borderRadius:9,background:T.badBg,color:T.bad,border:"none",fontSize:16,flexShrink:0}} onClick={()=>removeComp(i)}>×</button>
+          </div>
+          {unitMismatch&&<div className="text-xs mt4" style={{color:T.bad}}>Ce produit est acheté au {linkedProduct.unit} — choisissez une unité compatible ({linkedProduct.unit==="kg"?"g ou kg":linkedProduct.unit==="L"?"ml ou L":"pce"}).</div>}
+        </div>);
+      })}
     </div>
     <div className="card"><div className="between mb8"><div className="bucket-label">Étapes</div><button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={addStep}>+ Étape</button></div>
       {steps.length===0&&<div className="text-xs text-dim center" style={{padding:"10px 0"}}>Aucune étape</div>}
@@ -1526,7 +1613,7 @@ function Recipes({data,setData,db,reload}){
   const[view,setView]=useState("list");const[sel,setSel]=useState(null);const[typeFilter,setTypeFilter]=useState("all");
   const allRecipes=data.recipes;
   const filtered=allRecipes.filter(r=>typeFilter==="all"||r.type===typeFilter);
-  if(view==="edit")return<RecipeEditor recipe={sel?allRecipes.find(r=>r.id===sel):null} allRecipes={allRecipes} onSave={async(rec)=>{await db.saveRecipe(rec);await reload();setView("list");setSel(null);}} onCancel={()=>{setView("list");setSel(null);}}/>;
+  if(view==="edit")return<RecipeEditor recipe={sel?allRecipes.find(r=>r.id===sel):null} allRecipes={allRecipes} products={data.products||[]} onSave={async(rec)=>{await db.saveRecipe(rec);await reload();setView("list");setSel(null);}} onCancel={()=>{setView("list");setSel(null);}}/>;
   if(view==="detail"&&sel)return<RecipeDetail recipe={allRecipes.find(r=>r.id===sel)} allRecipes={allRecipes} onBack={()=>{setView("list");setSel(null);}} onEdit={()=>setView("edit")}/>;
   return(<div className="page"><div className="section-title">Fiches techniques</div><div className="section-sub">{allRecipes.filter(r=>r.type==="plat").length} plats · {allRecipes.filter(r=>r.type==="mere").length} mères</div>
     <SegmentedControl value={typeFilter} onChange={setTypeFilter} options={[{value:"all",label:"Tous"},{value:"plat",label:"Plats"},{value:"mere",label:"Mères"}]}/>
@@ -1585,6 +1672,38 @@ function Planning({data}){
     <div className="bucket-label">En service — {day}</div>
     {data.users.filter(u=>shifts[u.id]).map(u=><div key={u.id} className="item"><div className="item-icon" style={{background:`${u.color}25`,color:u.color,fontWeight:700,fontSize:14}}>{u.initials}</div><div className="item-body"><div className="item-title">{u.name}</div><div className="item-sub">{u.role}</div></div><div style={{textAlign:"right"}}>{shifts[u.id].map((sh,i)=><div key={i} className="badge b-info" style={{marginBottom:3,display:"block"}}>{sh}</div>)}</div></div>)}
   </div>);
+}
+
+function ProductsEditor({data,setData,db,reload}){
+  const[showAdd,setShowAdd]=useState(false);const[editing,setEditing]=useState(null);
+  const[form,setForm]=useState({name:"",price:"",unit:"kg"});
+  function openAdd(){setEditing(null);setForm({name:"",price:"",unit:"kg"});setShowAdd(true);}
+  function openEdit(p){setEditing(p);setForm({name:p.name,price:p.price.toString(),unit:p.unit});setShowAdd(true);}
+  async function save(){
+    if(!form.name.trim())return;
+    const payload={name:form.name.trim(),price:parseFloat(String(form.price).replace(",","."))||0,unit:form.unit};
+    if(editing)await db.updateProduct(editing.id,payload); else await db.addProduct(payload);
+    await reload(); setShowAdd(false); setEditing(null);
+  }
+  async function remove(p){if(!window.confirm(`Supprimer "${p.name}" du catalogue ?`))return;await db.deleteProduct(p.id);await reload();}
+  const sorted=[...(data.products||[])].sort((a,b)=>a.name.localeCompare(b.name));
+  return(<><div className="text-xs text-dim mb12" style={{lineHeight:1.5}}>Prix d'achat de vos matières premières. Utilisés pour calculer automatiquement le coût de vos fiches techniques.</div>
+    {sorted.length===0&&<div className="empty"><div className="empty-icon">🧾</div><div className="empty-title">Aucun produit</div><div className="empty-sub">Ajoutez vos matières premières et leurs prix</div></div>}
+    {sorted.map(p=><div key={p.id} className="item">
+      <div className="item-icon" style={{background:T.infoBg}}>🧾</div>
+      <div className="item-body"><div className="item-title">{p.name}</div><div className="item-sub">{p.price.toFixed(2)} € / {p.unit}</div></div>
+      <div className="row gap6"><button onClick={()=>openEdit(p)} style={{background:"transparent",border:"none",color:T.textDim,fontSize:16,padding:"6px 8px"}}>✏️</button><button onClick={()=>remove(p)} style={{background:"transparent",border:"none",color:T.bad,fontSize:16,padding:"6px 8px"}}>🗑</button></div>
+    </div>)}
+    <button className="btn btn-primary mt8" onClick={openAdd}>+ Nouveau produit</button>
+    {showAdd&&<div className="overlay" onClick={()=>setShowAdd(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
+      <div className="sheet-handle"></div><div className="sheet-title">{editing?"Modifier le produit":"Nouveau produit"}</div>
+      <div className="field"><label className="label">Nom</label><input className="input" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="ex : Filet de bar" autoFocus/></div>
+      <div className="row gap8"><div style={{flex:1}}><label className="label">Prix d'achat</label><input className="input input-sm" type="text" inputMode="decimal" value={form.price} onChange={e=>{const v=e.target.value;if(/^\d*[.,]?\d*$/.test(v))setForm({...form,price:v});}} placeholder="ex : 18.50"/></div>
+        <div style={{flex:0,width:90}}><label className="label">Pour</label><select className="input input-sm" value={form.unit} onChange={e=>setForm({...form,unit:e.target.value})}><option value="kg">1 kg</option><option value="L">1 L</option><option value="pce">1 pièce</option></select></div></div>
+      <div className="text-xs text-dim mb14">Le coût sera calculé automatiquement selon la quantité utilisée dans chaque recette (g, kg, ml, L ou pièces).</div>
+      <button className="btn btn-primary mt8" onClick={save} disabled={!form.name.trim()}>{editing?"Mettre à jour":"Ajouter au catalogue"}</button>
+    </div></div>}
+  </>);
 }
 
 function TaskCategoriesEditor({data,setData,db,reload}){
@@ -1923,9 +2042,10 @@ function Settings({data,setData,user,onLogout,db,reload}){
       <div className="section-title">Paramètres</div>
       <div className="section-sub">Administration Fuego</div>
       <div className="tabs" style={{marginBottom:20}}>
-        {[{k:"haccp",l:"🛡️ HACCP"},{k:"printer",l:"🖨️ Imprimante"},{k:"tasks",l:"📋 Tâches"},{k:"users",l:"👥 Équipe"},{k:"restaurant",l:"🏠 Resto"}].map(t=><button key={t.k} className={`tab ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k)}>{t.l}</button>)}
+        {[{k:"haccp",l:"🛡️ HACCP"},{k:"products",l:"🧾 Produits"},{k:"printer",l:"🖨️ Imprimante"},{k:"tasks",l:"📋 Tâches"},{k:"users",l:"👥 Équipe"},{k:"restaurant",l:"🏠 Resto"}].map(t=><button key={t.k} className={`tab ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k)}>{t.l}</button>)}
       </div>
       {tab==="haccp"&&<SettingsHaccp data={data} setData={setData} db={db} reload={reload}/>}
+      {tab==="products"&&<ProductsEditor data={data} setData={setData} db={db} reload={reload}/>}
       {tab==="printer"&&<SettingsPrinter user={user}/>}
       {tab==="tasks"&&<TaskCategoriesEditor data={data} setData={setData} db={db} reload={reload}/>}
       {tab==="users"&&<SettingsUsers data={data} setData={setData} user={user} db={db} reload={reload} onLogout={onLogout}/>}
