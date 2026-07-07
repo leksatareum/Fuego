@@ -199,10 +199,10 @@ const S = `
   .topbar{background:${T.bg1};padding:calc(12px + env(safe-area-inset-top)) 18px 12px;border-bottom:1px solid ${T.border};flex-shrink:0;display:flex;align-items:center;justify-content:space-between;}
   .topbar-back{width:36px;height:36px;border-radius:50%;background:${T.bg2};border:none;display:flex;align-items:center;justify-content:center;font-size:20px;color:${T.text};transition:transform .15s;}
   .topbar-back:active{transform:scale(.92);}
-  .topbar-center{flex:1;text-align:center;}
+  .topbar-center{flex:1;text-align:center;min-width:0;padding:0 8px;}
   .topbar-logo{font-family:'Inter',sans-serif;font-size:17px;font-weight:800;letter-spacing:.22em;text-transform:uppercase;}
   .topbar-logo .flame{background:linear-gradient(135deg,#FF6B00,#E8390A);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;color:transparent;}
-  .topbar-title{font-family:'Inter',sans-serif;font-size:15px;font-weight:700;color:${T.text};letter-spacing:.01em;}
+  .topbar-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'Inter',sans-serif;font-size:15px;font-weight:700;color:${T.text};letter-spacing:.01em;}
   .topbar-avatar{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#FF6B00,#E8390A);border:none;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:white;transition:transform .15s;}
   .topbar-avatar:active{transform:scale(.92);}
 
@@ -423,9 +423,10 @@ const S = `
   .between{display:flex;align-items:center;justify-content:space-between;}
   .gap6{gap:6px;}.gap8{gap:8px;}.gap10{gap:10px;}.gap12{gap:12px;}
   .mt4{margin-top:4px;}.mt6{margin-top:6px;}.mt8{margin-top:8px;}.mt12{margin-top:12px;}.mt14{margin-top:14px;}
-  .mb4{margin-bottom:4px;}.mb6{margin-bottom:6px;}.mb8{margin-bottom:8px;}.mb12{margin-bottom:12px;}.mb14{margin-bottom:14px;}
+  .mb4{margin-bottom:4px;}.mb6{margin-bottom:6px;}.mb8{margin-bottom:8px;}.mb10{margin-bottom:10px;}.mb12{margin-bottom:12px;}.mb14{margin-bottom:14px;}
   .text-sm{font-size:12px;}.text-xs{font-size:11px;}.text-dim{color:${T.textDim};}.text-mute{color:${T.textMute};}
   .fw6{font-weight:600;}.fw7{font-weight:700;}.center{text-align:center;}
+  .group-label{font-size:11px;font-weight:800;color:${T.textMute};text-transform:uppercase;letter-spacing:.12em;margin:4px 2px 8px;}
   .empty{text-align:center;padding:36px 18px;background:${T.bg2};border-radius:14px;border:1px solid ${T.border};}
   .empty-icon{font-size:38px;margin-bottom:10px;opacity:.6;}
   .empty-title{font-size:16px;font-weight:700;color:${T.text};margin-bottom:4px;}
@@ -598,6 +599,9 @@ const DAYS=["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
 function tempStatus(v,target){if(target==="-18")return v<=-15?"good":v>-12?"bad":"warn";const[lo,hi]=target.split("–").map(Number);return v>=lo&&v<=hi?"good":v>hi+2?"bad":"warn";}
 function tempCenter(target){if(target==="-18")return -18;const[lo,hi]=target.split("–").map(Number);return Math.round((lo+hi)/2);}
 function getReleve(data,fridgeId,period,date){return data.fridgeReleves.find(r=>r.fridgeId===fridgeId&&r.period===period&&r.date===(date||todayStr()));}
+const clamp=(n,min=0,max=100)=>Math.max(min,Math.min(max,Number.isFinite(n)?n:min));
+const safePct=(done,total)=>total>0?clamp((done/total)*100):0;
+const safeNum=(v,fallback=0)=>{const n=Number(v);return Number.isFinite(n)?n:fallback;};
 // Convertit une quantité (qty, unit) vers l'unité d'achat du produit (kg, L, pce) pour calculer le coût.
 // ex: 300 g d'un produit acheté au kg → 0.3 kg × prix/kg
 const UNIT_TO_BASE = { g:{base:"kg",factor:0.001}, kg:{base:"kg",factor:1}, ml:{base:"L",factor:0.001}, L:{base:"L",factor:1}, pce:{base:"pce",factor:1}, u:{base:"pce",factor:1} };
@@ -608,8 +612,8 @@ function computeIngredientCost(qty, unit, product){
   return qty * conv.factor * product.price;
 }
 function recipeTotalCost(recipe,allRecipes){return recipe.components.reduce((sum,c)=>{if(c.kind==="ingredient")return sum+(c.cost||0);if(c.kind==="subrecipe"){const sub=allRecipes.find(r=>r.id===c.subrecipeId);if(!sub)return sum;const subTotalCost=recipeTotalCost(sub,allRecipes);const subYield=sub.yield?sub.yield.qty:1;return sum+(subTotalCost*(c.qty/subYield));}return sum;},0);}
-function recipeCostPerPortion(recipe,allRecipes){const total=recipeTotalCost(recipe,allRecipes);if(recipe.type==="plat")return total/(recipe.portions||1);return recipe.yield?total/recipe.yield.qty:total;}
-function recipeMargin(recipe,allRecipes){if(recipe.type!=="plat")return null;const cost=recipeCostPerPortion(recipe,allRecipes);return Math.round(((recipe.price-cost)/recipe.price)*100);}
+function recipeCostPerPortion(recipe,allRecipes){const total=recipeTotalCost(recipe,allRecipes);if(recipe.type==="plat")return total/Math.max(1,safeNum(recipe.portions,1));return recipe.yield?total/Math.max(1,safeNum(recipe.yield.qty,1)):total;}
+function recipeMargin(recipe,allRecipes){if(recipe.type!=="plat")return null;const price=safeNum(recipe.price,0);if(price<=0)return 0;const cost=recipeCostPerPortion(recipe,allRecipes);return Math.round(((price-cost)/price)*100);}
 function recipeAllergens(recipe,allRecipes){const set=new Set(recipe.allergens||[]);recipe.components.forEach(c=>{if(c.kind==="subrecipe"){const sub=allRecipes.find(r=>r.id===c.subrecipeId);if(sub)recipeAllergens(sub,allRecipes).forEach(a=>set.add(a));}});return[...set];}
 function findUsedIn(recipeId,allRecipes){return allRecipes.filter(r=>r.components.some(c=>c.kind==="subrecipe"&&c.subrecipeId===recipeId));}
 function getServiceWindow(){const h=new Date().getHours();if(h>=7&&h<11)return{id:"morning",label:"Ouverture",icon:"☀️"};if(h>=11&&h<15)return{id:"lunch",label:"Service midi",icon:"🍽️"};if(h>=15&&h<18)return{id:"prep_pm",label:"Préparation soir",icon:"🔧"};if(h>=18&&h<23)return{id:"dinner",label:"Service soir",icon:"🌙"};return{id:"closing",label:"Clôture",icon:"🌃"};}
@@ -662,7 +666,7 @@ function FuegoLogo({size="topbar"}) {
 
 function Login({users,onLogin}){
   const[sel,setSel]=useState(null);const[pin,setPin]=useState("");const[err,setErr]=useState("");const[shake,setShake]=useState(false);
-  function tryLogin(){const u=users.find(u=>u.id===sel);if(u.pin===pin){haptic(15);onLogin(u);}else{haptic(30);setErr("PIN incorrect");setPin("");setShake(true);setTimeout(()=>setShake(false),450);}}
+  function tryLogin(){const u=users.find(u=>u.id===sel);if(u&&u.pin===pin){haptic(15);onLogin(u);}else{haptic(30);setErr("PIN incorrect");setPin("");setShake(true);setTimeout(()=>setShake(false),450);}}
   return(<div className="login-screen">
     <div className="fade-up" style={{marginBottom:14,display:"flex",justifyContent:"center"}}><FuegoBrand height={104}/></div>
     <div className="login-logo fade-up fade-up-1"><FuegoLogo size="login"/></div>
@@ -731,7 +735,7 @@ function Aujourdhui({data,go,user}){
       <div className="bucket-label"><span className="bucket-label-dot" style={{background:T.warn}}></span>En cours</div>
       {activeCoolings.map(c=>{
         const elMs=Date.now()-c.startedMs;const elMin=Math.floor(elMs/60000);const elSec=Math.floor((elMs%60000)/1000);
-        const maxMs=data.haccpSettings.coolingMax*60000;const pct=Math.min((elMs/maxMs)*100,100);
+        const maxMs=Math.max(1,safeNum(data.haccpSettings.coolingMax,120))*60000;const pct=safePct(elMs,maxMs);
         const isDanger=elMin>data.haccpSettings.coolingMax;const isNear=elMin>data.haccpSettings.coolingMax*0.75;
         const fmt=(m,s)=>`${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
         return(<div key={c.id} className={`live-widget ${isDanger?"danger":""}`} onClick={()=>go("cooling")}>
@@ -747,9 +751,9 @@ function Aujourdhui({data,go,user}){
       {nowItems.map((it,i)=>(<div key={i} className="check-row" onClick={()=>go(it.goto)}>
         <div className="check-row-icon" style={{background:`${it.color}22`,color:it.color}}>{it.icon}</div>
         <div className="check-row-body"><div className="check-row-title">{it.title}</div>
-          {it.total!==undefined?<div className="check-row-progress"><div className="check-row-bar"><div className="check-row-fill" style={{width:`${(it.done/it.total)*100}%`,background:it.color}}></div></div><span className="text-xs tabular text-dim">{it.done}/{it.total}</span></div>:<div className="check-row-progress">{it.sub}</div>}
+          {it.total!==undefined?<div className="check-row-progress"><div className="check-row-bar"><div className="check-row-fill" style={{width:`${safePct(it.done,it.total)}%`,background:it.color}}></div></div><span className="text-xs tabular text-dim">{it.done}/{it.total}</span></div>:<div className="check-row-progress">{it.sub}</div>}
         </div>
-        {it.total!==undefined&&<div className="check-row-pct tabular">{Math.round((it.done/it.total)*100)}%</div>}
+        {it.total!==undefined&&<div className="check-row-pct tabular">{Math.round(safePct(it.done,it.total))}%</div>}
       </div>))}
     </>}
 
@@ -1109,7 +1113,7 @@ function Cooling({data,setData,user,db,reload}){
   const maxMin=mode==="surgel"?(data.haccpSettings.freezingMax||240):data.haccpSettings.coolingMax;
   useEffect(()=>{if(step!==2)return;const i=setInterval(()=>setElapsed(Math.floor((Date.now()-startMs)/1000)),1000);return()=>clearInterval(i);},[step,startMs]);
   const fmt=s=>`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
-  const overtime=elapsed>maxMin*60;const progress=startMs?Math.min(elapsed/(maxMin*60)*100,100):0;
+  const limitSec=Math.max(1,safeNum(maxMin,120))*60;const overtime=elapsed>limitSec;const progress=startMs?safePct(elapsed,limitSec):0;
   async function start(){const r=await db.startCooling({product:form.product,qty:form.qty,startTemp,startedMs:Date.now(),operator:user.name,date:todayStr()});if(r.data)setActiveCoolingId(r.data.id);setStartMs(Date.now());setElapsed(0);setStep(2);await reload();}
   async function finish(){const dur=Math.floor(elapsed/60);const conform=mode==="surgel"?(endTemp<=-18):(dur<=maxMin&&endTemp<=10);const status=conform?"ok":"alert";
     const dlc=M.dlcMonths
@@ -1191,7 +1195,7 @@ function Oils({data,setData,user,db,reload}){
   return(<div className="page"><div className="section-title">Huiles de friture</div><div className="section-sub">Polaires — seuil légal : {max}%</div>
     {data.oils.map(o=>{const danger=o.polaires>=max;const warn=o.polaires>=max-5&&!danger;return(<div key={o.id} className="card">
       <div className="between mb10"><div><div className="item-title">{o.name}</div><div className="item-sub">Huile {o.type} · depuis {o.dateInstall}</div></div><div style={{textAlign:"right"}}><div className="tabular" style={{fontFamily:"'Inter',sans-serif",letterSpacing:"-.03em",fontSize:28,fontWeight:700,lineHeight:1,color:danger?T.bad:warn?T.warn:T.good}}>{o.polaires}%</div><div className="text-xs text-dim">polaires</div></div></div>
-      <div className="pbar mb10"><div className="pfill" style={{width:`${Math.min((o.polaires/max)*100,100)}%`,background:danger?T.bad:warn?T.warn:T.good}}></div></div>
+      <div className="pbar mb10"><div className="pfill" style={{width:`${safePct(o.polaires,max)}%`,background:danger?T.bad:warn?T.warn:T.good}}></div></div>
       <div className="row gap6 mb10"><span className={`badge ${danger?"b-bad":warn?"b-warn":"b-good"}`}>{danger?"🚨 Changer":warn?"⚠ Surveiller":"✓ OK"}</span><span className="badge b-mute">Test {o.lastTest}</span></div>
       {selOil?.id===o.id?<>
         <div className="field"><label className="label">Composés polaires</label><TapDial value={polaires} onChange={setPolaires} center={15} step={2} colorFn={v=>v<max-5?"good":v<max?"warn":"bad"} format={v=>`${v}%`}/></div>
@@ -1500,7 +1504,7 @@ function RecipeDetail({recipe,allRecipes,onBack,onEdit}){
       {recipe.type==="mere"&&<div className="text-xs text-dim mt8 center">→ <b style={{color:T.text}}>{recipe.yield.qty*mult} {recipe.yield.unit}</b> · Coût : <b style={{color:T.text}}>{(cost*mult).toFixed(2)} €</b></div>}
     </div>
     <div className="card"><div className="bucket-label mb8">Ingrédients</div>
-      {recipe.components.map((c,i)=>{const isLast=i===recipe.components.length-1;if(c.kind==="ingredient")return(<div key={i} className="between" style={{padding:"9px 0",borderBottom:isLast?"none":`1px solid ${T.border}`}}><span style={{fontSize:13,color:T.text}}>{c.item}</span><span className="text-xs text-dim tabular">{(c.qty*mult).toFixed(c.qty<10?1:0)} {c.unit} · {(c.cost*mult).toFixed(2)} €</span></div>);const sub=allRecipes.find(r=>r.id===c.subrecipeId);if(!sub)return null;const subUnitCost=recipeTotalCost(sub,allRecipes)/sub.yield.qty;return(<div key={i} className="between" style={{padding:"9px 0",borderBottom:isLast?"none":`1px solid ${T.border}`}}><span style={{fontSize:13,color:T.text}}><span style={{color:T.warn}}>🧪</span> {sub.name} <span className="text-xs text-dim">(recette)</span></span><span className="text-xs text-dim tabular">{(c.qty*mult).toFixed(c.qty<10?1:0)} {c.unit} · {(c.qty*mult*subUnitCost).toFixed(2)} €</span></div>);})}
+      {recipe.components.map((c,i)=>{const isLast=i===recipe.components.length-1;if(c.kind==="ingredient")return(<div key={i} className="between" style={{padding:"9px 0",borderBottom:isLast?"none":`1px solid ${T.border}`}}><span style={{fontSize:13,color:T.text}}>{c.item}</span><span className="text-xs text-dim tabular">{(c.qty*mult).toFixed(c.qty<10?1:0)} {c.unit} · {(c.cost*mult).toFixed(2)} €</span></div>);const sub=allRecipes.find(r=>r.id===c.subrecipeId);if(!sub)return null;const subUnitCost=recipeTotalCost(sub,allRecipes)/Math.max(1,safeNum(sub.yield?.qty,1));return(<div key={i} className="between" style={{padding:"9px 0",borderBottom:isLast?"none":`1px solid ${T.border}`}}><span style={{fontSize:13,color:T.text}}><span style={{color:T.warn}}>🧪</span> {sub.name} <span className="text-xs text-dim">(recette)</span></span><span className="text-xs text-dim tabular">{(c.qty*mult).toFixed(c.qty<10?1:0)} {c.unit} · {(c.qty*mult*subUnitCost).toFixed(2)} €</span></div>);})}
     </div>
     <div className="card"><div className="bucket-label mb8">Préparation</div>{recipe.steps.map((s,i)=><div key={i} className="row gap10 mb8"><div className="step-num">{i+1}</div><div style={{fontSize:13,paddingTop:4,color:T.text}}>{s}</div></div>)}</div>
     <div className="card"><div className="bucket-label mb8">Allergènes</div>{allergens.length===0?<span className="badge b-mute">Aucun</span>:<div className="row gap6" style={{flexWrap:"wrap"}}>{allergens.map(a=><span key={a} className="badge b-warn">{a}</span>)}</div>}</div>
@@ -1617,7 +1621,7 @@ function Recipes({data,setData,db,reload}){
   return(<div className="page"><div className="section-title">Fiches techniques</div><div className="section-sub">{allRecipes.filter(r=>r.type==="plat").length} plats · {allRecipes.filter(r=>r.type==="mere").length} mères</div>
     <SegmentedControl value={typeFilter} onChange={setTypeFilter} options={[{value:"all",label:"Tous"},{value:"plat",label:"Plats"},{value:"mere",label:"Mères"}]}/>
     <div style={{height:14}}></div>
-    {filtered.map(rec=>{const cost=recipeCostPerPortion(rec,allRecipes);const m=recipeMargin(rec,allRecipes);return(<div key={rec.id} className="item" onClick={()=>{setSel(rec.id);setView("detail");}}><div className="item-icon" style={{background:rec.type==="mere"?T.warnBg:T.infoBg}}>{rec.emoji}</div><div className="item-body"><div className="item-title">{rec.name}</div><div className="item-sub">{rec.type==="mere"?<>🧪 Mère · {rec.yield.qty} {rec.yield.unit} · {cost.toFixed(2)}€/{rec.yield.unit}</>:<>{rec.category} · {rec.price} €</>}</div></div>{rec.type==="plat"?<span className={`badge ${m>=70?"b-good":m>=50?"b-info":"b-bad"}`}>{m}%</span>:<span className="badge b-warn">Base</span>}</div>);})}
+    {filtered.map(rec=>{const cost=recipeCostPerPortion(rec,allRecipes);const m=recipeMargin(rec,allRecipes);return(<div key={rec.id} className="item" onClick={()=>{setSel(rec.id);setView("detail");}}><div className="item-icon" style={{background:rec.type==="mere"?T.warnBg:T.infoBg}}>{rec.emoji}</div><div className="item-body"><div className="item-title">{rec.name}</div><div className="item-sub">{rec.type==="mere"?<>🧪 Mère · {rec.yield?.qty||0} {rec.yield?.unit||"u"} · {cost.toFixed(2)}€/{rec.yield?.unit||"u"}</>:<>{rec.category} · {rec.price} €</>}</div></div>{rec.type==="plat"?<span className={`badge ${m>=70?"b-good":m>=50?"b-info":"b-bad"}`}>{m}%</span>:<span className="badge b-warn">Base</span>}</div>);})}
     <button className="btn-fab" onClick={()=>{setSel(null);setView("edit");}}>+</button>
   </div>);
 }
@@ -2122,12 +2126,12 @@ function useSpeechRecognition({onResult, wakeWord, wakeEnabled}){
   const [supported, setSupported] = useState(true);
 
   useEffect(()=>{
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const SR = typeof window!=="undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
     if (!SR){ setSupported(false); return; }
   },[]);
 
   const start = useCallback((continuous=false)=>{
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const SR = typeof window!=="undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
     if (!SR) return;
     const rec = new SR();
     rec.lang = "fr-FR";
@@ -2294,7 +2298,7 @@ export default function App(){
   // ── Mot-clé "Fuego" (écoute passive en arrière-plan) ──
   useEffect(()=>{
     if(!wakeEnabled || voiceOpen) return;
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const SR = typeof window!=="undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
     if(!SR) return;
     let rec; let stopped=false;
     try{
@@ -2373,7 +2377,7 @@ export default function App(){
       {user.isAdmin&&<button className="btn btn-ghost mb8" onClick={()=>{setProfile(false);go("settings");}}>⚙️ Paramètres</button>}
       <button className="btn" style={{background:T.badBg,color:T.bad}} onClick={logout}>Déconnexion</button>
     </div></div>}
-    <div className="scroll" key={page}>{pages[page]}</div>
+    <div className="scroll" key={page}>{pages[page]||pages.home}</div>
 
     {/* Bouton micro vocal — visible sur l'accueil */}
     {isRoot && page==="home" && (
