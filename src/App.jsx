@@ -145,6 +145,7 @@ const DB = {
   },
   async addTask(t){return sbPost("tasks",{category_id:t.categoryId,task:t.task,resp:t.resp,qty:t.qty,prio:t.prio,done:false,date:todayStr()});},
   async toggleTask(id,done){return sbPatch("tasks",{done},qs(`id=eq.${id}`));},
+  async clearTasks(){return sbDelete("tasks",qs("id=not.is.null"));},
   async saveTaskCategory(c){
     if(c.id)return sbPatch("task_categories",{name:c.name,icon:c.icon,color:c.color},qs(`id=eq.${c.id}`));
     return sbPost("task_categories",{name:c.name,icon:c.icon,color:c.color});
@@ -352,6 +353,8 @@ const S = `
   .chips::-webkit-scrollbar{display:none;}
   .chip{flex-shrink:0;padding:7px 14px;border-radius:999px;background:${T.bg2};color:${T.textDim};border:1px solid ${T.border};font-size:13px;font-weight:600;white-space:nowrap;transition:all .12s;}
   .chip.sel{background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;border-color:#E8390A;}
+  .dial.swipeable::after{content:"Glisser pour faire défiler";display:block;position:absolute;left:50%;transform:translateX(-50%);bottom:-17px;font-size:10px;color:${T.textMute};white-space:nowrap;}
+  .dial{position:relative;}
 
   .field{margin-bottom:14px;}
   .label{display:block;font-size:11px;font-weight:700;color:${T.textDim};margin-bottom:6px;text-transform:uppercase;letter-spacing:.07em;}
@@ -365,7 +368,9 @@ const S = `
   @keyframes sheetIn{from{transform:translateY(100%);}to{transform:translateY(0);}}
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);z-index:100000;display:flex;align-items:flex-end;justify-content:center;animation:overlayIn 200ms ease-out;isolation:isolate;}
   .sheet{position:relative;z-index:100001;background:${T.bg1};width:100%;max-width:480px;border-radius:24px 24px 0 0;padding:20px 18px calc(34px + env(safe-area-inset-bottom));max-height:min(86dvh,calc(100dvh - 84px));overflow-y:auto;-webkit-overflow-scrolling:touch;animation:sheetIn 300ms cubic-bezier(0.32,0.72,0,1);border-top:1px solid ${T.borderHi};box-shadow:0 -20px 60px rgba(0,0,0,.5);}
-  .sheet-handle{width:36px;height:4px;background:${T.textMute};border-radius:2px;margin:0 auto 16px;}
+  .sheet-handle{width:42px;height:5px;background:${T.textMute};border-radius:999px;margin:0 auto 16px;opacity:.75;}
+  .sheet{touch-action:pan-y;}
+  .dial.swipeable{touch-action:pan-y;}
   .sheet-title{font-family:'Inter',sans-serif;font-size:20px;font-weight:800;margin-bottom:16px;color:${T.text};}
 
   .temp-slot{flex:1;min-height:62px;border-radius:11px;border:1.5px solid ${T.border};background:${T.bg1};display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px;transition:all .15s;}
@@ -479,8 +484,77 @@ function useSaveToast(){
 
 function TapDial({value,onChange,center,step=1,colorFn,format=(v)=>`${v}°`}){
   const [offset,setOffset]=useState(0);
+  const startX=useRef(null);
+  const startY=useRef(null);
+  const moved=useRef(false);
+  const shift=(dir)=>{haptic(6);setOffset(o=>o+(dir*step));};
+  const start=(e)=>{const t=e.touches?e.touches[0]:e;startX.current=t.clientX;startY.current=t.clientY;moved.current=false;};
+  const move=(e)=>{
+    if(startX.current===null)return;
+    const t=e.touches?e.touches[0]:e;
+    const dx=t.clientX-startX.current, dy=t.clientY-startY.current;
+    if(Math.abs(dx)>18 && Math.abs(dx)>Math.abs(dy)*1.15){moved.current=true;e.preventDefault?.();}
+  };
+  const end=(e)=>{
+    if(startX.current===null)return;
+    const t=e.changedTouches?e.changedTouches[0]:e;
+    const dx=t.clientX-startX.current, dy=t.clientY-startY.current;
+    startX.current=startY.current=null;
+    if(Math.abs(dx)>46 && Math.abs(dx)>Math.abs(dy)*1.2){
+      // swipe gauche = valeurs plus hautes, swipe droite = valeurs plus basses
+      shift(dx<0?1:-1);
+    }
+  };
   const vals=[center-2*step+offset,center-step+offset,center+offset,center+step+offset,center+2*step+offset];
-  return(<div className="dial"><button className="dial-arrow" onClick={()=>{haptic(6);setOffset(o=>o-step);}}>‹</button><div className="dial-vals">{vals.map((v,i)=>{const cls=colorFn?colorFn(v):"";return(<button key={i} className={`dial-val ${value===v?"sel":""} ${value===v?cls:""}`} onClick={()=>{haptic(10);onChange(v);}}>{format(v)}</button>);})}</div><button className="dial-arrow" onClick={()=>{haptic(6);setOffset(o=>o+step);}}>›</button></div>);
+  return(<div className="dial swipeable" onTouchStart={start} onTouchMove={move} onTouchEnd={end} onMouseDown={start} onMouseMove={move} onMouseUp={end}>
+    <button className="dial-arrow" onClick={()=>shift(-1)}>‹</button>
+    <div className="dial-vals">{vals.map((v,i)=>{const cls=colorFn?colorFn(v):"";return(<button key={i} className={`dial-val ${value===v?"sel":""} ${value===v?cls:""}`} onClick={()=>{haptic(10);onChange(v);}}>{format(v)}</button>);})}</div>
+    <button className="dial-arrow" onClick={()=>shift(1)}>›</button>
+  </div>);
+}
+
+function GlobalSheetSwipe(){
+  useEffect(()=>{
+    let sx=0, sy=0, sheet=null, dragging=false;
+    const onStart=(e)=>{
+      const t=e.touches?.[0]; if(!t)return;
+      sheet=e.target.closest?.('.sheet'); if(!sheet)return;
+      sx=t.clientX; sy=t.clientY; dragging=true;
+      sheet.style.transition='none';
+    };
+    const onMove=(e)=>{
+      if(!dragging||!sheet)return;
+      const t=e.touches?.[0]; if(!t)return;
+      const dx=t.clientX-sx, dy=t.clientY-sy;
+      if(dy>0 && Math.abs(dy)>Math.abs(dx)*1.15){
+        sheet.style.transform=`translateY(${Math.min(dy,220)}px)`;
+        sheet.style.opacity=String(Math.max(.82,1-dy/500));
+      }
+    };
+    const onEnd=(e)=>{
+      if(!dragging||!sheet)return;
+      const t=e.changedTouches?.[0];
+      const dy=t?t.clientY-sy:0, dx=t?t.clientX-sx:0;
+      const targetSheet=sheet; dragging=false; sheet=null;
+      if(dy>92 && Math.abs(dy)>Math.abs(dx)*1.1){
+        haptic(12);
+        targetSheet.style.transition='transform .18s ease, opacity .18s ease';
+        targetSheet.style.transform='translateY(110%)';
+        targetSheet.style.opacity='0';
+        setTimeout(()=>targetSheet.closest?.('.overlay')?.click(),90);
+      }else{
+        targetSheet.style.transition='transform .22s cubic-bezier(.22,1,.36,1), opacity .22s';
+        targetSheet.style.transform='';
+        targetSheet.style.opacity='';
+      }
+    };
+    document.addEventListener('touchstart',onStart,{passive:true});
+    document.addEventListener('touchmove',onMove,{passive:true});
+    document.addEventListener('touchend',onEnd,{passive:true});
+    document.addEventListener('touchcancel',onEnd,{passive:true});
+    return()=>{document.removeEventListener('touchstart',onStart);document.removeEventListener('touchmove',onMove);document.removeEventListener('touchend',onEnd);document.removeEventListener('touchcancel',onEnd);};
+  },[]);
+  return null;
 }
 function BinaryChoice({value,onChange,options}){return(<div className="binary">{options.map(o=><button key={o.value} className={`binary-btn ${value===o.value?"sel":""} ${o.style||"neutral"}`} onClick={()=>{haptic(10);onChange(o.value);}}>{o.icon&&<span>{o.icon}</span>} {o.label}</button>)}</div>);}
 function SegmentedControl({value,onChange,options}){return(<div className="seg">{options.map(o=><button key={o.value} className={`seg-btn ${value===o.value?"sel":""}`} onClick={()=>{haptic(8);onChange(o.value);}}>{o.label}</button>)}</div>);}
@@ -678,7 +752,7 @@ function Login({users,onLogin}){
     <div className="login-tagline fade-up fade-up-2">Le système d'exploitation de votre restaurant</div>
     <div className="login-body fade-up fade-up-3">
     {!sel?<><p className="login-prompt">Qui êtes-vous ?</p>{users.map(u=><button key={u.id} className="role-btn" onClick={()=>setSel(u.id)}><div className="between"><div><div className="role-btn-name">{u.name}</div><div className="role-btn-sub">{u.role}</div></div><span className={`role-badge ${u.isAdmin?"rb-admin":"rb-staff"}`}>{u.isAdmin?"Admin":"Équipe"}</span></div></button>)}</>
-    :<><p className="login-prompt">Code PIN pour <b style={{color:T.text}}>{users.find(u=>u.id===sel)?.name}</b></p><div className="field"><input className={`input ${shake?"input-shake":""}`} type="password" inputMode="numeric" maxLength={6} value={pin} onChange={e=>{setPin(e.target.value);setErr("");}} onKeyDown={e=>e.key==="Enter"&&pin.length>=4&&tryLogin()} placeholder="●●●●" style={{textAlign:"center",fontSize:30,letterSpacing:10,borderColor:shake?T.bad:undefined}} autoFocus/></div>{err&&<p style={{color:T.bad,fontSize:12,marginBottom:10,textAlign:"center"}}>{err}</p>}<button className="btn btn-primary mb8" onClick={tryLogin} disabled={pin.length<4}>Connexion</button><button className="btn btn-ghost" onClick={()=>{setSel(null);setPin("");setErr("");}}>← Retour</button></>}
+    :<><p className="login-prompt">Code PIN pour <b style={{color:T.text}}>{users.find(u=>u.id===sel)?.name}</b></p><div className="field"><input className={`input ${shake?"input-shake":""}`} type="password" inputMode="numeric" maxLength={6} value={pin} onChange={e=>{setPin(e.target.value);setErr("");}} onKeyDown={e=>e.key==="Enter"&&pin.length>=4&&tryLogin()} placeholder="●●●●" style={{textAlign:"center",fontSize:30,letterSpacing:10,borderColor:shake?T.bad:undefined}}/></div>{err&&<p style={{color:T.bad,fontSize:12,marginBottom:10,textAlign:"center"}}>{err}</p>}<button className="btn btn-primary mb8" onClick={tryLogin} disabled={pin.length<4}>Connexion</button><button className="btn btn-ghost" onClick={()=>{setSel(null);setPin("");setErr("");}}>← Retour</button></>}
   </div></div>);
 }
 
@@ -1091,7 +1165,7 @@ function Reception({data,setData,user,db,reload}){
     <button className="btn-fab" onClick={()=>setShow(true)}>+</button>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">Nouvelle réception</div>
-      <div className="field"><label className="label">Produit</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})} placeholder="ex : Saumon frais" autoFocus/></div>
+      <div className="field"><label className="label">Produit</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})} placeholder="ex : Saumon frais"/></div>
       <div className="field"><label className="label">Fournisseur</label><input className="input" value={form.supplier} onChange={e=>setForm({...form,supplier:e.target.value})}/></div>
       <div className="row gap8 mb14"><div style={{flex:1}}><label className="label">Quantité</label><input className="input input-sm" value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})}/></div><div style={{flex:1}}><label className="label">N° lot</label><input className="input input-sm" value={form.lot} onChange={e=>setForm({...form,lot:e.target.value})}/></div></div>
       <div className="field"><label className="label">DLC</label><input className="input" type="date" value={form.dlc} onChange={e=>setForm({...form,dlc:e.target.value})}/></div>
@@ -1148,7 +1222,7 @@ function Cooling({data,setData,user,db,reload}){
         </div></>}
       {step===1&&<><div className="sheet-title">{M.icon} {M.label}</div>
         <div className="text-xs text-dim center mb12">{M.sub}{M.dlcMonths?` · DLC +${M.dlcMonths} mois`:""}</div>
-        <div className="field"><label className="label">Produit</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})} autoFocus/></div>
+        <div className="field"><label className="label">Produit</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})}/></div>
         <div className="field"><label className="label">Quantité</label><input className="input" value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})}/></div>
         <div className="field"><label className="label">Température de départ</label><TapDial value={startTemp} onChange={setStartTemp} center={65} step={2} colorFn={v=>v>=63?"good":"warn"}/></div>
         <div className="row gap8"><button className="btn btn-ghost" style={{flex:"0 0 auto",width:52}} onClick={()=>setStep(0)}>←</button><button className="btn btn-primary" style={{flex:1}} onClick={start} disabled={!form.product}>▶ Lancer le chronomètre</button></div></>}
@@ -1184,7 +1258,7 @@ function Reheating({data,setData,user,db,reload}){
     <button className="btn-fab" onClick={()=>setShow(true)}>+</button>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">Remise en température</div>
-      <div className="field"><label className="label">Produit</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})} autoFocus/></div>
+      <div className="field"><label className="label">Produit</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})}/></div>
       <div className="field"><label className="label">T° finale à cœur</label><TapDial value={endTemp} onChange={setEndTemp} center={65} colorFn={v=>v>=reheatMin?"good":"bad"}/></div>
       <div className="field"><label className="label">Durée (minutes)</label><TapDial value={duration} onChange={setDuration} center={30} step={5} colorFn={v=>v<=reheatMaxTime?"good":"bad"} format={v=>`${v}'`}/></div>
       {endTemp>=reheatMin&&duration<=reheatMaxTime&&<div className="banner banner-good mb8"><span>✓</span><div><b>Conforme.</b></div></div>}
@@ -1377,7 +1451,7 @@ function Labels({data,setData,user,db,reload}){
         <div style={{fontSize:7,textAlign:"center",borderTop:"1px solid #000",marginTop:2,paddingTop:2}}>Par <b>{user.name}</b></div>
       </div>
 
-      <div className="field"><label className="label">Produit</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})} placeholder="ex : Rôti de bœuf" autoFocus/></div>
+      <div className="field"><label className="label">Produit</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})} placeholder="ex : Rôti de bœuf"/></div>
       <div className="field"><label className="label">Quantité (optionnel)</label><input className="input" value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})} placeholder="ex : 3 kg"/></div>
 
       {/* SÉLECTEUR DE TYPE DE DATE — gros boutons visuels */}
@@ -1457,7 +1531,7 @@ function TestMeals({data,setData,user,db,reload}){
     <button className="btn-fab" onClick={()=>setShow(true)}>+</button>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">Nouveau plat témoin</div>
-      <div className="field"><label className="label">Plat</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})} autoFocus/></div>
+      <div className="field"><label className="label">Plat</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})}/></div>
       <div className="field"><label className="label">Service</label><SegmentedControl value={form.service} onChange={v=>setForm({...form,service:v})} options={[{value:"Midi",label:"☀️ Midi"},{value:"Soir",label:"🌙 Soir"}]}/></div>
       <button className="btn btn-primary mt8" onClick={save} disabled={!form.product}>Enregistrer</button>
     </div></div>}
@@ -1637,6 +1711,16 @@ function Tasks({data,setData,db,reload}){
   const categories=data.taskCategories||[];
   async function toggle(id){haptic(10);const t=data.tasks.find(x=>x.id===id);await db.toggleTask(id,!t.done);setData(d=>({...d,tasks:d.tasks.map(x=>x.id===id?{...x,done:!x.done}:x)}));}
   async function add(){const catId=form.categoryId||(categories[0]?.id);await db.addTask({...form,categoryId:catId});await reload();setShow(false);setForm({task:"",resp:"",qty:"",prio:"med",categoryId:null});}
+  async function endService(){
+    if(!data.tasks.length)return;
+    haptic(20);
+    const ok=window.confirm("Fin de service ?\n\nToute la liste de mise en place va disparaître afin d’en commencer une nouvelle.");
+    if(!ok)return;
+    await db.clearTasks?.();
+    setData(d=>({...d,tasks:[]}));
+    setFilter("all");
+    haptic(30);
+  }
   function openAddFor(catId){setForm({task:"",resp:"",qty:"",prio:"med",categoryId:catId});setShow(true);}
   const visibleTasks=filter==="all"?data.tasks:data.tasks.filter(t=>t.categoryId===filter);
   const done=visibleTasks.filter(t=>t.done).length;const total=visibleTasks.length;const pct=total?Math.round(done/total*100):0;
@@ -1645,6 +1729,7 @@ function Tasks({data,setData,db,reload}){
   const prios=[{k:"high",l:"⚡ Urgent",c:T.bad},{k:"med",l:"Normal",c:T.warn},{k:"low",l:"Quand possible",c:T.textDim}];
   return(<div className="page"><div className="section-title">Mise en place</div><div className="section-sub">{done} / {total} · {pct}%</div>
     <div className="card mb14"><div className="pbar"><div className="pfill" style={{width:`${pct}%`,background:T.accent}}></div></div></div>
+    {data.tasks.length>0&&<button className="btn mb14" onClick={endService} style={{borderColor:T.warn,color:T.warn,background:T.warnBg}}>🏁 Fin de service</button>}
     <div className="chips mb14">{filterOptions.map(opt=><button key={opt.value} className={`chip ${filter===opt.value?"sel":""}`} onClick={()=>setFilter(opt.value)}>{opt.label}</button>)}</div>
     {grouped.length===0&&<div className="empty"><div className="empty-icon">📋</div><div className="empty-title">Aucune tâche</div><div className="empty-sub">Ajoutez votre première tâche</div></div>}
     {grouped.map(({cat,tasks})=>{if(!cat)return null;const catDone=tasks.filter(t=>t.done).length;return(<div key={cat.id} style={{marginBottom:18}}>
@@ -1655,7 +1740,7 @@ function Tasks({data,setData,db,reload}){
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">Nouvelle tâche</div>
       <div className="field"><label className="label">Catégorie</label><div className="chips">{categories.map(c=><button key={c.id} className={`chip ${form.categoryId===c.id?"sel":""}`} onClick={()=>setForm({...form,categoryId:c.id})}>{c.icon} {c.name.replace("Mise en place ","")}</button>)}</div></div>
-      <div className="field"><label className="label">Description</label><input className="input" value={form.task} onChange={e=>setForm({...form,task:e.target.value})} autoFocus/></div>
+      <div className="field"><label className="label">Description</label><input className="input" value={form.task} onChange={e=>setForm({...form,task:e.target.value})}/></div>
       <div className="row gap8 mb14"><div style={{flex:1}}><label className="label">Resp.</label><input className="input input-sm" value={form.resp} onChange={e=>setForm({...form,resp:e.target.value})}/></div><div style={{flex:1}}><label className="label">Qté</label><input className="input input-sm" value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})}/></div></div>
       <div className="field"><label className="label">Priorité</label><SegmentedControl value={form.prio} onChange={v=>setForm({...form,prio:v})} options={[{value:"high",label:"⚡ Urgent"},{value:"med",label:"Normal"},{value:"low",label:"+ tard"}]}/></div>
       <button className="btn btn-primary mt8" onClick={add} disabled={!form.task||!form.categoryId}>{form.categoryId?"Ajouter":"Choisir une catégorie"}</button>
@@ -1710,7 +1795,7 @@ function ProductsEditor({data,setData,db,reload}){
     <button className="btn btn-primary mt8" onClick={openAdd}>+ Nouveau produit</button>
     {showAdd&&<div className="overlay" onClick={()=>setShowAdd(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">{editing?"Modifier le produit":"Nouveau produit"}</div>
-      <div className="field"><label className="label">Nom</label><input className="input" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="ex : Filet de bar" autoFocus/></div>
+      <div className="field"><label className="label">Nom</label><input className="input" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="ex : Filet de bar"/></div>
       <div className="row gap8"><div style={{flex:1}}><label className="label">Prix d'achat</label><input className="input input-sm" type="text" inputMode="decimal" value={form.price} onChange={e=>{const v=e.target.value;if(/^\d*[.,]?\d*$/.test(v))setForm({...form,price:v});}} placeholder="ex : 18.50"/></div>
         <div style={{flex:0,width:90}}><label className="label">Pour</label><select className="input input-sm" value={form.unit} onChange={e=>setForm({...form,unit:e.target.value})}><option value="kg">1 kg</option><option value="L">1 L</option><option value="pce">1 pièce</option></select></div></div>
       <div className="text-xs text-dim mb14">Le coût sera calculé automatiquement selon la quantité utilisée dans chaque recette (g, kg, ml, L ou pièces).</div>
@@ -1733,7 +1818,7 @@ function TaskCategoriesEditor({data,setData,db,reload}){
     <button className="btn btn-primary mt8" onClick={openAdd}>+ Nouvelle catégorie</button>
     {showAdd&&<div className="overlay" onClick={()=>setShowAdd(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">{editing?"Modifier":"Nouvelle catégorie"}</div>
-      <div className="field"><label className="label">Nom</label><input className="input" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="ex : Mise en place froid" autoFocus/></div>
+      <div className="field"><label className="label">Nom</label><input className="input" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="ex : Mise en place froid"/></div>
       <div className="field"><label className="label">Icône</label><div className="chips">{PRESET_ICONS.map(ic=><button key={ic} className={`chip ${form.icon===ic?"sel":""}`} onClick={()=>setForm({...form,icon:ic})} style={{fontSize:18,padding:"6px 12px"}}>{ic}</button>)}</div></div>
       <div className="field"><label className="label">Couleur</label><div className="row gap8" style={{flexWrap:"wrap"}}>{PRESET_COLORS.map(c=><button key={c} onClick={()=>setForm({...form,color:c})} style={{width:34,height:34,borderRadius:"50%",background:c,border:form.color===c?`3px solid ${T.text}`:`2px solid ${T.border}`,flexShrink:0}}/>)}</div></div>
       <div className="card" style={{background:T.bg3,borderLeft:`3px solid ${form.color}`}}><div className="row gap10"><div className="item-icon" style={{background:`${form.color}22`}}>{form.icon}</div><div><div className="text-xs text-dim">Aperçu</div><div className="item-title">{form.name||"Nom"}</div></div></div></div>
@@ -1902,7 +1987,7 @@ function SettingsHaccp({data,setData,db,reload}){
         <div className="sheet" onClick={e=>e.stopPropagation()}>
           <div className="sheet-handle"></div>
           <div className="sheet-title">{sheet.item?"Modifier l'enceinte":"Nouvelle enceinte"}</div>
-          <div className="field"><label className="label">Nom</label><input className="input" value={fForm.name} onChange={e=>setFForm({...fForm,name:e.target.value})} placeholder="ex : Frigo Entrées" autoFocus/></div>
+          <div className="field"><label className="label">Nom</label><input className="input" value={fForm.name} onChange={e=>setFForm({...fForm,name:e.target.value})} placeholder="ex : Frigo Entrées"/></div>
           <div className="field"><label className="label">Icône</label><div className="chips">{FRIDGE_ICONS.map(ic=><button key={ic} className={`chip ${fForm.icon===ic?"sel":""}`} onClick={()=>setFForm({...fForm,icon:ic})} style={{fontSize:20,padding:"6px 12px"}}>{ic}</button>)}</div></div>
           <div className="field"><label className="label">Type</label><SegmentedControl value={fForm.type} onChange={v=>setFForm({...fForm,type:v,target:v==="negatif"?"-18":"0–4"})} options={[{value:"positif",label:"❄️ Positif"},{value:"negatif",label:"🧊 Négatif"}]}/></div>
           <div className="field"><label className="label">Cible de température</label>
@@ -1920,7 +2005,7 @@ function SettingsHaccp({data,setData,db,reload}){
         <div className="sheet" onClick={e=>e.stopPropagation()}>
           <div className="sheet-handle"></div>
           <div className="sheet-title">{sheet.item?"Modifier la zone":"Nouvelle zone"}</div>
-          <div className="field"><label className="label">Nom de la zone</label><input className="input" value={cForm.zone} onChange={e=>setCForm({...cForm,zone:e.target.value})} placeholder="ex : Sol cuisine" autoFocus/></div>
+          <div className="field"><label className="label">Nom de la zone</label><input className="input" value={cForm.zone} onChange={e=>setCForm({...cForm,zone:e.target.value})} placeholder="ex : Sol cuisine"/></div>
           <div className="field"><label className="label">Icône</label><div className="chips">{CLEAN_ICONS.map(ic=><button key={ic} className={`chip ${cForm.icon===ic?"sel":""}`} onClick={()=>setCForm({...cForm,icon:ic})} style={{fontSize:20,padding:"6px 12px"}}>{ic}</button>)}</div></div>
           <div className="field"><label className="label">Fréquence</label><QuickPick value={cForm.freq} onChange={v=>setCForm({...cForm,freq:v})} options={FREQS.map(f=>({value:f,label:f}))}/></div>
           <div className="field"><label className="label">Produit</label><input className="input" value={cForm.produit} onChange={e=>setCForm({...cForm,produit:e.target.value})} placeholder="ex : Dégraissant Pro"/></div>
@@ -1985,7 +2070,7 @@ function SettingsUsers({data,setData,user,db,reload,onLogout}){
         <div className="sheet" onClick={e=>e.stopPropagation()}>
           <div className="sheet-handle"></div>
           <div className="sheet-title">{sheet.item?"Modifier le membre":"Nouveau membre"}</div>
-          <div className="field"><label className="label">Nom complet</label><input className="input" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="ex : Jean Dupont" autoFocus/></div>
+          <div className="field"><label className="label">Nom complet</label><input className="input" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="ex : Jean Dupont"/></div>
           <div className="field"><label className="label">Poste</label><input className="input" value={form.role} onChange={e=>setForm({...form,role:e.target.value})} placeholder="ex : Chef de partie"/></div>
           <div className="field"><label className="label">Code PIN (4 chiffres min.)</label><input className="input" type="password" inputMode="numeric" value={form.pin} onChange={e=>setForm({...form,pin:e.target.value})} style={{textAlign:"center",fontSize:24,letterSpacing:8}}/></div>
           <div className="field"><label className="label">Droits</label>
@@ -2370,7 +2455,7 @@ export default function App(){
     more:<More go={go} user={user}/>,
     settings:user.isAdmin?<Settings data={data} setData={setData} user={user} onLogout={logout} db={DB} reload={reload}/>:<div style={{textAlign:"center",padding:40,color:T.textDim}}><div style={{fontSize:42}}>🔒</div><div>Réservé aux administrateurs</div></div>,
   };
-  return(<><style>{S}</style><div className="shell">
+  return(<><style>{S}</style><GlobalSheetSwipe/><div className="shell">
     <div className="topbar">
       {isRoot?<><div style={{width:36}}></div><div className="topbar-center">{page==="home"?<div className="topbar-logo"><FuegoLogo/></div>:<div className="topbar-title">{TITLES[page]}</div>}</div><button className="topbar-avatar" onClick={()=>setProfile(!profile)}>{user.initials}</button></>:<><button className="topbar-back" onClick={()=>go(backTo)}>‹</button><div className="topbar-center"><div className="topbar-title">{TITLES[page]}</div></div><div style={{width:36}}></div></>}
     </div>
