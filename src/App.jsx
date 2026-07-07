@@ -3,8 +3,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 // Fonctionne dans l'artifact Claude, dans Vite, partout.
 // Utilise directement l'API REST Supabase via fetch.
 
-const SUPABASE_URL  = "REMPLACE_PAR_TON_URL";
-const SUPABASE_ANON = "REMPLACE_PAR_TA_ANON_KEY";
+import { SUPABASE_URL, SUPABASE_ANON } from "./config.js";
 // Client REST Supabase léger — pas besoin du SDK
 const sbFetch = async (table, opts={}) => {
   if (!SUPABASE_URL || SUPABASE_URL.includes("REMPLACE")) return { data: null, error: "not_configured" };
