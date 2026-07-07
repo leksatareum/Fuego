@@ -90,6 +90,8 @@ const DB = {
 
     return {
       restaurant: resto,
+      // Planning n'est pas encore persisté en DB : on garde un planning sûr pour éviter la page blanche.
+      planning: INIT?.planning || {},
       users: users.map(u=>({id:u.id,name:u.name,initials:u.initials,role:u.role,pin:u.pin,isAdmin:u.is_admin,color:u.color})),
       haccpSettings: {
         fridgeTargets: ft.map(f=>({id:f.id,name:f.name,icon:f.icon,target:f.target,type:f.type})),
@@ -218,7 +220,7 @@ const S = `
   .page{animation:pageIn 220ms cubic-bezier(0.4,0,0.2,1);}
   @keyframes pulseGlow{0%,100%{box-shadow:0 0 0 0 rgba(232,57,10,.5);}50%{box-shadow:0 0 0 10px rgba(232,57,10,0);}}
   /* ── VOICE ── */
-  .voice-fab{position:absolute;bottom:80px;left:14px;width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;border:none;font-size:22px;box-shadow:0 8px 24px rgba(232,57,10,.5);z-index:49;display:flex;align-items:center;justify-content:center;transition:transform .15s;}
+  .voice-fab{position:fixed;bottom:calc(110px + env(safe-area-inset-bottom));left:max(14px,calc((100vw - 480px)/2 + 14px));width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;border:none;font-size:22px;box-shadow:0 8px 24px rgba(232,57,10,.5);z-index:35;display:flex;align-items:center;justify-content:center;transition:transform .15s;}
   .voice-fab:active{transform:scale(.92);}
   .voice-fab.listening{animation:voicePulse 1.2s ease-in-out infinite;}
   @keyframes voicePulse{0%,100%{box-shadow:0 0 0 0 rgba(232,57,10,.6);}50%{box-shadow:0 0 0 14px rgba(232,57,10,0);}}
@@ -246,7 +248,7 @@ const S = `
   .inline-add:active{border-color:#B8503F;color:#F5F1E8;}
   .pulse{animation:pulseGlow 1.8s ease-in-out infinite;}
 
-  .bottomnav{position:absolute;bottom:0;left:0;right:0;background:rgba(17,17,17,.88);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid ${T.border};display:flex;padding:8px 4px calc(12px + env(safe-area-inset-bottom));z-index:50;}
+  .bottomnav{position:absolute;bottom:0;left:0;right:0;background:rgba(17,17,17,.88);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid ${T.border};display:flex;padding:8px 4px calc(12px + env(safe-area-inset-bottom));z-index:40;}
   .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;border:none;background:transparent;color:${T.textMute};transition:color .18s;position:relative;}
   .nav-item.active{color:#FF6B00;}
   .nav-item.active::before{content:"";position:absolute;top:0;left:50%;transform:translateX(-50%);width:24px;height:2px;background:linear-gradient(90deg,#FF6B00,#E8390A);border-radius:0 0 2px 2px;}
@@ -320,7 +322,7 @@ const S = `
   .btn-primary:active{background:linear-gradient(135deg,#D45A00 0%,#C02808 100%);}
   .btn-ghost{background:${T.bg2};color:${T.text};border:1px solid ${T.border};}
   .btn-sm{padding:8px 14px;font-size:13px;}
-  .btn-fab{position:absolute;bottom:80px;right:14px;width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;border:none;font-size:24px;box-shadow:0 8px 24px rgba(232,57,10,.5);z-index:49;display:flex;align-items:center;justify-content:center;transition:transform .15s;}
+  .btn-fab{position:fixed;bottom:calc(110px + env(safe-area-inset-bottom));right:max(14px,calc((100vw - 480px)/2 + 14px));width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;border:none;font-size:24px;box-shadow:0 8px 24px rgba(232,57,10,.5);z-index:35;display:flex;align-items:center;justify-content:center;transition:transform .15s;}
   .btn-fab:active{transform:scale(.92);}
 
   .dial{display:flex;align-items:center;gap:4px;background:${T.bg1};border-radius:11px;padding:3px;border:1px solid ${T.border};}
@@ -358,8 +360,8 @@ const S = `
 
   @keyframes overlayIn{from{opacity:0;}to{opacity:1;}}
   @keyframes sheetIn{from{transform:translateY(100%);}to{transform:translateY(0);}}
-  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);z-index:100;display:flex;align-items:flex-end;justify-content:center;animation:overlayIn 200ms ease-out;}
-  .sheet{background:${T.bg1};width:100%;max-width:480px;border-radius:24px 24px 0 0;padding:20px 18px calc(24px + env(safe-area-inset-bottom));max-height:88vh;overflow-y:auto;animation:sheetIn 300ms cubic-bezier(0.32,0.72,0,1);border-top:1px solid ${T.borderHi};box-shadow:0 -20px 60px rgba(0,0,0,.5);}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);z-index:9999;display:flex;align-items:flex-end;justify-content:center;animation:overlayIn 200ms ease-out;}
+  .sheet{background:${T.bg1};width:100%;max-width:480px;border-radius:24px 24px 0 0;padding:20px 18px calc(34px + env(safe-area-inset-bottom));max-height:calc(100dvh - 84px);overflow-y:auto;-webkit-overflow-scrolling:touch;animation:sheetIn 300ms cubic-bezier(0.32,0.72,0,1);border-top:1px solid ${T.borderHi};box-shadow:0 -20px 60px rgba(0,0,0,.5);}
   .sheet-handle{width:36px;height:4px;background:${T.textMute};border-radius:2px;margin:0 auto 16px;}
   .sheet-title{font-family:'Inter',sans-serif;font-size:20px;font-weight:800;margin-bottom:16px;color:${T.text};}
 
@@ -1669,11 +1671,16 @@ function Margins({data}){
 }
 
 function Planning({data}){
-  const[day,setDay]=useState("Lun");const shifts=data.planning[day]||{};
+  const[day,setDay]=useState("Lun");
+  const planning=data?.planning || INIT?.planning || {};
+  const users=Array.isArray(data?.users)?data.users:[];
+  const shifts=planning[day] || {};
+  const staffOnDuty=users.filter(u=>Array.isArray(shifts?.[u.id]) && shifts[u.id].length>0);
   return(<div className="page"><div className="section-title">Planning</div><div className="section-sub">Semaine du 12 au 18 mai</div>
     <div className="tabs">{DAYS.map(d=><button key={d} className={`tab ${day===d?"active":""}`} onClick={()=>setDay(d)}>{d}</button>)}</div>
     <div className="bucket-label">En service — {day}</div>
-    {data.users.filter(u=>shifts[u.id]).map(u=><div key={u.id} className="item"><div className="item-icon" style={{background:`${u.color}25`,color:u.color,fontWeight:700,fontSize:14}}>{u.initials}</div><div className="item-body"><div className="item-title">{u.name}</div><div className="item-sub">{u.role}</div></div><div style={{textAlign:"right"}}>{shifts[u.id].map((sh,i)=><div key={i} className="badge b-info" style={{marginBottom:3,display:"block"}}>{sh}</div>)}</div></div>)}
+    {staffOnDuty.length===0&&<div className="empty"><div className="empty-icon">📅</div><div className="empty-title">Aucun horaire</div><div className="empty-sub">Aucun membre planifié sur cette journée.</div></div>}
+    {staffOnDuty.map(u=><div key={u.id} className="item"><div className="item-icon" style={{background:`${u.color||T.accent}25`,color:u.color||T.accent,fontWeight:700,fontSize:14}}>{u.initials||"?"}</div><div className="item-body"><div className="item-title">{u.name}</div><div className="item-sub">{u.role}</div></div><div style={{textAlign:"right"}}>{shifts[u.id].map((sh,i)=><div key={i} className="badge b-info" style={{marginBottom:3,display:"block"}}>{sh}</div>)}</div></div>)}
   </div>);
 }
 
@@ -2289,7 +2296,7 @@ export default function App(){
       const loaded=await DB.loadAll();
       // Si la DB est vide (pas encore peuplée), fallback sur INIT
       if(!loaded.users || loaded.users.length===0){ setData(INIT); return; }
-      setData(loaded); setDbError(null);
+      setData({...loaded, planning: loaded.planning || INIT.planning}); setDbError(null);
     }
     catch(e){ console.error("Supabase:",e); setDbError(e.message||"Erreur connexion"); if(!data)setData(INIT); }
   },[]);
