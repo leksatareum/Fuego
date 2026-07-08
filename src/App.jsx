@@ -497,13 +497,13 @@ function SwipeToDelete({enabled,onDelete,confirmLabel="Supprimer ?",children}){
   }
 
   return(
-    <div style={{position:"relative",overflow:"hidden"}}>
-      <div style={{position:"absolute",top:0,right:0,bottom:0,width:REVEAL,display:"flex",alignItems:"center",justifyContent:"center",background:T.bad}}>
+    <div style={{position:"relative",overflow:"hidden",borderRadius:12,marginBottom:6}}>
+      <div style={{position:"absolute",top:0,right:0,bottom:0,width:REVEAL,display:"flex",alignItems:"center",justifyContent:"center",background:T.bad,zIndex:0}}>
         <button onClick={confirmDelete} style={{width:"100%",height:"100%",background:"none",border:"none",color:"#fff",fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}} aria-label="Supprimer">✕</button>
       </div>
       <div
         onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
-        style={{transform:`translateX(${dragX}px)`,transition:dragging?"none":"transform .2s ease-out",background:T.bg0,position:"relative"}}
+        style={{transform:`translateX(${dragX}px)`,transition:dragging?"none":"transform .2s ease-out",position:"relative",zIndex:1,marginBottom:0}}
       >
         {children}
       </div>
@@ -816,27 +816,16 @@ function FuegoLogo({size="topbar"}) {
 function SplashScreen(){
   return(<div style={{position:"fixed",inset:0,background:"#090909",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",zIndex:200}}>
     <style>{`
-      @keyframes flameWave{
-        0%,100%{transform:scaleY(1) scaleX(1);}
-        25%{transform:scaleY(1.05) scaleX(.97);}
-        50%{transform:scaleY(.96) scaleX(1.03);}
-        75%{transform:scaleY(1.03) scaleX(.99);}
+      @keyframes flameBreathe{
+        0%,100%{transform:scale(1);}
+        50%{transform:scale(1.06);}
       }
       @keyframes splashFade{from{opacity:0;}to{opacity:1;}}
-      .splash-flame{animation:flameWave 1.6s ease-in-out infinite;transform-origin:50% 85%;}
+      .splash-flame{animation:flameBreathe 1.6s ease-in-out infinite;}
       .splash-wrap{animation:splashFade 300ms ease-out;}
     `}</style>
     <div className="splash-wrap" style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
-      <svg className="splash-flame" width="72" height="86" viewBox="0 0 100 120" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <linearGradient id="splashGrad" x1="50" y1="0" x2="50" y2="120" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stopColor="#FF6B00"/>
-            <stop offset="100%" stopColor="#E8230A"/>
-          </linearGradient>
-        </defs>
-        <path fillRule="evenodd" fill="url(#splashGrad)" d="M50 8 C46 26 26 34 26 62 C26 84 38 98 50 104 C62 98 74 84 74 62 C74 46 62 40 58 26 C56 20 52 14 50 8 Z M50 88 C42 84 36 76 36 64 C36 52 46 46 50 38 C54 46 64 52 64 64 C64 76 58 84 50 88 Z"/>
-      </svg>
-      <div style={{marginTop:14,fontFamily:"'Inter',sans-serif",fontSize:22,fontWeight:900,letterSpacing:".22em",background:"linear-gradient(135deg,#FF6B00,#E8390A)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text",color:"transparent"}}>FUEGO</div>
+      <img className="splash-flame" src="/fuego-logo.png" alt="Fuego" style={{height:96,objectFit:"contain"}}/>
     </div>
   </div>);
 }
@@ -2211,7 +2200,7 @@ function Recipes({data,setData,db,reload,user}){
     {filtered.length===0 && <div className="empty"><div className="empty-icon">📖</div><div className="empty-title">Aucune fiche</div><div className="empty-sub">Crée ta première recette avec le bouton +</div></div>}
     {filtered.map(rec=>{
       const cost=recipeCostPerPortion(rec,allRecipes);const m=recipeMargin(rec,allRecipes);
-      const row=<div className="item" onClick={()=>{setSel(rec.id);setView("detail");}}><div className="item-icon" style={{background:rec.type==="mere"?T.warnBg:T.infoBg}}>{rec.emoji}</div><div className="item-body"><div className="item-title">{rec.name}</div><div className="item-sub">{rec.type==="mere"?<>🧪 Mère · {rec.yield?.qty||0} {rec.yield?.unit||"u"} · {cost.toFixed(2)}€/{rec.yield?.unit||"u"}</>:<>{rec.category} · {rec.price} €</>}</div></div>{rec.type==="plat"?<span className={`badge ${m>=70?"b-good":m>=50?"b-info":"b-bad"}`}>{m}%</span>:<span className="badge b-warn">Base</span>}</div>;
+      const row=<div className="item" style={{marginBottom:0}} onClick={()=>{setSel(rec.id);setView("detail");}}><div className="item-icon" style={{background:rec.type==="mere"?T.warnBg:T.infoBg}}>{rec.emoji}</div><div className="item-body"><div className="item-title">{rec.name}</div><div className="item-sub">{rec.type==="mere"?<>🧪 Mère · {rec.yield?.qty||0} {rec.yield?.unit||"u"} · {cost.toFixed(2)}€/{rec.yield?.unit||"u"}</>:<>{rec.category} · {rec.price} €</>}</div></div>{rec.type==="plat"?<span className={`badge ${m>=70?"b-good":m>=50?"b-info":"b-bad"}`}>{m}%</span>:<span className="badge b-warn">Base</span>}</div>;
       return(<SwipeToDelete key={rec.id} enabled={!!user?.isAdmin} confirmLabel={`Supprimer la fiche "${rec.name}" ?`} onDelete={async()=>{await db.deleteRecipe(rec.id);await reload();}}>{row}</SwipeToDelete>);
     })}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>{setSel(null);setView("edit");}}>+</button></div>
