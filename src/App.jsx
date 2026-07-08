@@ -224,13 +224,14 @@ const S = `
   .scroll{flex:1;overflow-y:auto;padding:18px 14px 110px;position:relative;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
   .scroll::-webkit-scrollbar{width:0;}
   @keyframes pageIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+  @keyframes pageInFade{from{opacity:0;}to{opacity:1;}}
   @keyframes loadBar{0%{transform:translateX(-100%);}100%{transform:translateX(250%);}}
   @keyframes fadeUp{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}
   @keyframes inputShake{0%,100%{transform:translateX(0);}20%{transform:translateX(-7px);}40%{transform:translateX(7px);}60%{transform:translateX(-4px);}80%{transform:translateX(4px);}}
   .input-shake{animation:inputShake .4s ease-in-out;}
   .fade-up{animation:fadeUp .45s cubic-bezier(.22,1,.36,1) both;}
   .fade-up-1{animation-delay:.05s;}.fade-up-2{animation-delay:.12s;}.fade-up-3{animation-delay:.19s;}
-  .page{animation:pageIn 220ms cubic-bezier(0.4,0,0.2,1);}
+  .page{animation:pageInFade 180ms ease-out;}
   @keyframes pulseGlow{0%,100%{box-shadow:0 0 0 0 rgba(232,57,10,.5);}50%{box-shadow:0 0 0 10px rgba(232,57,10,0);}}
   /* ── VOICE ── */
   .voice-fab{position:fixed;bottom:calc(110px + env(safe-area-inset-bottom));left:max(14px,calc((100vw - 480px)/2 + 14px));width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;border:none;font-size:22px;box-shadow:0 8px 24px rgba(232,57,10,.5);z-index:35;display:flex;align-items:center;justify-content:center;transition:transform .15s;}
@@ -337,8 +338,8 @@ const S = `
   .btn-primary:active{background:linear-gradient(135deg,#D45A00 0%,#C02808 100%);}
   .btn-ghost{background:${T.bg2};color:${T.text};border:1px solid ${T.border};}
   .btn-sm{padding:8px 14px;font-size:13px;}
-  .fab-anchor{position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;height:0;pointer-events:none;z-index:35;}
-  .btn-fab{position:absolute;bottom:calc(110px + env(safe-area-inset-bottom));right:14px;width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;border:none;font-size:24px;box-shadow:0 8px 24px rgba(232,57,10,.5);display:flex;align-items:center;justify-content:center;transition:transform .15s;pointer-events:auto;}
+  .fab-anchor{display:contents;}
+  .btn-fab{position:fixed;bottom:calc(110px + env(safe-area-inset-bottom));right:14px;width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;border:none;font-size:24px;box-shadow:0 8px 24px rgba(232,57,10,.5);display:flex;align-items:center;justify-content:center;transition:transform .15s;z-index:35;}
   .btn-fab:active{transform:scale(.92);}
 
   .dial{display:flex;align-items:center;gap:4px;background:${T.bg1};border-radius:11px;padding:3px;border:1px solid ${T.border};}
@@ -1122,7 +1123,16 @@ const GBPH_SECTIONS = [
       {q:"Refroidissement rapide", a:"De +63°C à +10°C à cœur en moins de 2 heures. Au-delà, le produit doit être jeté.", tag:"Réglementaire"},
       {q:"Remise en température", a:"Atteindre +63°C à cœur en moins d'1 heure avant service.", tag:"Réglementaire"},
       {q:"Maintien au chaud", a:"+63°C minimum en continu jusqu'au service.", tag:"Réglementaire"},
-      {q:"Huiles de friture", a:"Composés polaires < 25% — au-delà, l'huile doit être changée.", tag:"Réglementaire"},
+    ],
+  },
+  {
+    key: "oils", icon: "🍟", title: "Huiles de friture", color: "#D4A340",
+    cards: [
+      {q:"Seuil de composés polaires", a:"25% maximum — au-delà, l'huile est impropre à la consommation et doit être changée immédiatement.", tag:"Réglementaire"},
+      {q:"Contrôle", a:"Mesure régulière (bandelette ou testeur électronique) à chaque service ou selon la fréquence d'utilisation de la friteuse.", tag:"Bonnes pratiques"},
+      {q:"Filtrage", a:"Filtrer l'huile entre les services pour retirer les particules alimentaires, qui accélèrent sa dégradation.", tag:"Bonnes pratiques"},
+      {q:"Température de friture", a:"Ne pas dépasser 180°C — une température trop élevée dégrade l'huile plus vite et augmente les composés polaires.", tag:"Bonnes pratiques"},
+      {q:"Élimination", a:"L'huile usagée est un déchet à filière spécifique — jamais à l'évier. Collecte par un prestataire agréé.", tag:"Réglementaire"},
     ],
   },
   {
@@ -1143,6 +1153,9 @@ const GBPH_SECTIONS = [
       {q:"Congélation maison", a:"6 mois recommandés pour la plupart des produits (variable selon la nature : viande, poisson, légumes).", tag:"Bonnes pratiques"},
       {q:"Décongélation", a:"À consommer sous 24h. Ne jamais recongeler. Décongeler au réfrigérateur, jamais à température ambiante.", tag:"Réglementaire"},
       {q:"Plats témoins", a:"Conserver un échantillon de chaque plat servi pendant au moins 5 jours après le service, dans un contenant identifié et daté.", tag:"Réglementaire"},
+      {q:"Surgélation", a:"Descente rapide à cœur jusqu'à −18°C. Contrairement à la congélation lente, elle limite la formation de cristaux de glace et préserve mieux la texture. DLC recommandée : 6 mois.", tag:"Bonnes pratiques"},
+      {q:"Mise sous vide", a:"Prolonge la conservation en limitant l'oxydation, mais ne remplace pas le froid — la chaîne du froid doit être maintenue en parallèle. Attention au risque de botulisme sur les produits sous vide mal réfrigérés : ne jamais dépasser +4°C.", tag:"Réglementaire"},
+      {q:"Conservation au sel (type gravlax)", a:"Le salage à sec (sel + sucre) déshydrate partiellement le produit et abaisse son activité en eau, ce qui ralentit le développement bactérien. Ne dispense pas du froid : conserver au réfrigérateur pendant le salage et après rinçage. DLC courte (3 à 5 jours) sauf process de salaison plus poussé.", tag:"Bonnes pratiques"},
     ],
   },
   {
@@ -1238,13 +1251,17 @@ function GbphGuide({initialSection}){
 
 // Petit bouton d'aide contextuelle — à poser sur n'importe quel écran HACCP.
 // Ouvre directement la bonne section du guide.
+// Bouton d'aide contextuelle : discret, ancré en haut de la page (pas en
+// position flottante fixe), s'intègre au flux normal du contenu — s'affiche
+// donc toujours au même endroit relatif, sans risque de recouvrement ni de
+// calcul de position instable.
 function GbphHelpButton({section,go}){
   return(
     <button
       onClick={()=>go("gbph",{section})}
-      style={{position:"fixed",bottom:"calc(180px + env(safe-area-inset-bottom))",left:"max(14px,calc((100vw - 480px)/2 + 14px))",width:40,height:40,borderRadius:"50%",background:"rgba(255,107,0,.15)",border:"1.5px solid #FF6B00",color:"#FF6B00",fontSize:17,fontWeight:800,zIndex:34,backdropFilter:"blur(8px)"}}
+      style={{display:"inline-flex",alignItems:"center",gap:5,padding:"6px 12px",borderRadius:20,background:T.bg2,border:`1px solid ${T.border}`,color:T.textDim,fontSize:12,fontWeight:600,marginBottom:12}}
       aria-label="Aide GBPH"
-    >?</button>
+    ><span style={{color:"#FF6B00",fontWeight:800}}>?</span> Aide</button>
   );
 }
 
@@ -1297,7 +1314,9 @@ function Temperatures({data,setData,user,db,reload,go}){
   function cancel(){setEditing(null);setPickedTemp(null);}
   const userById=id=>data.users.find(u=>u.id===id);
   const allBad=data.haccpSettings.fridgeTargets.filter(f=>{const m=getReleve(data,f.id,"matin"),s=getReleve(data,f.id,"soir");return(m&&tempStatus(m.temp,f.target)==="bad")||(s&&tempStatus(s.temp,f.target)==="bad");});
-  return(<div className="page"><GbphHelpButton section="temp" go={go}/><div className="section-title">Températures</div><div className="section-sub">Un relevé matin et un soir, par frigo</div>
+  return(<div className="page">
+    <GbphHelpButton section="temp" go={go}/>
+    <div className="section-title">Températures</div><div className="section-sub">Un relevé matin et un soir, par frigo</div>
     {allBad.length>0&&<div className="urgent-card" style={{padding:"12px 14px",margin:"0 0 12px"}}><div className="urgent-label" style={{marginBottom:4}}>🚨 {allBad.length} frigo{allBad.length>1?"s":""} hors norme</div><div style={{fontSize:12,opacity:.9}}>Vérification immédiate requise</div></div>}
     {data.haccpSettings.fridgeTargets.map(f=>{
       const m=getReleve(data,f.id,"matin"),s=getReleve(data,f.id,"soir");
@@ -1328,7 +1347,9 @@ function Reception({data,setData,user,db,reload,go}){
   const[show,setShow]=useState(false);const[temp,setTemp]=useState(3);const[aspect,setAspect]=useState("OK");const[emb,setEmb]=useState("OK");
   const[form,setForm]=useState({supplier:"",product:"",qty:"",dlc:"",lot:""});
   async function save(){if(!form.product)return;await db.addReception({date:todayStr(),supplier:form.supplier,product:form.product,qty:form.qty,dlc:form.dlc,lot:form.lot,temp,tempOk:temp<=4,aspect,emballage:emb,signed:user.name});await reload();setShow(false);setTemp(3);setAspect("OK");setEmb("OK");setForm({supplier:"",product:"",qty:"",dlc:"",lot:""});}
-  return(<div className="page"><GbphHelpButton section="trace" go={go}/><div className="section-title">Réception</div><div className="section-sub">Contrôle de chaque livraison</div>
+  return(<div className="page">
+    <GbphHelpButton section="trace" go={go}/>
+    <div className="section-title">Réception</div><div className="section-sub">Contrôle de chaque livraison</div>
     {data.reception.length===0 && (
       <div className="empty">
         <div className="empty-icon">🚚</div>
@@ -1379,7 +1400,9 @@ function Cooling({data,setData,user,db,reload,go}){
       : new Date(Date.now()+data.haccpSettings.labelDlcDefault*86400000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
     if(activeCoolingId)await db.finishCooling(activeCoolingId,{endTemp,duration:dur,status,dlc,mode});await reload();setShow(false);setStep(0);setMode("refroid");setStartMs(null);setElapsed(0);setStartTemp(65);setEndTemp(8);setForm({product:"",qty:""});setActiveCoolingId(null);}
   const coolingDone=data.cooling.filter(c=>c.status!=="active");
-  return(<div className="page"><GbphHelpButton section="temp" go={go}/><div className="section-title">Cellule</div><div className="section-sub">Refroidissement & surgélation</div>
+  return(<div className="page">
+    <GbphHelpButton section="temp" go={go}/>
+    <div className="section-title">Cellule</div><div className="section-sub">Refroidissement & surgélation</div>
     {coolingDone.length===0 && <div className="empty"><div className="empty-icon">❄️</div><div className="empty-title">Aucun passage en cellule</div><div className="empty-sub">Lance un refroidissement ou une surgélation avec le bouton +</div></div>}
     {coolingDone.map(c=>{const cm=CELL_MODES[c.mode||"refroid"];const okTemp=(c.mode==="surgel")?c.endTemp<=-18:c.endTemp<=10;return(<div key={c.id} className="card">
       <div className="between mb6"><div><div className="item-title">{cm.icon} {c.product}</div><div className="item-sub">{cm.label} · {c.qty} · {c.date}</div></div><span className={`badge ${c.status==="ok"?"b-good":"b-bad"}`}>{c.status==="ok"?"✓ OK":"⚠"}</span></div>
@@ -1431,7 +1454,9 @@ function Reheating({data,setData,user,db,reload,go}){
   const[show,setShow]=useState(false);const[form,setForm]=useState({product:""});const[endTemp,setEndTemp]=useState(65);const[duration,setDuration]=useState(30);
   const{reheatMin,reheatMaxTime}=data.haccpSettings;
   async function save(){if(!form.product)return;const status=endTemp>=reheatMin&&duration<=reheatMaxTime?"ok":"alert";await db.addReheating({product:form.product,endTemp,duration,operator:user.name,status,date:todayStr()});await reload();setShow(false);setForm({product:""});setEndTemp(65);setDuration(30);}
-  return(<div className="page"><GbphHelpButton section="temp" go={go}/><div className="section-title">Remise en T°</div><div className="section-sub">≥ {reheatMin}°C en moins de {reheatMaxTime} min</div>
+  return(<div className="page">
+    <GbphHelpButton section="temp" go={go}/>
+    <div className="section-title">Remise en T°</div><div className="section-sub">≥ {reheatMin}°C en moins de {reheatMaxTime} min</div>
     {data.reheating.length===0 && <div className="empty"><div className="empty-icon">🔥</div><div className="empty-title">Aucune remise en température</div><div className="empty-sub">Enregistre ta prochaine remise en T° avec le bouton +</div></div>}
     {data.reheating.map(r=><div key={r.id} className="card">
       <div className="between mb6"><div><div className="item-title">{r.product}</div><div className="item-sub">{r.date} · {r.operator}</div></div><span className={`badge ${r.status==="ok"?"b-good":"b-bad"}`}>{r.status==="ok"?"✓":"⚠"}</span></div>
@@ -1468,7 +1493,7 @@ function Oils({data,setData,user,db,reload,go}){
   }
 
   return(<div className="page">
-    <GbphHelpButton section="temp" go={go}/>
+    <GbphHelpButton section="oils" go={go}/>
     <div className="section-title">Huiles de friture</div>
     <div className="section-sub">Polaires — seuil légal : {max}%</div>
 
@@ -1524,7 +1549,9 @@ function Traceability({data,setData,db,reload,go}){
   async function handleScan(e){const file=e.target.files[0];if(!file)return;setScanning(true);setScanOk(false);setScanErr("");const reader=new FileReader();reader.onload=async(ev)=>{const b64=ev.target.result.split(",")[1];try{const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:file.type,data:b64}},{type:"text",text:"Analyse cette etiquette alimentaire. Reponds UNIQUEMENT avec ce JSON : {\"product\":\"\",\"supplier\":\"\",\"lot\":\"\",\"dlc\":\"YYYY-MM-DD\",\"qty\":\"\",\"allergenes\":[]}"}]}]})});const d=await res.json();const raw=d.content&&d.content[0]&&d.content[0].text?d.content[0].text:"{}";const p=JSON.parse(raw.replace(/```json/g,"").replace(/```/g,"").trim());setForm({product:p.product||"",supplier:p.supplier||"",lot:p.lot||"",dlc:p.dlc||"",qty:p.qty||"",allergenes:(p.allergenes||[]).join(", ")});setScanOk(true);}catch{setScanErr("Analyse impossible — remplir manuellement.");}setScanning(false);};reader.readAsDataURL(file);}
   async function save(){if(!form.product)return;await db.addTraceability({product:form.product,emoji:"📦",supplier:form.supplier,lot:form.lot,dlc:form.dlc,qty:form.qty,allergenes:form.allergenes?form.allergenes.split(",").map(a=>a.trim()).filter(Boolean):[],status:"ok"});await reload();setShow(false);setScanOk(false);setScanErr("");setForm({product:"",supplier:"",lot:"",dlc:"",qty:"",allergenes:""});}
   const filtered=filter==="all"?data.traceability:filter==="alerts"?data.traceability.filter(t=>t.status!=="ok"):data.traceability.filter(t=>t.status==="ok");
-  return(<div className="page"><GbphHelpButton section="trace" go={go}/><div className="section-title">Traçabilité</div><div className="section-sub">{data.traceability.length} produits</div>
+  return(<div className="page">
+    <GbphHelpButton section="trace" go={go}/>
+    <div className="section-title">Traçabilité</div><div className="section-sub">{data.traceability.length} produits</div>
     <SegmentedControl value={filter} onChange={setFilter} options={[{value:"all",label:"Tous"},{value:"alerts",label:"⚠ Alertes"},{value:"ok",label:"✓ OK"}]}/>
     <div style={{height:14}}></div>
     {filtered.length===0?<div className="empty"><div className="empty-icon">✓</div><div className="empty-title">Tout est en ordre</div></div>:filtered.map(t=><div key={t.id} className="item"><div className="item-icon" style={{background:t.status==="expired"?T.badBg:t.status==="warn"?T.warnBg:T.infoBg}}>{t.emoji}</div><div className="item-body"><div className="item-title">{t.product}</div><div className="item-sub">{t.supplier} · DLC {t.dlc}</div></div><span className={`badge ${t.status==="ok"?"b-good":t.status==="warn"?"b-warn":"b-bad"}`}>{t.status==="ok"?"OK":t.status==="warn"?"Proche":"Expiré"}</span></div>)}
@@ -1899,7 +1926,9 @@ function TestMeals({data,setData,user,db,reload,go}){
   const[show,setShow]=useState(false);const[form,setForm]=useState({product:"",service:"Midi",qty:"100 g"});
   const days=data.haccpSettings.testMealDays;
   async function save(){const destroy=new Date(Date.now()+days*86400000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});await db.addTestMeal({date:todayStr(),product:form.product,service:form.service,qty:form.qty,destroyAt:destroy,operator:user.name});await reload();setShow(false);setForm({product:"",service:"Midi",qty:"100 g"});}
-  return(<div className="page"><GbphHelpButton section="dlc" go={go}/><div className="section-title">Plats témoins</div><div className="section-sub">Conservation {days} jours à ≤ 3°C</div>
+  return(<div className="page">
+    <GbphHelpButton section="dlc" go={go}/>
+    <div className="section-title">Plats témoins</div><div className="section-sub">Conservation {days} jours à ≤ 3°C</div>
     {data.testMeals.length===0 && <div className="empty"><div className="empty-icon">🧪</div><div className="empty-title">Aucun plat témoin</div><div className="empty-sub">Prélève un échantillon avec le bouton +</div></div>}
     {data.testMeals.map(m=>{const expired=new Date(m.destroyAt.split("/").reverse().join("-"))<new Date();return(<div key={m.id} className="card"><div className="between mb6"><div><div className="item-title">{m.product}</div><div className="item-sub">{m.service} · {m.qty}</div></div><span className={`badge ${expired?"b-bad":"b-good"}`}>{expired?"À jeter":"OK"}</span></div><div className="text-xs text-dim">Prélevé {m.date} · Détruire le <b style={{color:T.text}}>{m.destroyAt}</b></div></div>);})}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
@@ -1915,7 +1944,9 @@ function TestMeals({data,setData,user,db,reload,go}){
 function Pests({data,setData,db,reload,go}){
   const[show,setShow]=useState(false);const[form,setForm]=useState({type:"Visite contrat",company:"",result:"RAS",nextVisit:""});
   async function save(){await db.addPest({date:todayStr(),type:form.type,company:form.company,result:form.result,nextVisit:form.nextVisit});await reload();setShow(false);setForm({type:"Visite contrat",company:"",result:"RAS",nextVisit:""});}
-  return(<div className="page"><GbphHelpButton section="pest" go={go}/><div className="section-title">Nuisibles</div><div className="section-sub">Plan de lutte 3D</div>
+  return(<div className="page">
+    <GbphHelpButton section="pest" go={go}/>
+    <div className="section-title">Nuisibles</div><div className="section-sub">Plan de lutte 3D</div>
     {data.pests.length===0 && <div className="empty"><div className="empty-icon">🐀</div><div className="empty-title">Aucune intervention</div><div className="empty-sub">Enregistre une visite ou une observation avec le bouton +</div></div>}
     {data.pests.map(p=><div key={p.id} className="card"><div className="between mb6"><div><div className="item-title">{p.type}</div><div className="item-sub">{p.company}</div></div><span className={`badge ${p.result==="RAS"?"b-good":"b-warn"}`}>{p.result}</span></div><div className="text-xs text-dim">Visite : {p.date} · Prochaine : {p.nextVisit}</div></div>)}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
@@ -1931,7 +1962,9 @@ function Pests({data,setData,db,reload,go}){
 }
 
 function Training({data,go}){
-  return(<div className="page"><GbphHelpButton section="hygiene" go={go}/><div className="section-title">Formation HACCP</div><div className="section-sub">Attestations et visas</div>
+  return(<div className="page">
+    <GbphHelpButton section="hygiene" go={go}/>
+    <div className="section-title">Formation HACCP</div><div className="section-sub">Attestations et visas</div>
     {data.training.map(t=>{const hOk=new Date(t.haccpExp.split("/").reverse().join("-"))>=new Date();const vOk=new Date(t.visaExp.split("/").reverse().join("-"))>=new Date();return(<div key={t.id} className="card"><div className="item-title mb8">{t.name} <span className="text-xs text-dim">· {t.role}</span></div><div className="between mb6"><span className="text-sm">🎓 HACCP</span><span className={`badge ${hOk?"b-good":"b-bad"}`}>{hOk?"Valide":"Expirée"} · {t.haccpExp}</span></div><div className="between"><span className="text-sm">🩺 Visite médicale</span><span className={`badge ${vOk?"b-good":"b-bad"}`}>{vOk?"Valide":"Expirée"} · {t.visaExp}</span></div></div>);})}
   </div>);
 }
