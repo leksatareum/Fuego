@@ -148,6 +148,7 @@ const DB = {
     if(r.id)return sbPatch("recipes",row,qs(`id=eq.${r.id}`));
     return sbPost("recipes",row);
   },
+  async deleteRecipe(id){return sbDelete("recipes",qs(`id=eq.${id}`));},
   async addTask(t){return sbPost("tasks",{category_id:t.categoryId,task:t.task,resp:t.resp,qty:t.qty,prio:t.prio,done:false,date:todayStr()});},
   async toggleTask(id,done){return sbPatch("tasks",{done},qs(`id=eq.${id}`));},
   async clearTasks(){return sbDelete("tasks",qs("id=not.is.null"));},
@@ -460,6 +461,56 @@ const S = `
 `;
 
 // ─── HOOKS & MICRO-UX ────────────────────────────────────────────────────────
+// ─── SWIPE TO DELETE (style iOS) ────────────────────────────────────────────
+// Glisser vers la gauche révèle une croix rouge ; taper dessus supprime après
+// confirmation. Actif uniquement si `enabled` (réservé aux admins). Implémenté
+// en tactile pur (pas de librairie) pour rester léger.
+function SwipeToDelete({enabled,onDelete,confirmLabel="Supprimer ?",children}){
+  const[dragX,setDragX]=useState(0);
+  const[dragging,setDragging]=useState(false);
+  const startX=useRef(0);
+  const startedHoriz=useRef(false);
+  const REVEAL=76; // largeur de la zone croix révélée
+
+  if(!enabled) return children;
+
+  function onTouchStart(e){
+    startX.current=e.touches[0].clientX;
+    startedHoriz.current=false;
+  }
+  function onTouchMove(e){
+    const dx=e.touches[0].clientX-startX.current;
+    if(!startedHoriz.current){
+      if(Math.abs(dx)<8)return; // tolérance avant de trancher swipe horizontal vs scroll vertical
+      startedHoriz.current=true;
+    }
+    if(dx<0){ setDragging(true); setDragX(Math.max(dx,-REVEAL-20)); }
+  }
+  function onTouchEnd(){
+    setDragging(false);
+    setDragX(prev=>(prev<-REVEAL/2 ? -REVEAL : 0));
+  }
+  async function confirmDelete(){
+    if(!window.confirm(confirmLabel))return;
+    setDragX(0);
+    await onDelete();
+  }
+
+  return(
+    <div style={{position:"relative",overflow:"hidden"}}>
+      <div style={{position:"absolute",top:0,right:0,bottom:0,width:REVEAL,display:"flex",alignItems:"center",justifyContent:"center",background:T.bad}}>
+        <button onClick={confirmDelete} style={{width:"100%",height:"100%",background:"none",border:"none",color:"#fff",fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}} aria-label="Supprimer">✕</button>
+      </div>
+      <div
+        onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
+        style={{transform:`translateX(${dragX}px)`,transition:dragging?"none":"transform .2s ease-out",background:T.bg0,position:"relative"}}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function useLongPress(onLongPress, ms=550){
   const [pressing,setPressing]=useState(false);
   const timerRef=useRef(null);
@@ -758,6 +809,38 @@ function FuegoLogo({size="topbar"}) {
   );
 }
 
+// ─── ÉCRAN DE CHARGEMENT (splash) ──────────────────────────────────────────
+// Affiché ~1.5s au lancement de l'app, le temps que les données Supabase
+// arrivent. La flamme "ondule" via une animation SVG légère (pas de lib
+// externe), cohérente avec l'identité visuelle FUEGO.
+function SplashScreen(){
+  return(<div style={{position:"fixed",inset:0,background:"#090909",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",zIndex:200}}>
+    <style>{`
+      @keyframes flameWave{
+        0%,100%{transform:scaleY(1) scaleX(1);}
+        25%{transform:scaleY(1.05) scaleX(.97);}
+        50%{transform:scaleY(.96) scaleX(1.03);}
+        75%{transform:scaleY(1.03) scaleX(.99);}
+      }
+      @keyframes splashFade{from{opacity:0;}to{opacity:1;}}
+      .splash-flame{animation:flameWave 1.6s ease-in-out infinite;transform-origin:50% 85%;}
+      .splash-wrap{animation:splashFade 300ms ease-out;}
+    `}</style>
+    <div className="splash-wrap" style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
+      <svg className="splash-flame" width="72" height="86" viewBox="0 0 100 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="splashGrad" x1="50" y1="0" x2="50" y2="120" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="#FF6B00"/>
+            <stop offset="100%" stopColor="#E8230A"/>
+          </linearGradient>
+        </defs>
+        <path fillRule="evenodd" fill="url(#splashGrad)" d="M50 8 C46 26 26 34 26 62 C26 84 38 98 50 104 C62 98 74 84 74 62 C74 46 62 40 58 26 C56 20 52 14 50 8 Z M50 88 C42 84 36 76 36 64 C36 52 46 46 50 38 C54 46 64 52 64 64 C64 76 58 84 50 88 Z"/>
+      </svg>
+      <div style={{marginTop:14,fontFamily:"'Inter',sans-serif",fontSize:22,fontWeight:900,letterSpacing:".22em",background:"linear-gradient(135deg,#FF6B00,#E8390A)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text",color:"transparent"}}>FUEGO</div>
+    </div>
+  </div>);
+}
+
 function Login({users,onLogin}){
   const[sel,setSel]=useState(null);const[pin,setPin]=useState("");const[err,setErr]=useState("");const[shake,setShake]=useState(false);
   function tryLogin(){const u=users.find(u=>u.id===sel);if(u&&u.pin===pin){haptic(15);onLogin(u);}else{haptic(30);setErr("PIN incorrect");setPin("");setShake(true);setTimeout(()=>setShake(false),450);}}
@@ -771,7 +854,7 @@ function Login({users,onLogin}){
   </div></div>);
 }
 
-function Aujourdhui({data,go,user}){
+function Aujourdhui({data,go,user,onVoiceOpen}){
   const[,setTick]=useState(0);
   useEffect(()=>{const i=setInterval(()=>setTick(t=>t+1),30000);return()=>clearInterval(i);},[]);
   const h=new Date().getHours();const greeting=h<12?"Bonjour":h<18?"Bon après-midi":"Bonsoir";
@@ -812,9 +895,14 @@ function Aujourdhui({data,go,user}){
 
   return(<div className="page">
     <div className="greet-block">
-      <div className="greet-line"><span className="greet-dot"></span><span>{win.icon} {win.label}</span></div>
-      <div className="greet-name">{greeting}, {user.name.split(" ")[0]}</div>
-      <div className="greet-context tabular">{today}</div>
+      <div className="between" style={{alignItems:"flex-start"}}>
+        <div>
+          <div className="greet-line"><span className="greet-dot"></span><span>{win.icon} {win.label}</span></div>
+          <div className="greet-name">{greeting}, {user.name.split(" ")[0]}</div>
+          <div className="greet-context tabular">{today}</div>
+        </div>
+        {onVoiceOpen&&<button onClick={onVoiceOpen} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 14px",borderRadius:20,background:T.bg2,border:`1px solid ${T.border}`,color:T.text,fontSize:13,fontWeight:600,flexShrink:0,marginTop:2}}><span style={{color:"#FF6B00"}}>🎤</span> Dicter</button>}
+      </div>
     </div>
 
     {criticalAlerts.length>0&&<div className="urgent-card pulse">
@@ -1114,6 +1202,10 @@ function exportRegistrePDF(events,{period,moduleFilter}){
 // mais une synthèse pratique des règles qu'il couvre, organisée par thème.
 // ═══════════════════════════════════════════════════════════════════════════
 
+// 8 catégories distinctes, sans mélange thématique : chaque fiche est classée
+// selon son enjeu PRINCIPAL (température vs conservation vs sécurité sanitaire),
+// même quand une technique touche plusieurs sujets à la fois (ex: la surgélation
+// est un enjeu de température, la mise sous vide un enjeu de sécurité sanitaire).
 const GBPH_SECTIONS = [
   {
     key: "temp", icon: "🌡️", title: "Températures", color: "#5A8FB5",
@@ -1121,8 +1213,10 @@ const GBPH_SECTIONS = [
       {q:"Réfrigération", a:"0°C à +4°C pour les produits sensibles (viande, poisson, produits laitiers frais). Jusqu'à +8°C pour d'autres denrées selon l'arrêté du produit.", tag:"Réglementaire"},
       {q:"Congélation", a:"−18°C ou moins en continu. Ne jamais recongeler un produit décongelé.", tag:"Réglementaire"},
       {q:"Refroidissement rapide", a:"De +63°C à +10°C à cœur en moins de 2 heures. Au-delà, le produit doit être jeté.", tag:"Réglementaire"},
+      {q:"Surgélation", a:"Descente rapide à cœur jusqu'à −18°C. Contrairement à la congélation lente, elle limite la formation de cristaux de glace et préserve mieux la texture.", tag:"Bonnes pratiques"},
       {q:"Remise en température", a:"Atteindre +63°C à cœur en moins d'1 heure avant service.", tag:"Réglementaire"},
       {q:"Maintien au chaud", a:"+63°C minimum en continu jusqu'au service.", tag:"Réglementaire"},
+      {q:"Décongélation", a:"À consommer sous 24h. Ne jamais recongeler. Décongeler au réfrigérateur, jamais à température ambiante.", tag:"Réglementaire"},
     ],
   },
   {
@@ -1146,16 +1240,22 @@ const GBPH_SECTIONS = [
     ],
   },
   {
-    key: "dlc", icon: "📅", title: "DLC & conservation", color: "#D49340",
+    key: "dlc", icon: "📅", title: "DLC & durées de conservation", color: "#D49340",
     cards: [
       {q:"Préparation maison", a:"3 jours à compter de la fabrication, sauf indication contraire du fournisseur pour les matières premières utilisées.", tag:"Bonnes pratiques"},
       {q:"Produit entamé / ouvert", a:"3 jours après ouverture, à conserver au froid, quelle que soit la DLC d'origine si elle est plus longue.", tag:"Bonnes pratiques"},
       {q:"Congélation maison", a:"6 mois recommandés pour la plupart des produits (variable selon la nature : viande, poisson, légumes).", tag:"Bonnes pratiques"},
-      {q:"Décongélation", a:"À consommer sous 24h. Ne jamais recongeler. Décongeler au réfrigérateur, jamais à température ambiante.", tag:"Réglementaire"},
       {q:"Plats témoins", a:"Conserver un échantillon de chaque plat servi pendant au moins 5 jours après le service, dans un contenant identifié et daté.", tag:"Réglementaire"},
-      {q:"Surgélation", a:"Descente rapide à cœur jusqu'à −18°C. Contrairement à la congélation lente, elle limite la formation de cristaux de glace et préserve mieux la texture. DLC recommandée : 6 mois.", tag:"Bonnes pratiques"},
-      {q:"Mise sous vide", a:"Prolonge la conservation en limitant l'oxydation, mais ne remplace pas le froid — la chaîne du froid doit être maintenue en parallèle. Attention au risque de botulisme sur les produits sous vide mal réfrigérés : ne jamais dépasser +4°C.", tag:"Réglementaire"},
-      {q:"Conservation au sel (type gravlax)", a:"Le salage à sec (sel + sucre) déshydrate partiellement le produit et abaisse son activité en eau, ce qui ralentit le développement bactérien. Ne dispense pas du froid : conserver au réfrigérateur pendant le salage et après rinçage. DLC courte (3 à 5 jours) sauf process de salaison plus poussé.", tag:"Bonnes pratiques"},
+      {q:"Conservation au sel (type gravlax)", a:"DLC courte (3 à 5 jours) sauf process de salaison plus poussé. Ne dispense pas du froid pendant et après le salage.", tag:"Bonnes pratiques"},
+    ],
+  },
+  {
+    key: "techniques", icon: "🔪", title: "Techniques de conservation", color: "#8A6FB0",
+    cards: [
+      {q:"Mise sous vide — principe", a:"Prolonge la conservation en limitant l'oxydation, mais ne remplace pas le froid : la chaîne du froid doit être maintenue en parallèle.", tag:"Bonnes pratiques"},
+      {q:"Mise sous vide — risque botulisme", a:"Les produits sous vide mal réfrigérés favorisent le développement de la bactérie responsable du botulisme. Ne jamais dépasser +4°C, respecter scrupuleusement les DLC.", tag:"Réglementaire"},
+      {q:"Salage à sec (gravlax et similaires)", a:"Le sel et le sucre déshydratent partiellement le produit et abaissent son activité en eau, ce qui ralentit le développement bactérien. Conserver au réfrigérateur pendant le salage et après rinçage.", tag:"Bonnes pratiques"},
+      {q:"Fumaison à froid", a:"N'est pas un mode de cuisson : le produit reste cru. La chaîne du froid doit être respectée avant et après le fumage, comme pour tout produit non cuit.", tag:"Bonnes pratiques"},
     ],
   },
   {
@@ -2099,7 +2199,7 @@ function RecipeEditor({recipe,allRecipes,products=[],onSave,onCancel}){
   </div>);
 }
 
-function Recipes({data,setData,db,reload}){
+function Recipes({data,setData,db,reload,user}){
   const[view,setView]=useState("list");const[sel,setSel]=useState(null);const[typeFilter,setTypeFilter]=useState("all");
   const allRecipes=data.recipes;
   const filtered=allRecipes.filter(r=>typeFilter==="all"||r.type===typeFilter);
@@ -2109,7 +2209,11 @@ function Recipes({data,setData,db,reload}){
     <SegmentedControl value={typeFilter} onChange={setTypeFilter} options={[{value:"all",label:"Tous"},{value:"plat",label:"Plats"},{value:"mere",label:"Mères"}]}/>
     <div style={{height:14}}></div>
     {filtered.length===0 && <div className="empty"><div className="empty-icon">📖</div><div className="empty-title">Aucune fiche</div><div className="empty-sub">Crée ta première recette avec le bouton +</div></div>}
-    {filtered.map(rec=>{const cost=recipeCostPerPortion(rec,allRecipes);const m=recipeMargin(rec,allRecipes);return(<div key={rec.id} className="item" onClick={()=>{setSel(rec.id);setView("detail");}}><div className="item-icon" style={{background:rec.type==="mere"?T.warnBg:T.infoBg}}>{rec.emoji}</div><div className="item-body"><div className="item-title">{rec.name}</div><div className="item-sub">{rec.type==="mere"?<>🧪 Mère · {rec.yield?.qty||0} {rec.yield?.unit||"u"} · {cost.toFixed(2)}€/{rec.yield?.unit||"u"}</>:<>{rec.category} · {rec.price} €</>}</div></div>{rec.type==="plat"?<span className={`badge ${m>=70?"b-good":m>=50?"b-info":"b-bad"}`}>{m}%</span>:<span className="badge b-warn">Base</span>}</div>);})}
+    {filtered.map(rec=>{
+      const cost=recipeCostPerPortion(rec,allRecipes);const m=recipeMargin(rec,allRecipes);
+      const row=<div className="item" onClick={()=>{setSel(rec.id);setView("detail");}}><div className="item-icon" style={{background:rec.type==="mere"?T.warnBg:T.infoBg}}>{rec.emoji}</div><div className="item-body"><div className="item-title">{rec.name}</div><div className="item-sub">{rec.type==="mere"?<>🧪 Mère · {rec.yield?.qty||0} {rec.yield?.unit||"u"} · {cost.toFixed(2)}€/{rec.yield?.unit||"u"}</>:<>{rec.category} · {rec.price} €</>}</div></div>{rec.type==="plat"?<span className={`badge ${m>=70?"b-good":m>=50?"b-info":"b-bad"}`}>{m}%</span>:<span className="badge b-warn">Base</span>}</div>;
+      return(<SwipeToDelete key={rec.id} enabled={!!user?.isAdmin} confirmLabel={`Supprimer la fiche "${rec.name}" ?`} onDelete={async()=>{await db.deleteRecipe(rec.id);await reload();}}>{row}</SwipeToDelete>);
+    })}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>{setSel(null);setView("edit");}}>+</button></div>
   </div>);
 }
@@ -2913,6 +3017,8 @@ export default function App(){
   const[profile,setProfile]=useState(false);
   const[voiceOpen,setVoiceOpen]=useState(false);
   const[wakeEnabled,setWakeEnabled]=useState(false);
+  const[showSplash,setShowSplash]=useState(true);
+  useEffect(()=>{const t=setTimeout(()=>setShowSplash(false),1500);return()=>clearTimeout(t);},[]);
 
   const reload=useCallback(async()=>{
     // Si Supabase pas configuré → mode démo avec données INIT
@@ -2986,6 +3092,8 @@ export default function App(){
   const go=(k,opts)=>{ if(opts?.section)setGbphSection(opts.section); setPage(k); setProfile(false); };
   const logout=()=>{setUser(null);setPage("home");};
 
+  if(showSplash)return<><style>{S}</style><SplashScreen/></>;
+
   if(!data)return(
     <><style>{S}</style>
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",background:T.bg0,gap:16}}>
@@ -3010,7 +3118,7 @@ export default function App(){
   const isRoot=ROOT_PAGES.includes(page);
   const backTo=HACCP_PAGES.includes(page)?"haccp":MORE_PAGES.includes(page)?"more":"home";
   const activeTab=ROOT_PAGES.includes(page)?page:HACCP_PAGES.includes(page)?"haccp":MORE_PAGES.includes(page)?"more":page;
-  const props={data,setData,user,go,db:DB,reload};
+  const props={data,setData,user,go,db:DB,reload,onVoiceOpen:()=>setVoiceOpen(true)};
   const pages={
     home:<Aujourdhui {...props}/>,haccp:<HaccpHub {...props}/>,
     temps:<Temperatures {...props}/>,reception:<Reception {...props}/>,
@@ -3019,7 +3127,7 @@ export default function App(){
     labels:<Labels {...props}/>,testmeals:<TestMeals {...props}/>,
     clean:<Cleaning {...props}/>,pests:<Pests {...props}/>,
     training:<Training data={data} go={go}/>,registre:<Registre data={data}/>,gbph:<GbphGuide initialSection={gbphSection}/>,
-    recipes:<Recipes data={data} setData={setData} db={DB} reload={reload}/>,
+    recipes:<Recipes data={data} setData={setData} db={DB} reload={reload} user={user}/>,
     margins:<Margins data={data}/>,planning:<Planning {...props}/>,
     tasks:<Tasks data={data} setData={setData} db={DB} reload={reload}/>,
     more:<More go={go} user={user}/>,
@@ -3043,11 +3151,6 @@ export default function App(){
       <button className="btn" style={{background:T.badBg,color:T.bad}} onClick={logout}>Déconnexion</button>
     </div></div>}
     <div className="scroll" key={page}>{pages[page]||pages.home}</div>
-
-    {/* Bouton micro vocal — visible sur l'accueil */}
-    {isRoot && page==="home" && (
-      <button className={`voice-fab ${wakeEnabled?"listening":""}`} onClick={()=>setVoiceOpen(true)} title="Commande vocale">🎤</button>
-    )}
 
     {/* Overlay vocal */}
     {voiceOpen && (
