@@ -46,7 +46,7 @@ const DB = {
     const today = todayStr();
     const [
       ru, rhs, rft, rfr, rrec, rcool, rreh, roil,
-      rcl, rtr, rlb, rtm, rtr2, rpe, rrc, rcat, rtk, rre, rpr
+      rcl, rtr, rlb, rtm, rtr2, rpe, rrc, rcat, rtk, rre, rpr, rsh
     ] = await Promise.all([
       sbGet("users",           qs(q.order("id"),q.select())),
       sbGet("haccp_settings",  qs(q.limit(1),q.select())),
@@ -67,6 +67,7 @@ const DB = {
       sbGet("tasks",           qs(q.order("created_at",false),q.limit(500),q.select())),
       sbGet("restaurant",      qs(q.limit(1),q.select())),
       sbGet("products",        qs(q.order("name"),q.select())),
+      sbGet("shifts",          qs(q.order("date"),q.select())),
     ]);
     const users   = ru.data   || [];
     const hs      = rhs.data?.[0] || {};
@@ -87,6 +88,7 @@ const DB = {
     const tasks   = rtk.data  || [];
     const resto   = (rre.data || [{}])[0] || {};
     const products= rpr.data || [];
+    const shifts  = rsh.data || [];
 
     return {
       restaurant: resto,
@@ -104,7 +106,7 @@ const DB = {
       cooling: cool.map(c=>({id:c.id,product:c.product,qty:c.qty,startTemp:c.start_temp,endTemp:c.end_temp,duration:c.duration,startedMs:c.started_ms,operator:c.operator,status:c.status,date:c.date,dlc:c.dlc})),
       reheating: reheat.map(r=>({id:r.id,product:r.product,endTemp:r.end_temp,duration:r.duration,operator:r.operator,status:r.status,date:r.date})),
       oils: oils.map(o=>({id:o.id,name:o.name,type:o.type,dateInstall:o.date_install,lastTest:o.last_test,polaires:o.polaires,operator:o.operator})),
-      cleaning: clean.map(c=>({id:c.id,zone:c.zone,icon:c.icon,freq:c.freq,produit:c.produit,dilution:c.dilution,done:c.done})),
+      cleaning: clean.map(c=>({id:c.id,zone:c.zone,icon:c.icon,freq:c.freq,produit:c.produit,dilution:c.dilution,done:c.done,doneAt:c.done_at})),
       traceability: trace.map(t=>({id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status})),
       labels: labels.map(l=>({id:l.id,product:l.product,dateProd:l.date_prod,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator})),
       testMeals: tm.map(m=>({id:m.id,date:m.date,service:m.service,product:m.product,qty:m.qty,destroyAt:m.destroy_at,operator:m.operator})),
@@ -114,6 +116,7 @@ const DB = {
       taskCategories: cats.map(c=>({id:c.id,name:c.name,icon:c.icon,color:c.color})),
       tasks: tasks.map(t=>({id:t.id,categoryId:t.category_id,task:t.task,resp:t.resp,qty:t.qty,done:t.done,prio:t.prio})),
       products: products.map(p=>({id:p.id,name:p.name,price:p.price,unit:p.unit})),
+      shifts: shifts.map(s=>({id:s.id,userId:s.user_id,date:s.date,start:s.start,end:s.end})),
     };
   },
 
@@ -154,6 +157,13 @@ const DB = {
     if(fallbackId)await sbPatch("tasks",{category_id:fallbackId},qs(`category_id=eq.${id}`));
     return sbDelete("task_categories",qs(`id=eq.${id}`));
   },
+  async addShift(s){return sbPost("shifts",{user_id:s.userId,date:s.date,start:s.start,end:s.end});},
+  async updateShift(id,s){return sbPatch("shifts",{user_id:s.userId,date:s.date,start:s.start,end:s.end},qs(`id=eq.${id}`));},
+  async deleteShift(id){return sbDelete("shifts",qs(`id=eq.${id}`));},
+  async getAppState(key){const r=await sbGet("app_state",qs(`key=eq.${key}`,q.select()));return (r.data&&r.data[0])?r.data[0].value:null;},
+  async setAppState(key,value){const r=await sbGet("app_state",qs(`key=eq.${key}`,q.select()));if(r.data&&r.data.length)return sbPatch("app_state",{value},qs(`key=eq.${key}`));return sbPost("app_state",{key,value});},
+  // Remet à zéro les listes de travail (mise en place + nettoyage) — idempotent
+  async resetServiceLists(){await sbPatch("tasks",{done:false},qs("done=eq.true"));await sbPatch("cleaning",{done:false,done_at:null},qs("done=eq.true"));},
   async addProduct(p){return sbPost("products",{name:p.name,price:p.price,unit:p.unit});},
   async updateProduct(id,p){return sbPatch("products",{name:p.name,price:p.price,unit:p.unit},qs(`id=eq.${id}`));},
   async deleteProduct(id){return sbDelete("products",qs(`id=eq.${id}`));},
@@ -673,6 +683,7 @@ const INIT={
 const haptic=(ms=12)=>{try{if(navigator.vibrate)navigator.vibrate(ms);}catch{}};
 const todayStr=()=>new Date().toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
 const nowTime=()=>new Date().toTimeString().slice(0,5);
+const fmtDateTime=(iso)=>{if(!iso)return "";try{return new Date(iso).toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});}catch{return "";}};
 const DAYS=["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
 
 function tempStatus(v,target){if(target==="-18")return v<=-15?"good":v>-12?"bad":"warn";const[lo,hi]=target.split("–").map(Number);return v>=lo&&v<=hi?"good":v>hi+2?"bad":"warn";}
@@ -1314,11 +1325,26 @@ function Traceability({data,setData,db,reload}){
 }
 
 function Cleaning({data,setData,db,reload}){
-  async function toggle(id){haptic(10);const c=data.cleaning.find(x=>x.id===id);await db.toggleCleaning(id,!c.done);setData(d=>({...d,cleaning:d.cleaning.map(x=>x.id===id?{...x,done:!x.done}:x)}));}
-  const done=data.cleaning.filter(c=>c.done).length;const pct=Math.round(done/data.cleaning.length*100);
-  return(<div className="page"><div className="section-title">Nettoyage</div><div className="section-sub">{done} / {data.cleaning.length} · {pct}%</div>
+  const[busy,setBusy]=useState(null);
+  async function toggle(id){
+    if(busy)return;
+    haptic(10);
+    const c=data.cleaning.find(x=>x.id===id);
+    const next=!c.done;
+    const stamp=next?new Date().toISOString():null;
+    setBusy(id);
+    setData(d=>({...d,cleaning:d.cleaning.map(x=>x.id===id?{...x,done:next,doneAt:stamp}:x)}));
+    const res=await db.toggleCleaning(id,next);
+    setBusy(null);
+    if(res?.error){
+      alert("Le nettoyage n'a pas été enregistré. Vérifie la connexion Supabase.");
+      await reload?.();
+    }
+  }
+  const done=data.cleaning.filter(c=>c.done).length;const pct=safePct(done,data.cleaning.length);
+  return(<div className="page"><div className="section-title">Nettoyage</div><div className="section-sub">{done} / {data.cleaning.length} · {Math.round(pct)}%</div>
     <div className="card mb14"><div className="pbar"><div className="pfill" style={{width:`${pct}%`,background:T.accent}}></div></div></div>
-    {data.cleaning.map(c=><div key={c.id} className="item" onClick={()=>toggle(c.id)} style={{opacity:c.done?.6:1}}><div className="item-icon" style={{background:T.bg3}}>{c.icon}</div><div className="item-body"><div className="item-title" style={{textDecoration:c.done?"line-through":"none"}}>{c.zone}</div><div className="item-sub">{c.freq} · {c.produit} · {c.dilution}</div></div><div className={`check ${c.done?"on":""}`}>{c.done?"✓":""}</div></div>)}
+    {data.cleaning.map(c=><div key={c.id} className="item" onClick={()=>toggle(c.id)} style={{opacity:c.done?.6:1,pointerEvents:busy?"none":"auto"}}><div className="item-icon" style={{background:T.bg3}}>{c.icon}</div><div className="item-body"><div className="item-title" style={{textDecoration:c.done?"line-through":"none"}}>{c.zone}</div><div className="item-sub">{c.freq} · {c.produit} · {c.dilution}{c.done&&c.doneAt?` · fait le ${fmtDateTime(c.doneAt)}`:""}</div></div><div className={`check ${c.done?"on":""}`}>{busy===c.id?"…":c.done?"✓":""}</div></div>)}
   </div>);
 }
 
@@ -1706,44 +1732,72 @@ function Recipes({data,setData,db,reload}){
 }
 
 function Tasks({data,setData,db,reload}){
-  const[show,setShow]=useState(false);const[filter,setFilter]=useState("all");
+  const[show,setShow]=useState(false);const[filter,setFilter]=useState("all");const[busy,setBusy]=useState(false);
   const[form,setForm]=useState({task:"",resp:"",qty:"",prio:"med",categoryId:null});
   const categories=data.taskCategories||[];
-  async function toggle(id){haptic(10);const t=data.tasks.find(x=>x.id===id);await db.toggleTask(id,!t.done);setData(d=>({...d,tasks:d.tasks.map(x=>x.id===id?{...x,done:!x.done}:x)}));}
-  async function add(){const catId=form.categoryId||(categories[0]?.id);await db.addTask({...form,categoryId:catId});await reload();setShow(false);setForm({task:"",resp:"",qty:"",prio:"med",categoryId:null});}
+  const currentService=getServiceWindow();
+  async function toggle(id){
+    if(busy)return;
+    haptic(10);
+    const t=data.tasks.find(x=>x.id===id); if(!t)return;
+    const next=!t.done;
+    setData(d=>({...d,tasks:d.tasks.map(x=>x.id===id?{...x,done:next}:x)}));
+    const res=await db.toggleTask(id,next);
+    if(res?.error){alert("La tâche n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload?.();}
+  }
+  async function add(){
+    const cleanTask=form.task.trim();
+    const catId=form.categoryId||(categories[0]?.id);
+    if(!cleanTask||!catId||busy)return;
+    setBusy(true);
+    const payload={...form,task:cleanTask,resp:form.resp.trim(),qty:form.qty.trim(),categoryId:catId};
+    const res=await db.addTask(payload);
+    setBusy(false);
+    if(res?.error){alert("Impossible d'ajouter la tâche. Vérifie la connexion Supabase.");return;}
+    await reload();setShow(false);setForm({task:"",resp:"",qty:"",prio:"med",categoryId:null});
+  }
   async function endService(){
-    if(!data.tasks.length)return;
+    if(!data.tasks.length||busy)return;
     haptic(20);
     const ok=window.confirm("Fin de service ?\n\nToute la liste de mise en place va disparaître afin d’en commencer une nouvelle.");
     if(!ok)return;
-    await db.clearTasks?.();
+    setBusy(true);
+    const res=await db.clearTasks?.();
+    setBusy(false);
+    if(res?.error){alert("Impossible de clôturer le service. Rien n'a été supprimé.");await reload?.();return;}
     setData(d=>({...d,tasks:[]}));
     setFilter("all");
     haptic(30);
   }
   function openAddFor(catId){setForm({task:"",resp:"",qty:"",prio:"med",categoryId:catId});setShow(true);}
   const visibleTasks=filter==="all"?data.tasks:data.tasks.filter(t=>t.categoryId===filter);
-  const done=visibleTasks.filter(t=>t.done).length;const total=visibleTasks.length;const pct=total?Math.round(done/total*100):0;
+  const done=visibleTasks.filter(t=>t.done).length;const total=visibleTasks.length;const pct=safePct(done,total);
+  const urgentLeft=visibleTasks.filter(t=>t.prio==="high"&&!t.done).length;
   const filterOptions=[{value:"all",label:`Tous (${data.tasks.length})`},...categories.map(c=>({value:c.id,label:`${c.icon} ${c.name.replace("Mise en place ","")} (${data.tasks.filter(t=>t.categoryId===c.id).length})`}))];
   const grouped=filter==="all"?categories.map(cat=>({cat,tasks:data.tasks.filter(t=>t.categoryId===cat.id)})).filter(g=>g.tasks.length>0):[{cat:categories.find(c=>c.id===filter),tasks:visibleTasks}];
   const prios=[{k:"high",l:"⚡ Urgent",c:T.bad},{k:"med",l:"Normal",c:T.warn},{k:"low",l:"Quand possible",c:T.textDim}];
-  return(<div className="page"><div className="section-title">Mise en place</div><div className="section-sub">{done} / {total} · {pct}%</div>
-    <div className="card mb14"><div className="pbar"><div className="pfill" style={{width:`${pct}%`,background:T.accent}}></div></div></div>
-    {data.tasks.length>0&&<button className="btn mb14" onClick={endService} style={{borderColor:T.warn,color:T.warn,background:T.warnBg}}>🏁 Fin de service</button>}
+  const suggestions=["Pain burger","Sauce du jour","Tailler tomates","Bacs de frites","Vinaigrette","Préparer garnitures"];
+  return(<div className="page"><div className="section-title">Mise en place</div><div className="section-sub">{done} / {total} · {Math.round(pct)}%</div>
+    <div className="card mb14">
+      <div className="between mb10"><div className="row gap8"><span>{currentService.icon}</span><span className="text-xs" style={{fontWeight:800,color:T.text}}>Service en cours</span><span className="badge b-mute">{currentService.label}</span></div>{urgentLeft>0&&<span className="badge b-bad">{urgentLeft} urgent{urgentLeft>1?"s":""}</span>}</div>
+      <div className="pbar"><div className="pfill" style={{width:`${pct}%`,background:T.accent}}></div></div>
+    </div>
+    {data.tasks.length>0&&<button className="btn mb14" onClick={endService} disabled={busy} style={{borderColor:T.warn,color:T.warn,background:T.warnBg}}>{busy?"Clôture…":"🏁 Fin de service"}</button>}
     <div className="chips mb14">{filterOptions.map(opt=><button key={opt.value} className={`chip ${filter===opt.value?"sel":""}`} onClick={()=>setFilter(opt.value)}>{opt.label}</button>)}</div>
     {grouped.length===0&&<div className="empty"><div className="empty-icon">📋</div><div className="empty-title">Aucune tâche</div><div className="empty-sub">Ajoutez votre première tâche</div></div>}
     {grouped.map(({cat,tasks})=>{if(!cat)return null;const catDone=tasks.filter(t=>t.done).length;return(<div key={cat.id} style={{marginBottom:18}}>
       <div className="between mb8" style={{padding:"0 4px"}}><div className="row gap8"><span style={{fontSize:18}}>{cat.icon}</span><span style={{fontSize:13,fontWeight:700,color:cat.color}}>{cat.name}</span><span className="text-xs text-dim">· {catDone}/{tasks.length}</span></div><button onClick={()=>openAddFor(cat.id)} style={{background:"transparent",border:"none",color:cat.color,fontSize:18,fontWeight:700,padding:"4px 8px",cursor:"pointer"}}>+</button></div>
-      {prios.map(p=>{const pt=tasks.filter(t=>t.prio===p.k);if(!pt.length)return null;return(<div key={p.k} style={{marginBottom:8}}><div style={{fontSize:10,fontWeight:700,color:p.c,marginBottom:4,marginLeft:6,letterSpacing:".06em",textTransform:"uppercase"}}>{p.l}</div>{pt.map(t=><div key={t.id} className="item" onClick={()=>toggle(t.id)} style={{opacity:t.done?.45:1,borderLeftColor:cat.color,borderLeftWidth:3,borderLeftStyle:"solid"}}><div className={`check ${t.done?"on":""}`}>{t.done?"✓":""}</div><div className="item-body"><div className="item-title" style={{textDecoration:t.done?"line-through":"none"}}>{t.task}</div><div className="item-sub">{t.resp} · {t.qty}</div></div></div>)}</div>);})}
+      {prios.map(p=>{const pt=tasks.filter(t=>t.prio===p.k);if(!pt.length)return null;return(<div key={p.k} style={{marginBottom:8}}><div style={{fontSize:10,fontWeight:700,color:p.c,marginBottom:4,marginLeft:6,letterSpacing:".06em",textTransform:"uppercase"}}>{p.l}</div>{pt.map(t=><div key={t.id} className="item" onClick={()=>toggle(t.id)} style={{opacity:t.done?.45:1,borderLeftColor:cat.color,borderLeftWidth:3,borderLeftStyle:"solid"}}><div className={`check ${t.done?"on":""}`}>{t.done?"✓":""}</div><div className="item-body"><div className="item-title" style={{textDecoration:t.done?"line-through":"none"}}>{t.task}</div><div className="item-sub">{[t.resp,t.qty].filter(Boolean).join(" · ")||"—"}</div></div></div>)}</div>);})}
     </div>);})}
     <button className="btn-fab" onClick={()=>setShow(true)}>+</button>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">Nouvelle tâche</div>
       <div className="field"><label className="label">Catégorie</label><div className="chips">{categories.map(c=><button key={c.id} className={`chip ${form.categoryId===c.id?"sel":""}`} onClick={()=>setForm({...form,categoryId:c.id})}>{c.icon} {c.name.replace("Mise en place ","")}</button>)}</div></div>
-      <div className="field"><label className="label">Description</label><input className="input" value={form.task} onChange={e=>setForm({...form,task:e.target.value})}/></div>
-      <div className="row gap8 mb14"><div style={{flex:1}}><label className="label">Resp.</label><input className="input input-sm" value={form.resp} onChange={e=>setForm({...form,resp:e.target.value})}/></div><div style={{flex:1}}><label className="label">Qté</label><input className="input input-sm" value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})}/></div></div>
+      <div className="field"><label className="label">Description</label><input className="input" value={form.task} onChange={e=>setForm({...form,task:e.target.value})} placeholder="ex : Tailler tomates"/></div>
+      {!form.task&&<div className="chips mb14">{suggestions.map(s=><button key={s} className="chip" onClick={()=>setForm(f=>({...f,task:s}))}>{s}</button>)}</div>}
+      <div className="row gap8 mb14"><div style={{flex:1}}><label className="label">Resp.</label><input className="input input-sm" value={form.resp} onChange={e=>setForm({...form,resp:e.target.value})} placeholder="ex : Kevin"/></div><div style={{flex:1}}><label className="label">Qté</label><input className="input input-sm" value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})} placeholder="ex : 2 bacs"/></div></div>
       <div className="field"><label className="label">Priorité</label><SegmentedControl value={form.prio} onChange={v=>setForm({...form,prio:v})} options={[{value:"high",label:"⚡ Urgent"},{value:"med",label:"Normal"},{value:"low",label:"+ tard"}]}/></div>
-      <button className="btn btn-primary mt8" onClick={add} disabled={!form.task||!form.categoryId}>{form.categoryId?"Ajouter":"Choisir une catégorie"}</button>
+      <button className="btn btn-primary mt8" onClick={add} disabled={!form.task.trim()||!(form.categoryId||categories[0]?.id)||busy}>{busy?"Ajout…":"Ajouter"}</button>
     </div></div>}
   </div>);
 }
@@ -1758,17 +1812,85 @@ function Margins({data}){
   </div>);
 }
 
-function Planning({data}){
-  const[day,setDay]=useState("Lun");
-  const planning=data?.planning || INIT?.planning || {};
+// ─── PLANNING ÉQUIPE — semaine réelle, créneaux stockés en base ───────────────
+const isoDate=(d)=>d.toISOString().slice(0,10);
+function mondayOf(d){const x=new Date(d);const wd=(x.getDay()+6)%7;x.setDate(x.getDate()-wd);x.setHours(0,0,0,0);return x;}
+function Planning({data,user,db,reload}){
+  const[weekStart,setWeekStart]=useState(()=>mondayOf(new Date()));
+  const[dayIdx,setDayIdx]=useState(()=>((new Date().getDay()+6)%7));
+  const[sheet,setSheet]=useState(null); // null | {shift?} pour ajout/édition
   const users=Array.isArray(data?.users)?data.users:[];
-  const shifts=planning[day] || {};
-  const staffOnDuty=users.filter(u=>Array.isArray(shifts?.[u.id]) && shifts[u.id].length>0);
-  return(<div className="page"><div className="section-title">Planning</div><div className="section-sub">Semaine du 12 au 18 mai</div>
-    <div className="tabs">{DAYS.map(d=><button key={d} className={`tab ${day===d?"active":""}`} onClick={()=>setDay(d)}>{d}</button>)}</div>
-    <div className="bucket-label">En service — {day}</div>
-    {staffOnDuty.length===0&&<div className="empty"><div className="empty-icon">📅</div><div className="empty-title">Aucun horaire</div><div className="empty-sub">Aucun membre planifié sur cette journée.</div></div>}
-    {staffOnDuty.map(u=><div key={u.id} className="item"><div className="item-icon" style={{background:`${u.color||T.accent}25`,color:u.color||T.accent,fontWeight:700,fontSize:14}}>{u.initials||"?"}</div><div className="item-body"><div className="item-title">{u.name}</div><div className="item-sub">{u.role}</div></div><div style={{textAlign:"right"}}>{shifts[u.id].map((sh,i)=><div key={i} className="badge b-info" style={{marginBottom:3,display:"block"}}>{sh}</div>)}</div></div>)}
+  const shifts=Array.isArray(data?.shifts)?data.shifts:[];
+  const isAdmin=user?.isAdmin||user?.role?.toLowerCase().includes("chef");
+
+  const days=[...Array(7)].map((_,i)=>{const d=new Date(weekStart);d.setDate(d.getDate()+i);return d;});
+  const selDate=isoDate(days[dayIdx]);
+  const dayShifts=shifts.filter(s=>s.date===selDate).sort((a,b)=>(a.start||"").localeCompare(b.start||""));
+  const fmtRange=`${days[0].getDate()} ${days[0].toLocaleDateString("fr-FR",{month:"short"})} — ${days[6].getDate()} ${days[6].toLocaleDateString("fr-FR",{month:"short"})}`;
+
+  function openAdd(){setSheet({userId:users[0]?.id,date:selDate,start:"09:00",end:"15:00"});}
+  function openEdit(s){setSheet({...s});}
+  async function save(){
+    if(!sheet.userId||!sheet.start||!sheet.end)return;
+    if(sheet.id)await db.updateShift(sheet.id,sheet); else await db.addShift(sheet);
+    await reload();setSheet(null);
+  }
+  async function remove(){
+    if(!sheet?.id)return;
+    if(!window.confirm("Supprimer ce créneau ?"))return;
+    await db.deleteShift(sheet.id);await reload();setSheet(null);
+  }
+  const totalWeekH=(uid)=>{
+    const mins=shifts.filter(s=>s.userId===uid&&days.some(d=>isoDate(d)===s.date)).reduce((a,s)=>{
+      const [h1,m1]=(s.start||"0:0").split(":").map(Number);const [h2,m2]=(s.end||"0:0").split(":").map(Number);
+      return a+Math.max(0,(h2*60+m2)-(h1*60+m1));},0);
+    return (mins/60).toFixed(1).replace(".0","");
+  };
+
+  return(<div className="page">
+    <div className="section-title">Planning</div>
+    <div className="between mb12">
+      <button className="btn btn-ghost btn-sm" style={{width:"auto"}} onClick={()=>{const d=new Date(weekStart);d.setDate(d.getDate()-7);setWeekStart(d);}}>‹</button>
+      <div className="section-sub" style={{margin:0}}>{fmtRange}</div>
+      <button className="btn btn-ghost btn-sm" style={{width:"auto"}} onClick={()=>{const d=new Date(weekStart);d.setDate(d.getDate()+7);setWeekStart(d);}}>›</button>
+    </div>
+    <div className="tabs" style={{marginBottom:16}}>{days.map((d,i)=>{
+      const isToday=isoDate(d)===isoDate(new Date());
+      return <button key={i} className={`tab ${dayIdx===i?"active":""}`} onClick={()=>setDayIdx(i)}>{DAYS[i]} {d.getDate()}{isToday?" •":""}</button>;})}
+    </div>
+
+    <div className="bucket-label">Créneaux — {DAYS[dayIdx]} {days[dayIdx].getDate()}</div>
+    {dayShifts.length===0&&<div className="empty"><div className="empty-icon">📅</div><div className="empty-title">Aucun créneau</div><div className="empty-sub">{isAdmin?"Ajoutez les horaires de l'équipe":"Aucun membre planifié ce jour"}</div></div>}
+    {dayShifts.map(s=>{const u=users.find(x=>x.id===s.userId);return(
+      <div key={s.id} className="item" onClick={()=>isAdmin&&openEdit(s)}>
+        <div className="item-icon" style={{background:T.infoBg,fontWeight:700,fontSize:14}}>{u?.initials||"?"}</div>
+        <div className="item-body"><div className="item-title">{u?.name||"Inconnu"}</div><div className="item-sub">{u?.role||""}</div></div>
+        <span className="badge b-info tabular">{s.start} – {s.end}</span>
+      </div>);})}
+
+    <div className="bucket-label mt14">Heures de la semaine</div>
+    {users.map(u=>{const h=totalWeekH(u.id);if(h==="0")return null;return(
+      <div key={u.id} className="item"><div className="item-icon" style={{background:T.bg3,fontWeight:700,fontSize:14}}>{u.initials}</div>
+      <div className="item-body"><div className="item-title">{u.name}</div></div>
+      <span className="fw7 tabular">{h} h</span></div>);})}
+
+    {isAdmin&&<button className="btn-fab" onClick={openAdd}>+</button>}
+
+    {sheet&&<div className="overlay" onClick={()=>setSheet(null)}><div className="sheet" onClick={e=>e.stopPropagation()}>
+      <div className="sheet-handle"></div>
+      <div className="sheet-title">{sheet.id?"Modifier le créneau":"Nouveau créneau"}</div>
+      <div className="field"><label className="label">Membre</label>
+        <select className="input" value={sheet.userId} onChange={e=>setSheet({...sheet,userId:parseInt(e.target.value)})}>
+          {users.map(u=><option key={u.id} value={u.id}>{u.name} — {u.role}</option>)}
+        </select></div>
+      <div className="field"><label className="label">Date</label><input className="input" type="date" value={sheet.date} onChange={e=>setSheet({...sheet,date:e.target.value})}/></div>
+      <div className="row gap8">
+        <div style={{flex:1}}><label className="label">Début</label><input className="input" type="time" value={sheet.start} onChange={e=>setSheet({...sheet,start:e.target.value})}/></div>
+        <div style={{flex:1}}><label className="label">Fin</label><input className="input" type="time" value={sheet.end} onChange={e=>setSheet({...sheet,end:e.target.value})}/></div>
+      </div>
+      <button className="btn btn-primary mt12" onClick={save}>{sheet.id?"Mettre à jour":"Ajouter"}</button>
+      {sheet.id&&<button className="btn btn-ghost mt8" style={{color:T.bad}} onClick={remove}>🗑 Supprimer ce créneau</button>}
+    </div></div>}
   </div>);
 }
 
@@ -2390,6 +2512,37 @@ export default function App(){
   },[]);
   useEffect(()=>{reload();},[]);
 
+  // ── Temps réel : re-synchronise les données toutes les 25 s + au retour sur l'app.
+  //    (Le client REST n'a pas de websocket ; le polling suffit pour une équipe de cuisine.)
+  // ── Reset fin de service : quand on change de période (fin du midi 15h00, fin du soir 23h30),
+  //    les listes Mise en place + Nettoyage repassent à zéro pour toute l'équipe.
+  //    Les relevés de température sont déjà remis à zéro chaque jour (matin/soir par date).
+  useEffect(()=>{
+    const SERVICE_BOUNDS=[15*60, 23*60+30]; // fins de service en minutes (15h00 / 23h30) — adapter si besoin
+    const serviceKey=()=>{
+      const n=new Date();const mins=n.getHours()*60+n.getMinutes();
+      const period=mins<SERVICE_BOUNDS[0]?"midi":mins<SERVICE_BOUNDS[1]?"soir":"nuit";
+      return `${n.toISOString().slice(0,10)}-${period}`;
+    };
+    let busy=false;
+    const tick=async()=>{
+      if(busy||document.hidden)return; busy=true;
+      try{
+        const key=serviceKey();
+        const last=await DB.getAppState("last_service");
+        if(last!==null&&last!==key){ await DB.resetServiceLists(); }
+        if(last!==key){ await DB.setAppState("last_service",key); }
+        await reload();
+      }catch(e){/* silencieux : prochaine tentative au tick suivant */}
+      busy=false;
+    };
+    const iv=setInterval(tick,25000);
+    const onVisible=()=>{ if(!document.hidden) tick(); };
+    document.addEventListener("visibilitychange",onVisible);
+    window.addEventListener("focus",onVisible);
+    return()=>{clearInterval(iv);document.removeEventListener("visibilitychange",onVisible);window.removeEventListener("focus",onVisible);};
+  },[reload]);
+
   // ── Mot-clé "Fuego" (écoute passive en arrière-plan) ──
   useEffect(()=>{
     if(!wakeEnabled || voiceOpen) return;
@@ -2450,7 +2603,7 @@ export default function App(){
     clean:<Cleaning {...props}/>,pests:<Pests {...props}/>,
     training:<Training data={data}/>,registre:<Registre data={data}/>,
     recipes:<Recipes data={data} setData={setData} db={DB} reload={reload}/>,
-    margins:<Margins data={data}/>,planning:<Planning data={data}/>,
+    margins:<Margins data={data}/>,planning:<Planning {...props}/>,
     tasks:<Tasks data={data} setData={setData} db={DB} reload={reload}/>,
     more:<More go={go} user={user}/>,
     settings:user.isAdmin?<Settings data={data} setData={setData} user={user} onLogout={logout} db={DB} reload={reload}/>:<div style={{textAlign:"center",padding:40,color:T.textDim}}><div style={{fontSize:42}}>🔒</div><div>Réservé aux administrateurs</div></div>,
