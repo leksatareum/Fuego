@@ -335,7 +335,8 @@ const S = `
   .btn-primary:active{background:linear-gradient(135deg,#D45A00 0%,#C02808 100%);}
   .btn-ghost{background:${T.bg2};color:${T.text};border:1px solid ${T.border};}
   .btn-sm{padding:8px 14px;font-size:13px;}
-  .btn-fab{position:fixed;bottom:calc(110px + env(safe-area-inset-bottom));right:max(14px,calc((100vw - 480px)/2 + 14px));width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;border:none;font-size:24px;box-shadow:0 8px 24px rgba(232,57,10,.5);z-index:35;display:flex;align-items:center;justify-content:center;transition:transform .15s;}
+  .fab-anchor{position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;height:0;pointer-events:none;z-index:35;}
+  .btn-fab{position:absolute;bottom:calc(110px + env(safe-area-inset-bottom));right:14px;width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;border:none;font-size:24px;box-shadow:0 8px 24px rgba(232,57,10,.5);display:flex;align-items:center;justify-content:center;transition:transform .15s;pointer-events:auto;}
   .btn-fab:active{transform:scale(.92);}
 
   .dial{display:flex;align-items:center;gap:4px;background:${T.bg1};border-radius:11px;padding:3px;border:1px solid ${T.border};}
@@ -1238,7 +1239,7 @@ function GbphHelpButton({section,go}){
   return(
     <button
       onClick={()=>go("gbph",{section})}
-      style={{position:"fixed",bottom:96,right:16,width:44,height:44,borderRadius:"50%",background:"rgba(255,107,0,.15)",border:"1.5px solid #FF6B00",color:"#FF6B00",fontSize:18,fontWeight:800,zIndex:40,backdropFilter:"blur(8px)"}}
+      style={{position:"fixed",bottom:"calc(180px + env(safe-area-inset-bottom))",left:"max(14px,calc((100vw - 480px)/2 + 14px))",width:40,height:40,borderRadius:"50%",background:"rgba(255,107,0,.15)",border:"1.5px solid #FF6B00",color:"#FF6B00",fontSize:17,fontWeight:800,zIndex:34,backdropFilter:"blur(8px)"}}
       aria-label="Aide GBPH"
     >?</button>
   );
@@ -1330,7 +1331,7 @@ function Reception({data,setData,user,db,reload}){
       <div className="row gap6 mb6" style={{flexWrap:"wrap"}}><span className={`badge ${r.aspect==="OK"?"b-good":"b-bad"}`}>Aspect {r.aspect}</span><span className={`badge ${r.emballage==="OK"?"b-good":"b-bad"}`}>Emb. {r.emballage}</span><span className="badge b-mute">{r.signed}</span></div>
       <div className="text-xs text-dim">DLC {r.dlc} · Lot {r.lot} · {r.date}</div>
     </div>)}
-    <button className="btn-fab" onClick={()=>setShow(true)}>+</button>
+    <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">Nouvelle réception</div>
       <div className="field"><label className="label">Produit</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})} placeholder="ex : Saumon frais"/></div>
@@ -1373,7 +1374,7 @@ function Cooling({data,setData,user,db,reload}){
       <div className="row gap12" style={{flexWrap:"wrap"}}><div><div className="text-xs text-dim">Départ</div><div className="text-sm fw7 tabular">{c.startTemp}°C</div></div><div><div className="text-xs text-dim">Arrivée</div><div className="text-sm fw7 tabular" style={{color:okTemp?T.good:T.bad}}>{c.endTemp}°C</div></div><div><div className="text-xs text-dim">Durée</div><div className="text-sm fw7 tabular" style={{color:c.duration<=maxMin?T.good:T.bad}}>{c.duration} min</div></div></div>
       <div className="text-xs text-dim mt6">DLC : {c.dlc} · {c.operator}</div>
     </div>);})}
-    <button className="btn-fab" onClick={()=>{setStep(0);setMode("refroid");setShow(true);}}>+</button>
+    <div className="fab-anchor"><button className="btn-fab" onClick={()=>{setStep(0);setMode("refroid");setShow(true);}}>+</button></div>
     {show&&<div className="overlay" onClick={()=>step<=1&&setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div>
       {step===0&&<><div className="sheet-title">Passage en cellule</div>
@@ -1423,7 +1424,7 @@ function Reheating({data,setData,user,db,reload}){
       <div className="between mb6"><div><div className="item-title">{r.product}</div><div className="item-sub">{r.date} · {r.operator}</div></div><span className={`badge ${r.status==="ok"?"b-good":"b-bad"}`}>{r.status==="ok"?"✓":"⚠"}</span></div>
       <div className="row gap12" style={{flexWrap:"wrap"}}><div><div className="text-xs text-dim">T° finale</div><div className="text-sm fw7 tabular" style={{color:r.endTemp>=reheatMin?T.good:T.bad}}>{r.endTemp}°C</div></div><div><div className="text-xs text-dim">Durée</div><div className="text-sm fw7 tabular" style={{color:r.duration<=reheatMaxTime?T.good:T.bad}}>{r.duration} min</div></div></div>
     </div>)}
-    <button className="btn-fab" onClick={()=>setShow(true)}>+</button>
+    <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">Remise en température</div>
       <div className="field"><label className="label">Produit</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})}/></div>
@@ -1464,7 +1465,7 @@ function Traceability({data,setData,db,reload}){
     <SegmentedControl value={filter} onChange={setFilter} options={[{value:"all",label:"Tous"},{value:"alerts",label:"⚠ Alertes"},{value:"ok",label:"✓ OK"}]}/>
     <div style={{height:14}}></div>
     {filtered.length===0?<div className="empty"><div className="empty-icon">✓</div><div className="empty-title">Tout est en ordre</div></div>:filtered.map(t=><div key={t.id} className="item"><div className="item-icon" style={{background:t.status==="expired"?T.badBg:t.status==="warn"?T.warnBg:T.infoBg}}>{t.emoji}</div><div className="item-body"><div className="item-title">{t.product}</div><div className="item-sub">{t.supplier} · DLC {t.dlc}</div></div><span className={`badge ${t.status==="ok"?"b-good":t.status==="warn"?"b-warn":"b-bad"}`}>{t.status==="ok"?"OK":t.status==="warn"?"Proche":"Expiré"}</span></div>)}
-    <button className="btn-fab" onClick={()=>setShow(true)}>+</button>
+    <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">Ajouter un produit</div>
       <label className="scan" style={{cursor:"pointer",display:"block"}}><div className="scan-icon">📸</div><div className="scan-title">Scanner l'étiquette</div><div className="scan-sub">L'IA remplit les champs</div><input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handleScan}/></label>
@@ -1837,7 +1838,7 @@ function TestMeals({data,setData,user,db,reload}){
   async function save(){const destroy=new Date(Date.now()+days*86400000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});await db.addTestMeal({date:todayStr(),product:form.product,service:form.service,qty:form.qty,destroyAt:destroy,operator:user.name});await reload();setShow(false);setForm({product:"",service:"Midi",qty:"100 g"});}
   return(<div className="page"><div className="section-title">Plats témoins</div><div className="section-sub">Conservation {days} jours à ≤ 3°C</div>
     {data.testMeals.map(m=>{const expired=new Date(m.destroyAt.split("/").reverse().join("-"))<new Date();return(<div key={m.id} className="card"><div className="between mb6"><div><div className="item-title">{m.product}</div><div className="item-sub">{m.service} · {m.qty}</div></div><span className={`badge ${expired?"b-bad":"b-good"}`}>{expired?"À jeter":"OK"}</span></div><div className="text-xs text-dim">Prélevé {m.date} · Détruire le <b style={{color:T.text}}>{m.destroyAt}</b></div></div>);})}
-    <button className="btn-fab" onClick={()=>setShow(true)}>+</button>
+    <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">Nouveau plat témoin</div>
       <div className="field"><label className="label">Plat</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})}/></div>
@@ -1852,7 +1853,7 @@ function Pests({data,setData,db,reload}){
   async function save(){await db.addPest({date:todayStr(),type:form.type,company:form.company,result:form.result,nextVisit:form.nextVisit});await reload();setShow(false);setForm({type:"Visite contrat",company:"",result:"RAS",nextVisit:""});}
   return(<div className="page"><div className="section-title">Nuisibles</div><div className="section-sub">Plan de lutte 3D</div>
     {data.pests.map(p=><div key={p.id} className="card"><div className="between mb6"><div><div className="item-title">{p.type}</div><div className="item-sub">{p.company}</div></div><span className={`badge ${p.result==="RAS"?"b-good":"b-warn"}`}>{p.result}</span></div><div className="text-xs text-dim">Visite : {p.date} · Prochaine : {p.nextVisit}</div></div>)}
-    <button className="btn-fab" onClick={()=>setShow(true)}>+</button>
+    <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">Nouvelle intervention</div>
       <div className="field"><label className="label">Type</label><select className="input" value={form.type} onChange={e=>setForm({...form,type:e.target.value})}><option>Visite contrat</option><option>Intervention urgente</option><option>Observation interne</option></select></div>
@@ -2010,7 +2011,7 @@ function Recipes({data,setData,db,reload}){
     <SegmentedControl value={typeFilter} onChange={setTypeFilter} options={[{value:"all",label:"Tous"},{value:"plat",label:"Plats"},{value:"mere",label:"Mères"}]}/>
     <div style={{height:14}}></div>
     {filtered.map(rec=>{const cost=recipeCostPerPortion(rec,allRecipes);const m=recipeMargin(rec,allRecipes);return(<div key={rec.id} className="item" onClick={()=>{setSel(rec.id);setView("detail");}}><div className="item-icon" style={{background:rec.type==="mere"?T.warnBg:T.infoBg}}>{rec.emoji}</div><div className="item-body"><div className="item-title">{rec.name}</div><div className="item-sub">{rec.type==="mere"?<>🧪 Mère · {rec.yield?.qty||0} {rec.yield?.unit||"u"} · {cost.toFixed(2)}€/{rec.yield?.unit||"u"}</>:<>{rec.category} · {rec.price} €</>}</div></div>{rec.type==="plat"?<span className={`badge ${m>=70?"b-good":m>=50?"b-info":"b-bad"}`}>{m}%</span>:<span className="badge b-warn">Base</span>}</div>);})}
-    <button className="btn-fab" onClick={()=>{setSel(null);setView("edit");}}>+</button>
+    <div className="fab-anchor"><button className="btn-fab" onClick={()=>{setSel(null);setView("edit");}}>+</button></div>
   </div>);
 }
 
@@ -2072,7 +2073,7 @@ function Tasks({data,setData,db,reload}){
       <div className="between mb8" style={{padding:"0 4px"}}><div className="row gap8"><span style={{fontSize:18}}>{cat.icon}</span><span style={{fontSize:13,fontWeight:700,color:cat.color}}>{cat.name}</span><span className="text-xs text-dim">· {catDone}/{tasks.length}</span></div><button onClick={()=>openAddFor(cat.id)} style={{background:"transparent",border:"none",color:cat.color,fontSize:18,fontWeight:700,padding:"4px 8px",cursor:"pointer"}}>+</button></div>
       {prios.map(p=>{const pt=tasks.filter(t=>t.prio===p.k);if(!pt.length)return null;return(<div key={p.k} style={{marginBottom:8}}><div style={{fontSize:10,fontWeight:700,color:p.c,marginBottom:4,marginLeft:6,letterSpacing:".06em",textTransform:"uppercase"}}>{p.l}</div>{pt.map(t=><div key={t.id} className="item" onClick={()=>toggle(t.id)} style={{opacity:t.done?.45:1,borderLeftColor:cat.color,borderLeftWidth:3,borderLeftStyle:"solid"}}><div className={`check ${t.done?"on":""}`}>{t.done?"✓":""}</div><div className="item-body"><div className="item-title" style={{textDecoration:t.done?"line-through":"none"}}>{t.task}</div><div className="item-sub">{[t.resp,t.qty].filter(Boolean).join(" · ")||"—"}</div></div></div>)}</div>);})}
     </div>);})}
-    <button className="btn-fab" onClick={()=>setShow(true)}>+</button>
+    <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">Nouvelle tâche</div>
       <div className="field"><label className="label">Catégorie</label><div className="chips">{categories.map(c=><button key={c.id} className={`chip ${form.categoryId===c.id?"sel":""}`} onClick={()=>setForm({...form,categoryId:c.id})}>{c.icon} {c.name.replace("Mise en place ","")}</button>)}</div></div>
@@ -2157,7 +2158,7 @@ function Planning({data,user,db,reload}){
       <div className="item-body"><div className="item-title">{u.name}</div></div>
       <span className="fw7 tabular">{h} h</span></div>);})}
 
-    {isAdmin&&<button className="btn-fab" onClick={openAdd}>+</button>}
+    {isAdmin&&<div className="fab-anchor"><button className="btn-fab" onClick={openAdd}>+</button></div>}
 
     {sheet&&<div className="overlay" onClick={()=>setSheet(null)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div>
