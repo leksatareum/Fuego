@@ -250,7 +250,7 @@ const S = `
   .voice-result{padding:14px 20px;border-radius:14px;font-size:15px;font-weight:600;text-align:center;max-width:320px;}
   .voice-result.ok{background:#0F2018;color:#5FB075;border:1px solid #5FB075;}
   .voice-result.err{background:#251010;color:#D55C5C;border:1px solid #D55C5C;}
-  .voice-close{position:absolute;top:20px;right:20px;width:40px;height:40px;border-radius:50%;background:#1A1A1A;border:1px solid #2A2A2A;color:#FFFFFF;font-size:20px;display:flex;align-items:center;justify-content:center;}
+  .voice-close{position:fixed;top:calc(20px + env(safe-area-inset-top));right:calc(20px + max(0px,(100vw - 480px)/2));width:40px;height:40px;border-radius:50%;background:#1A1A1A;border:1px solid #2A2A2A;color:#FFFFFF;font-size:20px;display:flex;align-items:center;justify-content:center;z-index:210;}
   .voice-toggle{display:flex;align-items:center;gap:10px;padding:12px 16px;background:#1A1A1A;border-radius:12px;border:1px solid #2A2A2A;margin-bottom:8px;}
   @keyframes toastIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
   .save-toast{position:fixed;bottom:calc(96px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:rgba(10,10,10,.96);border:1px solid #2A2A2A;color:#5FB075;font-size:13px;font-weight:600;padding:8px 16px;border-radius:999px;z-index:200;display:flex;align-items:center;gap:6px;animation:toastIn .2s ease-out;box-shadow:0 8px 24px rgba(0,0,0,.4);}
@@ -465,34 +465,58 @@ const S = `
 // Glisser vers la gauche révèle une croix rouge ; taper dessus supprime après
 // confirmation. Actif uniquement si `enabled` (réservé aux admins). Implémenté
 // en tactile pur (pas de librairie) pour rester léger.
+// Registre global : une seule carte ouverte à la fois sur tout l'écran (comme iOS).
+// Chaque SwipeToDelete monté s'y enregistre pour pouvoir se fermer si un autre s'ouvre.
+const _swipeOpenRegistry = { current: null };
+
 function SwipeToDelete({enabled,onDelete,confirmLabel="Supprimer ?",children}){
   const[dragX,setDragX]=useState(0);
   const[dragging,setDragging]=useState(false);
   const startX=useRef(0);
   const startedHoriz=useRef(false);
+  const dragStartX=useRef(0); // position de dragX au moment du touchstart (0 ou -REVEAL)
+  const closeSelf=useRef(()=>{});
   const REVEAL=76; // largeur de la zone croix révélée
+
+  closeSelf.current=()=>setDragX(0);
 
   if(!enabled) return children;
 
   function onTouchStart(e){
     startX.current=e.touches[0].clientX;
     startedHoriz.current=false;
+    dragStartX.current=dragX;
   }
   function onTouchMove(e){
     const dx=e.touches[0].clientX-startX.current;
     if(!startedHoriz.current){
       if(Math.abs(dx)<8)return; // tolérance avant de trancher swipe horizontal vs scroll vertical
       startedHoriz.current=true;
+      // Une nouvelle carte s'ouvre : referme celle qui l'était avant.
+      if(_swipeOpenRegistry.current && _swipeOpenRegistry.current!==closeSelf.current){
+        _swipeOpenRegistry.current();
+      }
     }
-    if(dx<0){ setDragging(true); setDragX(Math.max(dx,-REVEAL-20)); }
+    const next=Math.max(Math.min(dragStartX.current+dx,0),-REVEAL-20);
+    setDragging(true); setDragX(next);
   }
   function onTouchEnd(){
     setDragging(false);
-    setDragX(prev=>(prev<-REVEAL/2 ? -REVEAL : 0));
+    setDragX(prev=>{
+      const open = prev<-REVEAL/2;
+      if(open) _swipeOpenRegistry.current=closeSelf.current;
+      else if(_swipeOpenRegistry.current===closeSelf.current) _swipeOpenRegistry.current=null;
+      return open ? -REVEAL : 0;
+    });
+  }
+  function onRowClick(e){
+    // Si la carte est ouverte, un tap dessus la referme au lieu de déclencher l'action normale (ex: ouvrir la fiche).
+    if(dragX<0){ e.stopPropagation(); e.preventDefault(); setDragX(0); if(_swipeOpenRegistry.current===closeSelf.current)_swipeOpenRegistry.current=null; }
   }
   async function confirmDelete(){
     if(!window.confirm(confirmLabel))return;
     setDragX(0);
+    if(_swipeOpenRegistry.current===closeSelf.current)_swipeOpenRegistry.current=null;
     await onDelete();
   }
 
@@ -502,7 +526,7 @@ function SwipeToDelete({enabled,onDelete,confirmLabel="Supprimer ?",children}){
         <button onClick={confirmDelete} style={{width:"100%",height:"100%",background:"none",border:"none",color:"#fff",fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}} aria-label="Supprimer">✕</button>
       </div>
       <div
-        onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
+        onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onClickCapture={onRowClick}
         style={{transform:`translateX(${dragX}px)`,transition:dragging?"none":"transform .2s ease-out",position:"relative",zIndex:1,marginBottom:0}}
       >
         {children}
@@ -1591,7 +1615,7 @@ function Oils({data,setData,user,db,reload,go}){
         <div className="empty-icon">🍟</div>
         <div className="empty-title">Aucune friteuse suivie</div>
         <div className="empty-sub">Ajoute tes friteuses pour commencer le suivi des huiles</div>
-        <button className="btn btn-primary mt14" onClick={()=>setShowAdd(true)} style={{maxWidth:220}}>+ Ajouter une friteuse</button>
+        <button className="btn btn-primary mt14" onClick={()=>setShowAdd(true)} style={{maxWidth:220,marginLeft:"auto",marginRight:"auto",display:"block"}}>+ Ajouter une friteuse</button>
       </div>
     ) : (
       <>
@@ -1620,7 +1644,7 @@ function Oils({data,setData,user,db,reload,go}){
     {showAdd&&<div className="overlay" onClick={()=>setShowAdd(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div>
       <div className="sheet-title">Nouvelle friteuse</div>
-      <div className="field"><label className="label">Nom</label><input className="input" value={newOil.name} onChange={e=>setNewOil({...newOil,name:e.target.value})} placeholder="ex : Friteuse 1 — Frites" autoFocus/></div>
+      <div className="field"><label className="label">Nom</label><input className="input" value={newOil.name} onChange={e=>setNewOil({...newOil,name:e.target.value})} placeholder="ex : Friteuse 1 — Frites"/></div>
       <div className="field"><label className="label">Type d'huile</label>
         <QuickPick value={newOil.type} onChange={v=>setNewOil({...newOil,type:v})} options={[
           {value:"Tournesol",label:"Tournesol"},{value:"Arachide",label:"Arachide"},{value:"Colza",label:"Colza"},{value:"Spéciale friture",label:"Spéciale friture"},
@@ -2308,7 +2332,8 @@ function Planning({data,user,db,reload}){
   function openEdit(s){setSheet({...s});}
   async function save(){
     if(!sheet.userId||!sheet.start||!sheet.end)return;
-    if(sheet.id)await db.updateShift(sheet.id,sheet); else await db.addShift(sheet);
+    const res = sheet.id ? await db.updateShift(sheet.id,sheet) : await db.addShift(sheet);
+    if(res?.error){ alert("Le créneau n'a pas été enregistré. Vérifie la connexion Supabase."); await reload(); return; }
     await reload();setSheet(null);
   }
   async function remove(){
@@ -2323,6 +2348,15 @@ function Planning({data,user,db,reload}){
     return (mins/60).toFixed(1).replace(".0","");
   };
 
+  const[viewMode,setViewMode]=useState("table"); // table | day
+
+  // Créneaux du jour groupés par personne, pour une cellule tableau compacte.
+  function shiftsFor(userId,dayDate){
+    const dstr=isoDate(dayDate);
+    return shifts.filter(s=>s.userId===userId&&s.date===dstr).sort((a,b)=>(a.start||"").localeCompare(b.start||""));
+  }
+  function openAddFor(userId,dayDate){setSheet({userId,date:isoDate(dayDate),start:"09:00",end:"15:00"});}
+
   return(<div className="page">
     <div className="section-title">Planning</div>
     <div className="between mb12">
@@ -2330,19 +2364,65 @@ function Planning({data,user,db,reload}){
       <div className="section-sub" style={{margin:0}}>{fmtRange}</div>
       <button className="btn btn-ghost btn-sm" style={{width:"auto"}} onClick={()=>{const d=new Date(weekStart);d.setDate(d.getDate()+7);setWeekStart(d);}}>›</button>
     </div>
-    <div className="tabs" style={{marginBottom:16}}>{days.map((d,i)=>{
-      const isToday=isoDate(d)===isoDate(new Date());
-      return <button key={i} className={`tab ${dayIdx===i?"active":""}`} onClick={()=>setDayIdx(i)}>{DAYS[i]} {d.getDate()}{isToday?" •":""}</button>;})}
-    </div>
 
-    <div className="bucket-label">Créneaux — {DAYS[dayIdx]} {days[dayIdx].getDate()}</div>
-    {dayShifts.length===0&&<div className="empty"><div className="empty-icon">📅</div><div className="empty-title">Aucun créneau</div><div className="empty-sub">{isAdmin?"Ajoutez les horaires de l'équipe":"Aucun membre planifié ce jour"}</div></div>}
-    {dayShifts.map(s=>{const u=users.find(x=>x.id===s.userId);return(
-      <div key={s.id} className="item" onClick={()=>isAdmin&&openEdit(s)}>
-        <div className="item-icon" style={{background:T.infoBg,fontWeight:700,fontSize:14}}>{u?.initials||"?"}</div>
-        <div className="item-body"><div className="item-title">{u?.name||"Inconnu"}</div><div className="item-sub">{u?.role||""}</div></div>
-        <span className="badge b-info tabular">{s.start} – {s.end}</span>
-      </div>);})}
+    <SegmentedControl value={viewMode} onChange={setViewMode} options={[{value:"table",label:"📋 Tableau"},{value:"day",label:"📅 Par jour"}]}/>
+    <div style={{height:14}}></div>
+
+    {viewMode==="table" ? (
+      <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch",marginBottom:16,borderRadius:12,border:`1px solid ${T.border}`}}>
+        <table style={{borderCollapse:"collapse",width:"100%",minWidth:560,fontSize:12.5}}>
+          <thead>
+            <tr style={{background:T.bg2}}>
+              <th style={{position:"sticky",left:0,background:T.bg2,padding:"10px 12px",textAlign:"left",fontWeight:700,fontSize:12,color:T.textDim,zIndex:1,minWidth:104}}>Équipe</th>
+              {days.map((d,i)=>{const isToday=isoDate(d)===isoDate(new Date());return(
+                <th key={i} style={{padding:"10px 8px",textAlign:"center",fontWeight:700,fontSize:11.5,color:isToday?T.accent:T.textDim,minWidth:78}}>{DAYS[i]}<br/><span className="tabular">{d.getDate()}</span></th>
+              );})}
+            </tr>
+          </thead>
+          <tbody>
+            {users.map(u=>(
+              <tr key={u.id} style={{borderTop:`1px solid ${T.border}`}}>
+                <td style={{position:"sticky",left:0,background:T.bg1,padding:"8px 12px",fontWeight:600,whiteSpace:"nowrap"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{width:22,height:22,borderRadius:"50%",background:T.infoBg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9.5,fontWeight:700,flexShrink:0}}>{u.initials}</span>
+                    <span style={{fontSize:12}}>{u.name.split(" ")[0]}</span>
+                  </div>
+                </td>
+                {days.map((d,i)=>{
+                  const cellShifts=shiftsFor(u.id,d);
+                  return(
+                    <td key={i} style={{padding:"6px 4px",textAlign:"center",verticalAlign:"middle"}} onClick={()=>isAdmin&&cellShifts.length===0&&openAddFor(u.id,d)}>
+                      {cellShifts.length===0
+                        ? (isAdmin ? <div style={{color:T.textMute,fontSize:16,cursor:"pointer"}}>+</div> : <div style={{color:T.textMute}}>—</div>)
+                        : cellShifts.map(s=>(
+                          <div key={s.id} onClick={(e)=>{e.stopPropagation();if(isAdmin)openEdit(s);}} className="tabular" style={{background:T.infoBg,color:T.info,borderRadius:6,padding:"3px 5px",fontSize:10.5,fontWeight:700,marginBottom:2,cursor:isAdmin?"pointer":"default"}}>{s.start}–{s.end}</div>
+                        ))
+                      }
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    ) : (
+      <>
+        <div className="tabs" style={{marginBottom:16}}>{days.map((d,i)=>{
+          const isToday=isoDate(d)===isoDate(new Date());
+          return <button key={i} className={`tab ${dayIdx===i?"active":""}`} onClick={()=>setDayIdx(i)}>{DAYS[i]} {d.getDate()}{isToday?" •":""}</button>;})}
+        </div>
+
+        <div className="bucket-label">Créneaux — {DAYS[dayIdx]} {days[dayIdx].getDate()}</div>
+        {dayShifts.length===0&&<div className="empty"><div className="empty-icon">📅</div><div className="empty-title">Aucun créneau</div><div className="empty-sub">{isAdmin?"Ajoutez les horaires de l'équipe":"Aucun membre planifié ce jour"}</div></div>}
+        {dayShifts.map(s=>{const u=users.find(x=>x.id===s.userId);return(
+          <div key={s.id} className="item" onClick={()=>isAdmin&&openEdit(s)}>
+            <div className="item-icon" style={{background:T.infoBg,fontWeight:700,fontSize:14}}>{u?.initials||"?"}</div>
+            <div className="item-body"><div className="item-title">{u?.name||"Inconnu"}</div><div className="item-sub">{u?.role||""}</div></div>
+            <span className="badge b-info tabular">{s.start} – {s.end}</span>
+          </div>);})}
+      </>
+    )}
 
     <div className="bucket-label mt14">Heures de la semaine</div>
     {users.map(u=>{const h=totalWeekH(u.id);if(h==="0")return null;return(
