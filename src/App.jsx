@@ -1059,7 +1059,12 @@ function exportRegistrePDF(events,{period,moduleFilter}){
   w.document.write(`<html><head><title>Registre HACCP — Fuego</title><style>
     @page{margin:14mm;}
     *{box-sizing:border-box;}
-    body{font-family:Arial,Helvetica,sans-serif;color:#111;font-size:10pt;}
+    body{font-family:Arial,Helvetica,sans-serif;color:#111;font-size:10pt;margin:0;}
+    .closebar{position:sticky;top:0;background:#090909;padding:12px 16px;display:flex;align-items:center;gap:10px;z-index:10;}
+    .closebar button{background:linear-gradient(135deg,#FF6B00,#E8390A);color:#fff;border:none;border-radius:10px;padding:10px 18px;font-size:14px;font-weight:700;font-family:Arial,sans-serif;}
+    .closebar span{color:#999;font-size:12px;font-family:Arial,sans-serif;}
+    .pagebody{padding:14mm;}
+    @media print{ .closebar{display:none;} .pagebody{padding:0;} }
     .header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #E8390A;padding-bottom:10px;margin-bottom:16px;}
     .brand{font-weight:900;font-size:20pt;letter-spacing:3px;}
     .brand span{color:#E8390A;}
@@ -1076,6 +1081,11 @@ function exportRegistrePDF(events,{period,moduleFilter}){
     .muted{color:#666;font-size:8.5pt;}
     .footer{margin-top:24px;padding-top:10px;border-top:1px solid #ddd;font-size:8pt;color:#888;text-align:center;}
   </style></head><body>
+    <div class="closebar">
+      <button onclick="window.close()">← Retour à Fuego</button>
+      <span>Si le bouton ne fonctionne pas, ferme cet onglet manuellement.</span>
+    </div>
+    <div class="pagebody">
     <div class="header">
       <div class="brand">FUEG<span>O</span></div>
       <div class="meta">Registre HACCP<br/>${periodLabel}<br/>Généré le ${todayStr()} à ${nowTime()}</div>
@@ -1087,9 +1097,151 @@ function exportRegistrePDF(events,{period,moduleFilter}){
     </div>
     ${rows}
     <div class="footer">Document généré automatiquement par Fuego · Plan de Maîtrise Sanitaire</div>
+    </div>
   </body></html>`);
   w.document.close();
   setTimeout(()=>{ w.focus(); w.print(); }, 400);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GUIDE DES BONNES PRATIQUES — aide-mémoire HACCP, reformulé pour un accès
+// rapide en cuisine. Ce n'est pas une reproduction du GBPH officiel (protégé),
+// mais une synthèse pratique des règles qu'il couvre, organisée par thème.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const GBPH_SECTIONS = [
+  {
+    key: "temp", icon: "🌡️", title: "Températures", color: "#5A8FB5",
+    cards: [
+      {q:"Réfrigération", a:"0°C à +4°C pour les produits sensibles (viande, poisson, produits laitiers frais). Jusqu'à +8°C pour d'autres denrées selon l'arrêté du produit.", tag:"Réglementaire"},
+      {q:"Congélation", a:"−18°C ou moins en continu. Ne jamais recongeler un produit décongelé.", tag:"Réglementaire"},
+      {q:"Refroidissement rapide", a:"De +63°C à +10°C à cœur en moins de 2 heures. Au-delà, le produit doit être jeté.", tag:"Réglementaire"},
+      {q:"Remise en température", a:"Atteindre +63°C à cœur en moins d'1 heure avant service.", tag:"Réglementaire"},
+      {q:"Maintien au chaud", a:"+63°C minimum en continu jusqu'au service.", tag:"Réglementaire"},
+      {q:"Huiles de friture", a:"Composés polaires < 25% — au-delà, l'huile doit être changée.", tag:"Réglementaire"},
+    ],
+  },
+  {
+    key: "clean", icon: "🧹", title: "Nettoyage & désinfection", color: "#5FB075",
+    cards: [
+      {q:"Quotidien", a:"Toutes les surfaces en contact direct avec les aliments : plans de travail, sols de cuisine, tables de salle.", tag:"Fréquence"},
+      {q:"Hebdomadaire", a:"Équipements moins exposés : chambres froides, friteuses, parois.", tag:"Fréquence"},
+      {q:"Mensuel", a:"Zones lourdes : hottes, filtres, conduits d'extraction.", tag:"Fréquence"},
+      {q:"Après chaque usage", a:"Ustensiles et équipements à usage ponctuel : trancheuses, planches, couteaux.", tag:"Fréquence"},
+      {q:"Méthode", a:"Toujours dans l'ordre : nettoyer (retirer les salissures) puis désinfecter (éliminer les micro-organismes). Respecter les dilutions indiquées sur le produit.", tag:"Méthode"},
+    ],
+  },
+  {
+    key: "dlc", icon: "📅", title: "DLC & conservation", color: "#D49340",
+    cards: [
+      {q:"Préparation maison", a:"3 jours à compter de la fabrication, sauf indication contraire du fournisseur pour les matières premières utilisées.", tag:"Bonnes pratiques"},
+      {q:"Produit entamé / ouvert", a:"3 jours après ouverture, à conserver au froid, quelle que soit la DLC d'origine si elle est plus longue.", tag:"Bonnes pratiques"},
+      {q:"Congélation maison", a:"6 mois recommandés pour la plupart des produits (variable selon la nature : viande, poisson, légumes).", tag:"Bonnes pratiques"},
+      {q:"Décongélation", a:"À consommer sous 24h. Ne jamais recongeler. Décongeler au réfrigérateur, jamais à température ambiante.", tag:"Réglementaire"},
+      {q:"Plats témoins", a:"Conserver un échantillon de chaque plat servi pendant au moins 5 jours après le service, dans un contenant identifié et daté.", tag:"Réglementaire"},
+    ],
+  },
+  {
+    key: "trace", icon: "🏷️", title: "Traçabilité & étiquetage", color: "#FF6B00",
+    cards: [
+      {q:"Étiquette obligatoire", a:"Nom du produit, date de fabrication ou d'ouverture, DLC, numéro de lot, allergènes visibles.", tag:"Réglementaire"},
+      {q:"Allergènes", a:"Les 14 allergènes majeurs doivent être signalés dès qu'ils sont présents dans une préparation, y compris en trace si risque de contamination croisée.", tag:"Réglementaire"},
+      {q:"Réception marchandises", a:"Contrôler la température à réception, l'aspect, l'emballage et la DLC avant d'accepter la livraison. Conserver la traçabilité fournisseur (bon de livraison, lot).", tag:"Réglementaire"},
+      {q:"Durée d'archivage", a:"Conserver les étiquettes et bons de livraison au moins 3 ans à compter de la date de fin de vie du produit, en cas de contrôle.", tag:"Réglementaire"},
+    ],
+  },
+  {
+    key: "hygiene", icon: "🧼", title: "Hygiène du personnel", color: "#B85CB0",
+    cards: [
+      {q:"Lavage des mains", a:"Avant de commencer le service, après chaque passage aux toilettes, après avoir manipulé des déchets ou des produits crus, après s'être mouché ou avoir touché son visage.", tag:"Obligatoire"},
+      {q:"Tenue de travail", a:"Tenue propre et dédiée au poste, changée quotidiennement. Cheveux attachés ou couverts en zone de préparation.", tag:"Obligatoire"},
+      {q:"Blessures et coupures", a:"Toute plaie sur les mains doit être protégée par un pansement étanche et une protection supplémentaire (gant, doigtier).", tag:"Obligatoire"},
+      {q:"En cas de maladie", a:"Toute personne présentant des symptômes gastro-intestinaux (vomissements, diarrhée) ne doit pas manipuler d'aliments jusqu'à guérison complète.", tag:"Obligatoire"},
+      {q:"Bijoux et ongles", a:"Pas de bijoux aux mains et poignets en zone de préparation. Ongles courts, sans vernis, sans faux ongles.", tag:"Obligatoire"},
+      {q:"Formation", a:"Chaque membre de l'équipe manipulant des denrées doit être formé aux bases de l'hygiène alimentaire (formation HACCP obligatoire pour au moins une personne de l'établissement).", tag:"Réglementaire"},
+    ],
+  },
+  {
+    key: "pest", icon: "🐀", title: "Nuisibles", color: "#D55C5C",
+    cards: [
+      {q:"Contrôle régulier", a:"Inspection visuelle quotidienne des zones à risque (réserves, angles, arrière des équipements). Contrat avec un prestataire recommandé pour les visites périodiques.", tag:"Bonnes pratiques"},
+      {q:"En cas de détection", a:"Isoler immédiatement les denrées potentiellement contaminées, documenter l'incident, faire intervenir le prestataire nuisibles rapidement.", tag:"Réglementaire"},
+      {q:"Prévention", a:"Stockage hermétique des denrées, gestion stricte des déchets, absence de zones humides ou d'accumulation de restes alimentaires.", tag:"Bonnes pratiques"},
+    ],
+  },
+];
+
+function GbphCard({card}){
+  const[open,setOpen]=useState(false);
+  return(
+    <div className="card" style={{marginBottom:8,cursor:"pointer"}} onClick={()=>setOpen(!open)}>
+      <div className="between">
+        <div style={{fontWeight:700,fontSize:14}}>{card.q}</div>
+        <span className={`badge ${card.tag==="Réglementaire"||card.tag==="Obligatoire"?"b-bad":"b-info"}`} style={{flexShrink:0,marginLeft:8}}>{card.tag}</span>
+      </div>
+      {open&&<div className="text-sm text-dim mt8" style={{lineHeight:1.5}}>{card.a}</div>}
+    </div>
+  );
+}
+
+function GbphGuide({initialSection}){
+  const[section,setSection]=useState(initialSection||GBPH_SECTIONS[0].key);
+  const[search,setSearch]=useState("");
+  const current=GBPH_SECTIONS.find(s=>s.key===section)||GBPH_SECTIONS[0];
+
+  const filtered = search.trim()
+    ? GBPH_SECTIONS.flatMap(s=>s.cards.map(c=>({...c,section:s})))
+        .filter(c=>c.q.toLowerCase().includes(search.toLowerCase())||c.a.toLowerCase().includes(search.toLowerCase()))
+    : null;
+
+  return(<div className="page">
+    <div className="section-title">Guide des bonnes pratiques</div>
+    <div className="section-sub">Aide-mémoire HACCP — accès rapide</div>
+
+    <div className="field" style={{marginBottom:14}}>
+      <input className="input" placeholder="Rechercher (ex: température, DLC, mains...)" value={search} onChange={e=>setSearch(e.target.value)}/>
+    </div>
+
+    {filtered ? (
+      <>
+        <div className="text-xs text-dim mb8">{filtered.length} résultat{filtered.length>1?"s":""}</div>
+        {filtered.length===0
+          ? <div className="empty"><div className="empty-icon">🔍</div><div className="empty-title">Aucun résultat</div><div className="empty-sub">Essaie un autre mot-clé</div></div>
+          : filtered.map((c,i)=>(
+            <div key={i}>
+              <div className="text-xs" style={{color:c.section.color,fontWeight:700,marginBottom:4}}>{c.section.icon} {c.section.title}</div>
+              <GbphCard card={c}/>
+            </div>
+          ))}
+      </>
+    ) : (
+      <>
+        <div className="chips" style={{marginBottom:16}}>
+          {GBPH_SECTIONS.map(s=>(
+            <button key={s.key} className={`chip ${section===s.key?"sel":""}`} onClick={()=>{haptic(8);setSection(s.key);}}>{s.icon} {s.title}</button>
+          ))}
+        </div>
+        <div className="bucket-label">{current.icon} {current.title}</div>
+        {current.cards.map((c,i)=><GbphCard key={i} card={c}/>)}
+      </>
+    )}
+
+    <div className="banner banner-info mt14"><span>ℹ️</span><div style={{fontSize:11,lineHeight:1.5}}>
+      Synthèse pratique à titre d'aide-mémoire. Le Guide des Bonnes Pratiques d'Hygiène officiel de ta branche professionnelle reste la référence complète en cas de contrôle.
+    </div></div>
+  </div>);
+}
+
+// Petit bouton d'aide contextuelle — à poser sur n'importe quel écran HACCP.
+// Ouvre directement la bonne section du guide.
+function GbphHelpButton({section,go}){
+  return(
+    <button
+      onClick={()=>go("gbph",{section})}
+      style={{position:"fixed",bottom:96,right:16,width:44,height:44,borderRadius:"50%",background:"rgba(255,107,0,.15)",border:"1.5px solid #FF6B00",color:"#FF6B00",fontSize:18,fontWeight:800,zIndex:40,backdropFilter:"blur(8px)"}}
+      aria-label="Aide GBPH"
+    >?</button>
+  );
 }
 
 function HaccpHub({data,go}){
@@ -1120,23 +1272,28 @@ function HaccpHub({data,go}){
     ]},
   ];
   return(<div className="page"><div className="section-title">HACCP</div><div className="section-sub">Plan de Maîtrise Sanitaire</div>
-    <div className="item" onClick={()=>go("registre")} style={{background:"linear-gradient(135deg,#1A1A1A,#242424)",border:"1px solid #FF6B00",marginBottom:20}}>
+    <div className="item" onClick={()=>go("registre")} style={{background:"linear-gradient(135deg,#1A1A1A,#242424)",border:"1px solid #FF6B00",marginBottom:10}}>
       <div className="item-icon" style={{background:"linear-gradient(135deg,#FF6B00,#E8390A)"}}>📋</div>
       <div className="item-body"><div className="item-title">Registre HACCP</div><div className="item-sub">Historique complet, filtres, export PDF</div></div>
+      <span className="item-arrow">›</span>
+    </div>
+    <div className="item" onClick={()=>go("gbph")} style={{background:T.bg2,border:`1px solid ${T.border}`,marginBottom:20}}>
+      <div className="item-icon" style={{background:"#B85CB025"}}>📖</div>
+      <div className="item-body"><div className="item-title">Guide des bonnes pratiques</div><div className="item-sub">Aide-mémoire hygiène, températures, DLC</div></div>
       <span className="item-arrow">›</span>
     </div>
     {groups.map(g=>(<div key={g.title} style={{marginBottom:20}}><div className="bucket-label">{g.title}</div>{g.items.map(it=><div key={it.key} className="item" onClick={()=>go(it.key)}><div className="item-icon" style={{background:it.bg}}>{it.icon}</div><div className="item-body"><div className="item-title">{it.title}</div><div className="item-sub">{it.sub}</div></div><span className={`badge ${it.badge.c}`}>{it.badge.l}</span></div>)}</div>))}
   </div>);
 }
 
-function Temperatures({data,setData,user,db,reload}){
+function Temperatures({data,setData,user,db,reload,go}){
   const[editing,setEditing]=useState(null);const[pickedTemp,setPickedTemp]=useState(null);
   function openSlot(f,p){const e=getReleve(data,f.id,p);setEditing({fridge:f,period:p});setPickedTemp(e?e.temp:tempCenter(f.target));}
   async function save(){if(!editing||pickedTemp===null)return;const date=todayStr();await db.saveReleve({fridgeId:editing.fridge.id,date,period:editing.period,temp:pickedTemp,time:nowTime(),operatorId:user.id});await reload();setEditing(null);setPickedTemp(null);}
   function cancel(){setEditing(null);setPickedTemp(null);}
   const userById=id=>data.users.find(u=>u.id===id);
   const allBad=data.haccpSettings.fridgeTargets.filter(f=>{const m=getReleve(data,f.id,"matin"),s=getReleve(data,f.id,"soir");return(m&&tempStatus(m.temp,f.target)==="bad")||(s&&tempStatus(s.temp,f.target)==="bad");});
-  return(<div className="page"><div className="section-title">Températures</div><div className="section-sub">Un relevé matin et un soir, par frigo</div>
+  return(<div className="page"><GbphHelpButton section="temp" go={go}/><div className="section-title">Températures</div><div className="section-sub">Un relevé matin et un soir, par frigo</div>
     {allBad.length>0&&<div className="urgent-card" style={{padding:"12px 14px",margin:"0 0 12px"}}><div className="urgent-label" style={{marginBottom:4}}>🚨 {allBad.length} frigo{allBad.length>1?"s":""} hors norme</div><div style={{fontSize:12,opacity:.9}}>Vérification immédiate requise</div></div>}
     {data.haccpSettings.fridgeTargets.map(f=>{
       const m=getReleve(data,f.id,"matin"),s=getReleve(data,f.id,"soir");
@@ -1324,8 +1481,21 @@ function Traceability({data,setData,db,reload}){
   </div>);
 }
 
-function Cleaning({data,setData,db,reload}){
+// Ordre réglementaire des fréquences de nettoyage (GBPH restauration) :
+// quotidien (surfaces de contact alimentaire) → hebdomadaire (équipements moins exposés)
+// → mensuel (zones lourdes : hottes, filtres) → après usage (ustensiles ponctuels, hors calendrier).
+const CLEAN_FREQS = [
+  {key:"Quotidien",label:"Quotidien",icon:"☀️"},
+  {key:"Hebdomadaire",label:"Hebdo",icon:"📅"},
+  {key:"Mensuel",label:"Mensuel",icon:"🗓️"},
+  {key:"Trimestriel",label:"Trimestriel",icon:"📆"},
+  {key:"Après usage",label:"Après usage",icon:"🔁"},
+];
+
+function Cleaning({data,setData,db,reload,go}){
   const[busy,setBusy]=useState(null);
+  const[tab,setTab]=useState("Quotidien");
+
   async function toggle(id){
     if(busy)return;
     haptic(10);
@@ -1341,10 +1511,49 @@ function Cleaning({data,setData,db,reload}){
       await reload?.();
     }
   }
-  const done=data.cleaning.filter(c=>c.done).length;const pct=safePct(done,data.cleaning.length);
-  return(<div className="page"><div className="section-title">Nettoyage</div><div className="section-sub">{done} / {data.cleaning.length} · {Math.round(pct)}%</div>
-    <div className="card mb14"><div className="pbar"><div className="pfill" style={{width:`${pct}%`,background:T.accent}}></div></div></div>
-    {data.cleaning.map(c=><div key={c.id} className="item" onClick={()=>toggle(c.id)} style={{opacity:c.done?.6:1,pointerEvents:busy?"none":"auto"}}><div className="item-icon" style={{background:T.bg3}}>{c.icon}</div><div className="item-body"><div className="item-title" style={{textDecoration:c.done?"line-through":"none"}}>{c.zone}</div><div className="item-sub">{c.freq} · {c.produit} · {c.dilution}{c.done&&c.doneAt?` · fait le ${fmtDateTime(c.doneAt)}`:""}</div></div><div className={`check ${c.done?"on":""}`}>{busy===c.id?"…":c.done?"✓":""}</div></div>)}
+
+  // Répartit les zones existantes par fréquence ; celles dont la fréquence ne
+  // correspond à aucune des 4 catégories connues tombent dans "Quotidien" par défaut
+  // (sécurité anti-perte de donnée si une fréquence inattendue arrive de la base).
+  const byFreq = CLEAN_FREQS.reduce((acc,f)=>{acc[f.key]=data.cleaning.filter(c=>c.freq===f.key);return acc;},{});
+  const known = new Set(CLEAN_FREQS.map(f=>f.key));
+  const orphans = data.cleaning.filter(c=>!known.has(c.freq));
+  if(orphans.length) byFreq["Quotidien"]=[...byFreq["Quotidien"],...orphans];
+
+  const list = byFreq[tab]||[];
+  const done = list.filter(c=>c.done).length;
+  const pct = safePct(done, list.length);
+  const totalDone = data.cleaning.filter(c=>c.done).length;
+  const totalPct = safePct(totalDone, data.cleaning.length);
+
+  return(<div className="page">
+    <GbphHelpButton section="clean" go={go}/>
+    <div className="section-title">Nettoyage</div>
+    <div className="section-sub">Ensemble : {totalDone} / {data.cleaning.length} · {Math.round(totalPct)}%</div>
+
+    <div className="tabs" style={{marginBottom:16}}>
+      {CLEAN_FREQS.map(f=>{
+        const n=byFreq[f.key]?.length||0;
+        return <button key={f.key} className={`tab ${tab===f.key?"active":""}`} onClick={()=>{haptic(8);setTab(f.key);}}>{f.icon} {f.label}{n>0?` (${n})`:""}</button>;
+      })}
+    </div>
+
+    {list.length>0 && (
+      <div className="card mb14"><div className="pbar"><div className="pfill" style={{width:`${pct}%`,background:T.accent}}></div></div></div>
+    )}
+
+    {list.length===0
+      ? <div className="empty"><div className="empty-icon">🧹</div><div className="empty-title">Aucune zone</div><div className="empty-sub">Rien de programmé sur cette fréquence</div></div>
+      : list.map(c=>(
+        <div key={c.id} className="item" onClick={()=>toggle(c.id)} style={{opacity:c.done?.6:1,pointerEvents:busy?"none":"auto"}}>
+          <div className="item-icon" style={{background:T.bg3}}>{c.icon}</div>
+          <div className="item-body">
+            <div className="item-title" style={{textDecoration:c.done?"line-through":"none"}}>{c.zone}</div>
+            <div className="item-sub">{c.produit} · {c.dilution}{c.done&&c.doneAt?` · fait le ${fmtDateTime(c.doneAt)}`:""}</div>
+          </div>
+          <div className={`check ${c.done?"on":""}`}>{busy===c.id?"…":c.done?"✓":""}</div>
+        </div>
+      ))}
   </div>);
 }
 
@@ -1371,16 +1580,85 @@ const fmtDM = (d)=> d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"}
 const fmtDMY = (d)=> d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"2-digit"});
 
 // Format étiquette Brother — 57,15 × 50,8 mm. Opérateur mis en évidence, type de date dynamique.
-function printBrotherLabel({product, qty, dateType, startDateStr, dlc, lot, allergens, operator}){
+// ─── RELAIS D'IMPRESSION RÉSEAU ────────────────────────────────────────────
+// Safari/iOS ne peut pas parler directement à une imprimante réseau (Brother
+// TD-2125NWB incluse). On passe par un petit serveur relais (sur un Android
+// dédié en cuisine, via Termux) qui, lui, peut envoyer les données brutes à
+// l'imprimante. L'adresse du relais est enregistrée dans Paramètres > Imprimante.
+function getRelayUrl(){
+  try{ return localStorage.getItem("fuego_relay_url") || ""; }catch{ return ""; }
+}
+function setRelayUrl(url){
+  try{ localStorage.setItem("fuego_relay_url", url); }catch{}
+}
+async function testRelay(url){
+  try{
+    const res = await fetch(`${url}/ping`, { method:"GET", signal:AbortSignal.timeout(4000) });
+    if(!res.ok) return {ok:false, error:"Réponse invalide"};
+    const data = await res.json();
+    return {ok:true, printer:data.printer};
+  }catch(e){ return {ok:false, error:e.message||"Injoignable"}; }
+}
+
+// Construit la commande ESC/POS brute pour une étiquette texte simple.
+// (Format basique — suffisant pour du texte, sans mise en page avancée.)
+function buildEscPos({product, qty, dateType, startDateStr, dlc, lot, allergens, operator}){
   const dt = dateTypeByKey(dateType||"fabrique");
+  const ESC = "\x1B", INIT = ESC+"@", BOLD_ON = ESC+"E\x01", BOLD_OFF = ESC+"E\x00";
+  const CENTER = ESC+"a\x01", LEFT = ESC+"a\x00", CUT = "\x1D"+"V"+"\x41"+"\x00";
+  const dlcLabel = dt.key==="congele" ? "À consommer avant" : "DLC";
+  let out = INIT + CENTER + BOLD_ON + "FUEGO\n" + BOLD_OFF + LEFT;
+  out += "--------------------------------\n";
+  out += BOLD_ON + product + BOLD_OFF + "\n";
+  if(qty) out += `Qté : ${qty}\n`;
+  out += `${dt.verb} le : ${startDateStr}\n`;
+  out += BOLD_ON + `${dlcLabel} : ${dlc}` + BOLD_OFF + "\n";
+  out += `Lot : ${lot}\n`;
+  out += "--------------------------------\n";
+  out += `ALLERGENES : ${(allergens||"Aucun").toUpperCase()}\n`;
+  out += `Par ${operator} - ${nowTime()}\n\n\n`;
+  out += CUT;
+  return out;
+}
+
+async function printBrotherLabel(labelData){
+  const relayUrl = getRelayUrl();
+
+  // Méthode 1 — relais réseau configuré : envoi direct, sans passer par Safari
+  if(relayUrl){
+    try{
+      const escpos = buildEscPos(labelData);
+      const res = await fetch(`${relayUrl}/print`, {
+        method:"POST",
+        headers:{"Content-Type":"text/plain"},
+        body: escpos,
+        signal: AbortSignal.timeout(8000),
+      });
+      const result = await res.json();
+      if(result.success){ haptic(15); return {ok:true}; }
+      alert(`Erreur d'impression : ${result.error||"inconnue"}`);
+      return {ok:false};
+    }catch(e){
+      alert(`Relais d'impression injoignable : ${e.message}\n\nVérifie que le téléphone relais est allumé et connecté au WiFi.`);
+      return {ok:false};
+    }
+  }
+
+  // Méthode 2 — secours : boîte d'impression Safari (fonctionne si l'imprimante
+  // est accessible via AirPrint ou un pilote installé sur l'appareil).
+  const dt = dateTypeByKey(labelData.dateType||"fabrique");
+  const {product, qty, startDateStr, dlc, lot, allergens, operator} = labelData;
   const w = window.open("","_blank","width=420,height=420");
-  if(!w){ alert("Autorisez les pop-ups pour imprimer"); return; }
+  if(!w){ alert("Autorisez les pop-ups pour imprimer"); return {ok:false}; }
   w.document.write(`<html><head><title>Étiquette Fuego</title>
   <style>
     @page { size: 57.15mm 50.8mm; margin: 0; }
     *{box-sizing:border-box;margin:0;padding:0;}
-    html,body{width:57.15mm;height:50.8mm;}
-    body{font-family:Arial,Helvetica,sans-serif;padding:2mm 3mm;display:flex;flex-direction:column;}
+    html{background:#090909;}
+    .label{width:57.15mm;height:50.8mm;font-family:Arial,Helvetica,sans-serif;padding:2mm 3mm;display:flex;flex-direction:column;background:#fff;margin:0 auto;}
+    .closebar{padding:14px 16px;text-align:center;}
+    .closebar button{background:linear-gradient(135deg,#FF6B00,#E8390A);color:#fff;border:none;border-radius:10px;padding:10px 20px;font-size:14px;font-weight:700;font-family:Arial,sans-serif;width:100%;}
+    @media print{ .closebar{display:none;} html{background:#fff;} }
     .brand{font-weight:900;font-size:8pt;letter-spacing:2px;text-align:center;border-bottom:1.5px solid #000;padding-bottom:0.8mm;margin-bottom:0.8mm;}
     .prod{font-weight:bold;font-size:12pt;line-height:1.05;margin-bottom:0.5mm;}
     .qty{font-size:7pt;color:#333;margin-bottom:0.5mm;}
@@ -1392,22 +1670,26 @@ function printBrotherLabel({product, qty, dateType, startDateStr, dlc, lot, alle
     .foot{font-size:7pt;text-align:center;margin-top:0.8mm;border-top:1px solid #000;padding-top:0.6mm;}
     .foot b{font-weight:bold;}
   </style></head><body>
-    <div class="brand">FUEGO</div>
-    <div class="prod">${product}</div>
-    ${qty?`<div class="qty">Qté : ${qty}</div>`:""}
-    <div class="rows">
-      <div class="row"><span>${dt.verb} le</span><b>${startDateStr}</b></div>
-      <div class="row"><span>${dt.key==="congele"?"À consommer avant":"DLC"}</span><b class="dlc">${dlc}</b></div>
-      <div class="row"><span>Lot</span><b>${lot}</b></div>
+    <div class="closebar"><button onclick="window.close()">← Retour à Fuego</button></div>
+    <div class="label">
+      <div class="brand">FUEGO</div>
+      <div class="prod">${product}</div>
+      ${qty?`<div class="qty">Qté : ${qty}</div>`:""}
+      <div class="rows">
+        <div class="row"><span>${dt.verb} le</span><b>${startDateStr}</b></div>
+        <div class="row"><span>${dt.key==="congele"?"À consommer avant":"DLC"}</span><b class="dlc">${dlc}</b></div>
+        <div class="row"><span>Lot</span><b>${lot}</b></div>
+      </div>
+      <div class="al">⚠ ALLERGÈNES : ${(allergens||"Aucun").toUpperCase()}</div>
+      <div class="foot">Par <b>${operator}</b> · ${nowTime()}</div>
     </div>
-    <div class="al">⚠ ALLERGÈNES : ${(allergens||"Aucun").toUpperCase()}</div>
-    <div class="foot">Par <b>${operator}</b> · ${nowTime()}</div>
   </body></html>`);
   w.document.close();
   setTimeout(()=>{ w.focus(); w.print(); }, 350);
+  return {ok:true};
 }
 
-function Labels({data,setData,user,db,reload}){
+function Labels({data,setData,user,db,reload,go}){
   const[show,setShow]=useState(false);
   const[form,setForm]=useState({product:"",allergens:"",qty:""});
   const[dateType,setDateType]=useState("fabrique");           // clé DATE_TYPES
@@ -1445,6 +1727,7 @@ function Labels({data,setData,user,db,reload}){
   }
 
   return(<div className="page">
+    <GbphHelpButton section="trace" go={go}/>
     <div className="section-title">Étiquetage</div>
     <div className="section-sub">Brother · 57,15 × 50,8 mm</div>
 
@@ -2212,11 +2495,29 @@ function SettingsUsers({data,setData,user,db,reload,onLogout}){
 }
 
 function SettingsPrinter({user}){
-  const[testDone,setTestDone]=useState(false);
-  function testPrint(){
-    printBrotherLabel({product:"TEST FUEGO",qty:"",dateProd:todayStr(),dlc:todayStr(),lot:"TEST-001",allergens:"Aucun",operator:user.name});
-    setTestDone(true); setTimeout(()=>setTestDone(false),3000);
+  const[relayInput,setRelayInput]=useState(getRelayUrl());
+  const[testState,setTestState]=useState(null); // null | "testing" | {ok,...}
+  const[printDone,setPrintDone]=useState(false);
+
+  async function saveAndTestRelay(){
+    const url = relayInput.trim().replace(/\/$/,"");
+    setTestState("testing");
+    const result = await testRelay(url);
+    if(result.ok){ setRelayUrl(url); setTestState({ok:true}); }
+    else{ setTestState({ok:false, error:result.error}); }
   }
+
+  function clearRelay(){
+    setRelayUrl(""); setRelayInput(""); setTestState(null);
+  }
+
+  async function testPrint(){
+    await printBrotherLabel({product:"TEST FUEGO",qty:"",dateType:"fabrique",startDateStr:todayStr(),dlc:todayStr(),lot:"TEST-001",allergens:"Aucun",operator:user.name});
+    setPrintDone(true); setTimeout(()=>setPrintDone(false),3000);
+  }
+
+  const relayActive = !!getRelayUrl();
+
   return(<>
     <div className="group-label">Imprimante d'étiquettes</div>
     <div className="card" style={{marginBottom:12}}>
@@ -2225,20 +2526,35 @@ function SettingsPrinter({user}){
         <div><div className="item-title">Brother — Ethernet</div><div className="text-xs text-dim">Format 57,15 × 50,8 mm</div></div>
       </div>
       <div className="text-xs text-dim" style={{lineHeight:1.6}}>
-        Ton imprimante Brother est branchée en Ethernet sur ta box. Chaque téléphone connecté au même WiFi peut imprimer via la boîte d'impression du téléphone.
+        Sur iPhone, Safari ne peut pas parler directement à la Brother. On passe par un petit relais installé sur un Android du réseau, qui transmet les étiquettes à l'imprimante.
       </div>
     </div>
 
-    <div className="banner banner-info mb12"><span>ℹ️</span><div style={{fontSize:11,lineHeight:1.5}}>
-      <b>Configuration une seule fois par téléphone :</b> installe l'app <b>Brother iPrint&amp;Label</b> (iOS/Android) OU active AirPrint. Ensuite, au moment d'imprimer, choisis ta Brother dans la liste.
-    </div></div>
+    <div className="group-label">Relais d'impression {relayActive&&<span className="badge b-good" style={{marginLeft:6}}>Actif</span>}</div>
+    <div className="card" style={{marginBottom:12}}>
+      <div className="field" style={{marginBottom:8}}>
+        <label className="label">Adresse du relais (affichée au démarrage de Termux)</label>
+        <input className="input input-sm" placeholder="http://192.168.2.XX:9191" value={relayInput} onChange={e=>setRelayInput(e.target.value)}/>
+      </div>
+      <div className="row gap8">
+        <button className="btn btn-primary" style={{flex:1}} onClick={saveAndTestRelay} disabled={!relayInput.trim()||testState==="testing"}>
+          {testState==="testing"?"Test en cours…":"Enregistrer et tester"}
+        </button>
+        {relayActive&&<button className="btn btn-ghost" style={{flex:"0 0 auto",width:44}} onClick={clearRelay}>🗑</button>}
+      </div>
+      {testState&&testState!=="testing"&&(
+        testState.ok
+          ? <div className="banner banner-good mt8"><span>✓</span><div>Relais joignable. L'imprimante répond.</div></div>
+          : <div className="banner banner-bad mt8"><span>⚠️</span><div>Injoignable : {testState.error}. Vérifie que Termux tourne sur l'Android et que les deux appareils sont sur le même WiFi.</div></div>
+      )}
+    </div>
 
-    <div className="group-label">Étapes de configuration</div>
+    <div className="group-label">Installation du relais (une seule fois)</div>
     {[
-      ["1","Vérifier le réseau","Le téléphone doit être sur le même WiFi que la box où est branchée la Brother."],
-      ["2","Installer Brother iPrint&Label","Depuis l'App Store ou Google Play — gratuit. L'app détecte l'imprimante sur le réseau."],
-      ["3","Régler le format","Dans les réglages d'impression, choisir l'étiquette 57 × 50 mm (DK-11221 ou équivalent découpe)."],
-      ["4","Imprimer un test","Bouton ci-dessous → choisir la Brother dans la boîte d'impression."],
+      ["1","Installer Termux","Sur l'Android dédié, depuis F-Droid (pas le Play Store, qui a une version obsolète)."],
+      ["2","Lancer le serveur","Dans Termux : installer Node.js, copier server.js, taper « node server.js »."],
+      ["3","Noter l'adresse affichée","Termux affiche une adresse du type http://192.168.x.x:9191 — c'est celle à coller ci-dessus."],
+      ["4","Laisser tourner","Termux doit rester ouvert en arrière-plan sur l'Android en permanence."],
     ].map(([n,t,d])=>(
       <div key={n} className="item" style={{marginBottom:6}}>
         <div className="item-icon" style={{background:"linear-gradient(135deg,#FF6B00,#E8390A)",color:"white",fontWeight:800,fontSize:15}}>{n}</div>
@@ -2247,11 +2563,11 @@ function SettingsPrinter({user}){
     ))}
 
     <button className="btn btn-primary mt12" onClick={testPrint}>🖨️ Imprimer une étiquette test</button>
-    {testDone&&<div className="banner banner-good mt8"><span>✓</span><div>Fenêtre d'impression ouverte. Choisis ta Brother et vérifie le cadrage.</div></div>}
+    {printDone&&<div className="banner banner-good mt8"><span>✓</span><div>{relayActive?"Étiquette envoyée au relais.":"Fenêtre d'impression ouverte (mode secours Safari)."}</div></div>}
 
-    <div className="banner banner-warn mt12"><span>⚠️</span><div style={{fontSize:11,lineHeight:1.5}}>
-      Si le texte est coupé ou mal centré : dans la boîte d'impression, mets les marges à <b>zéro</b> et l'échelle à <b>100 %</b> (pas "ajuster à la page").
-    </div></div>
+    {!relayActive&&<div className="banner banner-warn mt12"><span>⚠️</span><div style={{fontSize:11,lineHeight:1.5}}>
+      Sans relais configuré, le bouton ci-dessus utilise la boîte d'impression Safari — qui ne trouvera probablement pas la Brother (limitation connue sur ce modèle).
+    </div></div>}
   </>);
 }
 
@@ -2275,9 +2591,9 @@ function Settings({data,setData,user,onLogout,db,reload}){
 }
 
 const NAV=[{k:"home",i:"🏠",l:"Aujourd'hui"},{k:"haccp",i:"🛡️",l:"HACCP"},{k:"recipes",i:"📖",l:"Recettes"},{k:"tasks",i:"✅",l:"Mise en place"},{k:"more",i:"⋯",l:"Plus"}];
-const TITLES={home:"Aujourd'hui",haccp:"HACCP",temps:"Températures",reception:"Réception",cooling:"Cellule",reheating:"Remise en T°",oils:"Huiles friture",trace:"Traçabilité",labels:"Étiquetage",testmeals:"Plats témoins",clean:"Nettoyage",pests:"Nuisibles",training:"Formation",registre:"Registre HACCP",recipes:"Recettes",margins:"Marges",planning:"Planning",tasks:"Mise en place",more:"Plus",settings:"Paramètres"};
+const TITLES={home:"Aujourd'hui",haccp:"HACCP",temps:"Températures",reception:"Réception",cooling:"Cellule",reheating:"Remise en T°",oils:"Huiles friture",trace:"Traçabilité",labels:"Étiquetage",testmeals:"Plats témoins",clean:"Nettoyage",pests:"Nuisibles",training:"Formation",registre:"Registre HACCP",gbph:"Guide des bonnes pratiques",recipes:"Recettes",margins:"Marges",planning:"Planning",tasks:"Mise en place",more:"Plus",settings:"Paramètres"};
 const ROOT_PAGES=["home","haccp","recipes","tasks","more"];
-const HACCP_PAGES=["temps","reception","cooling","reheating","oils","trace","labels","testmeals","clean","pests","training","registre"];
+const HACCP_PAGES=["temps","reception","cooling","reheating","oils","trace","labels","testmeals","clean","pests","training","registre","gbph"];
 const MORE_PAGES=["margins","planning","settings"];
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2566,7 +2882,8 @@ export default function App(){
     return ()=>{ stopped=true; try{rec&&rec.stop();}catch{} };
   },[wakeEnabled,voiceOpen]);
 
-  const go=k=>{setPage(k);setProfile(false);};
+  const[gbphSection,setGbphSection]=useState(null);
+  const go=(k,opts)=>{ if(opts?.section)setGbphSection(opts.section); setPage(k); setProfile(false); };
   const logout=()=>{setUser(null);setPage("home");};
 
   if(!data)return(
@@ -2601,7 +2918,7 @@ export default function App(){
     oils:<Oils {...props}/>,trace:<Traceability {...props}/>,
     labels:<Labels {...props}/>,testmeals:<TestMeals {...props}/>,
     clean:<Cleaning {...props}/>,pests:<Pests {...props}/>,
-    training:<Training data={data}/>,registre:<Registre data={data}/>,
+    training:<Training data={data}/>,registre:<Registre data={data}/>,gbph:<GbphGuide initialSection={gbphSection}/>,
     recipes:<Recipes data={data} setData={setData} db={DB} reload={reload}/>,
     margins:<Margins data={data}/>,planning:<Planning {...props}/>,
     tasks:<Tasks data={data} setData={setData} db={DB} reload={reload}/>,
