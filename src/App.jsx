@@ -1324,11 +1324,11 @@ function Temperatures({data,setData,user,db,reload,go}){
   </div>);
 }
 
-function Reception({data,setData,user,db,reload}){
+function Reception({data,setData,user,db,reload,go}){
   const[show,setShow]=useState(false);const[temp,setTemp]=useState(3);const[aspect,setAspect]=useState("OK");const[emb,setEmb]=useState("OK");
   const[form,setForm]=useState({supplier:"",product:"",qty:"",dlc:"",lot:""});
   async function save(){if(!form.product)return;await db.addReception({date:todayStr(),supplier:form.supplier,product:form.product,qty:form.qty,dlc:form.dlc,lot:form.lot,temp,tempOk:temp<=4,aspect,emballage:emb,signed:user.name});await reload();setShow(false);setTemp(3);setAspect("OK");setEmb("OK");setForm({supplier:"",product:"",qty:"",dlc:"",lot:""});}
-  return(<div className="page"><div className="section-title">Réception</div><div className="section-sub">Contrôle de chaque livraison</div>
+  return(<div className="page"><GbphHelpButton section="trace" go={go}/><div className="section-title">Réception</div><div className="section-sub">Contrôle de chaque livraison</div>
     {data.reception.length===0 && (
       <div className="empty">
         <div className="empty-icon">🚚</div>
@@ -1361,7 +1361,7 @@ const CELL_MODES = {
   refroid: { key:"refroid", label:"Refroidissement", icon:"❄️", sub:"63°C → 10°C à cœur", targetEnd:10, startCenter:65, endCenter:8, dlcMonths:0 },
   surgel:  { key:"surgel",  label:"Surgélation",     icon:"🧊", sub:"jusqu'à −18°C à cœur", targetEnd:-18, startCenter:65, endCenter:-18, dlcMonths:6 },
 };
-function Cooling({data,setData,user,db,reload}){
+function Cooling({data,setData,user,db,reload,go}){
   const[show,setShow]=useState(false);const[step,setStep]=useState(0);
   const[mode,setMode]=useState("refroid");
   const[form,setForm]=useState({product:"",qty:""});const[startTemp,setStartTemp]=useState(65);const[endTemp,setEndTemp]=useState(8);
@@ -1378,8 +1378,10 @@ function Cooling({data,setData,user,db,reload}){
       ? (()=>{const d=new Date();d.setMonth(d.getMonth()+M.dlcMonths);return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"2-digit"});})()
       : new Date(Date.now()+data.haccpSettings.labelDlcDefault*86400000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
     if(activeCoolingId)await db.finishCooling(activeCoolingId,{endTemp,duration:dur,status,dlc,mode});await reload();setShow(false);setStep(0);setMode("refroid");setStartMs(null);setElapsed(0);setStartTemp(65);setEndTemp(8);setForm({product:"",qty:""});setActiveCoolingId(null);}
-  return(<div className="page"><div className="section-title">Cellule</div><div className="section-sub">Refroidissement & surgélation</div>
-    {data.cooling.filter(c=>c.status!=="active").map(c=>{const cm=CELL_MODES[c.mode||"refroid"];const okTemp=(c.mode==="surgel")?c.endTemp<=-18:c.endTemp<=10;return(<div key={c.id} className="card">
+  const coolingDone=data.cooling.filter(c=>c.status!=="active");
+  return(<div className="page"><GbphHelpButton section="temp" go={go}/><div className="section-title">Cellule</div><div className="section-sub">Refroidissement & surgélation</div>
+    {coolingDone.length===0 && <div className="empty"><div className="empty-icon">❄️</div><div className="empty-title">Aucun passage en cellule</div><div className="empty-sub">Lance un refroidissement ou une surgélation avec le bouton +</div></div>}
+    {coolingDone.map(c=>{const cm=CELL_MODES[c.mode||"refroid"];const okTemp=(c.mode==="surgel")?c.endTemp<=-18:c.endTemp<=10;return(<div key={c.id} className="card">
       <div className="between mb6"><div><div className="item-title">{cm.icon} {c.product}</div><div className="item-sub">{cm.label} · {c.qty} · {c.date}</div></div><span className={`badge ${c.status==="ok"?"b-good":"b-bad"}`}>{c.status==="ok"?"✓ OK":"⚠"}</span></div>
       <div className="row gap12" style={{flexWrap:"wrap"}}><div><div className="text-xs text-dim">Départ</div><div className="text-sm fw7 tabular">{c.startTemp}°C</div></div><div><div className="text-xs text-dim">Arrivée</div><div className="text-sm fw7 tabular" style={{color:okTemp?T.good:T.bad}}>{c.endTemp}°C</div></div><div><div className="text-xs text-dim">Durée</div><div className="text-sm fw7 tabular" style={{color:c.duration<=maxMin?T.good:T.bad}}>{c.duration} min</div></div></div>
       <div className="text-xs text-dim mt6">DLC : {c.dlc} · {c.operator}</div>
@@ -1425,11 +1427,12 @@ function Cooling({data,setData,user,db,reload}){
   </div>);
 }
 
-function Reheating({data,setData,user,db,reload}){
+function Reheating({data,setData,user,db,reload,go}){
   const[show,setShow]=useState(false);const[form,setForm]=useState({product:""});const[endTemp,setEndTemp]=useState(65);const[duration,setDuration]=useState(30);
   const{reheatMin,reheatMaxTime}=data.haccpSettings;
   async function save(){if(!form.product)return;const status=endTemp>=reheatMin&&duration<=reheatMaxTime?"ok":"alert";await db.addReheating({product:form.product,endTemp,duration,operator:user.name,status,date:todayStr()});await reload();setShow(false);setForm({product:""});setEndTemp(65);setDuration(30);}
-  return(<div className="page"><div className="section-title">Remise en T°</div><div className="section-sub">≥ {reheatMin}°C en moins de {reheatMaxTime} min</div>
+  return(<div className="page"><GbphHelpButton section="temp" go={go}/><div className="section-title">Remise en T°</div><div className="section-sub">≥ {reheatMin}°C en moins de {reheatMaxTime} min</div>
+    {data.reheating.length===0 && <div className="empty"><div className="empty-icon">🔥</div><div className="empty-title">Aucune remise en température</div><div className="empty-sub">Enregistre ta prochaine remise en T° avec le bouton +</div></div>}
     {data.reheating.map(r=><div key={r.id} className="card">
       <div className="between mb6"><div><div className="item-title">{r.product}</div><div className="item-sub">{r.date} · {r.operator}</div></div><span className={`badge ${r.status==="ok"?"b-good":"b-bad"}`}>{r.status==="ok"?"✓":"⚠"}</span></div>
       <div className="row gap12" style={{flexWrap:"wrap"}}><div><div className="text-xs text-dim">T° finale</div><div className="text-sm fw7 tabular" style={{color:r.endTemp>=reheatMin?T.good:T.bad}}>{r.endTemp}°C</div></div><div><div className="text-xs text-dim">Durée</div><div className="text-sm fw7 tabular" style={{color:r.duration<=reheatMaxTime?T.good:T.bad}}>{r.duration} min</div></div></div>
@@ -1514,14 +1517,14 @@ function Oils({data,setData,user,db,reload,go}){
   </div>);
 }
 
-function Traceability({data,setData,db,reload}){
+function Traceability({data,setData,db,reload,go}){
   const[show,setShow]=useState(false);const[scanning,setScanning]=useState(false);const[scanOk,setScanOk]=useState(false);const[scanErr,setScanErr]=useState("");
   const[filter,setFilter]=useState("all");
   const[form,setForm]=useState({product:"",supplier:"",lot:"",dlc:"",qty:"",allergenes:""});
   async function handleScan(e){const file=e.target.files[0];if(!file)return;setScanning(true);setScanOk(false);setScanErr("");const reader=new FileReader();reader.onload=async(ev)=>{const b64=ev.target.result.split(",")[1];try{const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:file.type,data:b64}},{type:"text",text:"Analyse cette etiquette alimentaire. Reponds UNIQUEMENT avec ce JSON : {\"product\":\"\",\"supplier\":\"\",\"lot\":\"\",\"dlc\":\"YYYY-MM-DD\",\"qty\":\"\",\"allergenes\":[]}"}]}]})});const d=await res.json();const raw=d.content&&d.content[0]&&d.content[0].text?d.content[0].text:"{}";const p=JSON.parse(raw.replace(/```json/g,"").replace(/```/g,"").trim());setForm({product:p.product||"",supplier:p.supplier||"",lot:p.lot||"",dlc:p.dlc||"",qty:p.qty||"",allergenes:(p.allergenes||[]).join(", ")});setScanOk(true);}catch{setScanErr("Analyse impossible — remplir manuellement.");}setScanning(false);};reader.readAsDataURL(file);}
   async function save(){if(!form.product)return;await db.addTraceability({product:form.product,emoji:"📦",supplier:form.supplier,lot:form.lot,dlc:form.dlc,qty:form.qty,allergenes:form.allergenes?form.allergenes.split(",").map(a=>a.trim()).filter(Boolean):[],status:"ok"});await reload();setShow(false);setScanOk(false);setScanErr("");setForm({product:"",supplier:"",lot:"",dlc:"",qty:"",allergenes:""});}
   const filtered=filter==="all"?data.traceability:filter==="alerts"?data.traceability.filter(t=>t.status!=="ok"):data.traceability.filter(t=>t.status==="ok");
-  return(<div className="page"><div className="section-title">Traçabilité</div><div className="section-sub">{data.traceability.length} produits</div>
+  return(<div className="page"><GbphHelpButton section="trace" go={go}/><div className="section-title">Traçabilité</div><div className="section-sub">{data.traceability.length} produits</div>
     <SegmentedControl value={filter} onChange={setFilter} options={[{value:"all",label:"Tous"},{value:"alerts",label:"⚠ Alertes"},{value:"ok",label:"✓ OK"}]}/>
     <div style={{height:14}}></div>
     {filtered.length===0?<div className="empty"><div className="empty-icon">✓</div><div className="empty-title">Tout est en ordre</div></div>:filtered.map(t=><div key={t.id} className="item"><div className="item-icon" style={{background:t.status==="expired"?T.badBg:t.status==="warn"?T.warnBg:T.infoBg}}>{t.emoji}</div><div className="item-body"><div className="item-title">{t.product}</div><div className="item-sub">{t.supplier} · DLC {t.dlc}</div></div><span className={`badge ${t.status==="ok"?"b-good":t.status==="warn"?"b-warn":"b-bad"}`}>{t.status==="ok"?"OK":t.status==="warn"?"Proche":"Expiré"}</span></div>)}
@@ -1892,11 +1895,12 @@ function Labels({data,setData,user,db,reload,go}){
   </div>);
 }
 
-function TestMeals({data,setData,user,db,reload}){
+function TestMeals({data,setData,user,db,reload,go}){
   const[show,setShow]=useState(false);const[form,setForm]=useState({product:"",service:"Midi",qty:"100 g"});
   const days=data.haccpSettings.testMealDays;
   async function save(){const destroy=new Date(Date.now()+days*86400000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});await db.addTestMeal({date:todayStr(),product:form.product,service:form.service,qty:form.qty,destroyAt:destroy,operator:user.name});await reload();setShow(false);setForm({product:"",service:"Midi",qty:"100 g"});}
-  return(<div className="page"><div className="section-title">Plats témoins</div><div className="section-sub">Conservation {days} jours à ≤ 3°C</div>
+  return(<div className="page"><GbphHelpButton section="dlc" go={go}/><div className="section-title">Plats témoins</div><div className="section-sub">Conservation {days} jours à ≤ 3°C</div>
+    {data.testMeals.length===0 && <div className="empty"><div className="empty-icon">🧪</div><div className="empty-title">Aucun plat témoin</div><div className="empty-sub">Prélève un échantillon avec le bouton +</div></div>}
     {data.testMeals.map(m=>{const expired=new Date(m.destroyAt.split("/").reverse().join("-"))<new Date();return(<div key={m.id} className="card"><div className="between mb6"><div><div className="item-title">{m.product}</div><div className="item-sub">{m.service} · {m.qty}</div></div><span className={`badge ${expired?"b-bad":"b-good"}`}>{expired?"À jeter":"OK"}</span></div><div className="text-xs text-dim">Prélevé {m.date} · Détruire le <b style={{color:T.text}}>{m.destroyAt}</b></div></div>);})}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
@@ -1908,10 +1912,11 @@ function TestMeals({data,setData,user,db,reload}){
   </div>);
 }
 
-function Pests({data,setData,db,reload}){
+function Pests({data,setData,db,reload,go}){
   const[show,setShow]=useState(false);const[form,setForm]=useState({type:"Visite contrat",company:"",result:"RAS",nextVisit:""});
   async function save(){await db.addPest({date:todayStr(),type:form.type,company:form.company,result:form.result,nextVisit:form.nextVisit});await reload();setShow(false);setForm({type:"Visite contrat",company:"",result:"RAS",nextVisit:""});}
-  return(<div className="page"><div className="section-title">Nuisibles</div><div className="section-sub">Plan de lutte 3D</div>
+  return(<div className="page"><GbphHelpButton section="pest" go={go}/><div className="section-title">Nuisibles</div><div className="section-sub">Plan de lutte 3D</div>
+    {data.pests.length===0 && <div className="empty"><div className="empty-icon">🐀</div><div className="empty-title">Aucune intervention</div><div className="empty-sub">Enregistre une visite ou une observation avec le bouton +</div></div>}
     {data.pests.map(p=><div key={p.id} className="card"><div className="between mb6"><div><div className="item-title">{p.type}</div><div className="item-sub">{p.company}</div></div><span className={`badge ${p.result==="RAS"?"b-good":"b-warn"}`}>{p.result}</span></div><div className="text-xs text-dim">Visite : {p.date} · Prochaine : {p.nextVisit}</div></div>)}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
@@ -1925,8 +1930,8 @@ function Pests({data,setData,db,reload}){
   </div>);
 }
 
-function Training({data}){
-  return(<div className="page"><div className="section-title">Formation HACCP</div><div className="section-sub">Attestations et visas</div>
+function Training({data,go}){
+  return(<div className="page"><GbphHelpButton section="hygiene" go={go}/><div className="section-title">Formation HACCP</div><div className="section-sub">Attestations et visas</div>
     {data.training.map(t=>{const hOk=new Date(t.haccpExp.split("/").reverse().join("-"))>=new Date();const vOk=new Date(t.visaExp.split("/").reverse().join("-"))>=new Date();return(<div key={t.id} className="card"><div className="item-title mb8">{t.name} <span className="text-xs text-dim">· {t.role}</span></div><div className="between mb6"><span className="text-sm">🎓 HACCP</span><span className={`badge ${hOk?"b-good":"b-bad"}`}>{hOk?"Valide":"Expirée"} · {t.haccpExp}</span></div><div className="between"><span className="text-sm">🩺 Visite médicale</span><span className={`badge ${vOk?"b-good":"b-bad"}`}>{vOk?"Valide":"Expirée"} · {t.visaExp}</span></div></div>);})}
   </div>);
 }
@@ -2070,6 +2075,7 @@ function Recipes({data,setData,db,reload}){
   return(<div className="page"><div className="section-title">Fiches techniques</div><div className="section-sub">{allRecipes.filter(r=>r.type==="plat").length} plats · {allRecipes.filter(r=>r.type==="mere").length} mères</div>
     <SegmentedControl value={typeFilter} onChange={setTypeFilter} options={[{value:"all",label:"Tous"},{value:"plat",label:"Plats"},{value:"mere",label:"Mères"}]}/>
     <div style={{height:14}}></div>
+    {filtered.length===0 && <div className="empty"><div className="empty-icon">📖</div><div className="empty-title">Aucune fiche</div><div className="empty-sub">Crée ta première recette avec le bouton +</div></div>}
     {filtered.map(rec=>{const cost=recipeCostPerPortion(rec,allRecipes);const m=recipeMargin(rec,allRecipes);return(<div key={rec.id} className="item" onClick={()=>{setSel(rec.id);setView("detail");}}><div className="item-icon" style={{background:rec.type==="mere"?T.warnBg:T.infoBg}}>{rec.emoji}</div><div className="item-body"><div className="item-title">{rec.name}</div><div className="item-sub">{rec.type==="mere"?<>🧪 Mère · {rec.yield?.qty||0} {rec.yield?.unit||"u"} · {cost.toFixed(2)}€/{rec.yield?.unit||"u"}</>:<>{rec.category} · {rec.price} €</>}</div></div>{rec.type==="plat"?<span className={`badge ${m>=70?"b-good":m>=50?"b-info":"b-bad"}`}>{m}%</span>:<span className="badge b-warn">Base</span>}</div>);})}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>{setSel(null);setView("edit");}}>+</button></div>
   </div>);
@@ -2979,7 +2985,7 @@ export default function App(){
     oils:<Oils {...props}/>,trace:<Traceability {...props}/>,
     labels:<Labels {...props}/>,testmeals:<TestMeals {...props}/>,
     clean:<Cleaning {...props}/>,pests:<Pests {...props}/>,
-    training:<Training data={data}/>,registre:<Registre data={data}/>,gbph:<GbphGuide initialSection={gbphSection}/>,
+    training:<Training data={data} go={go}/>,registre:<Registre data={data}/>,gbph:<GbphGuide initialSection={gbphSection}/>,
     recipes:<Recipes data={data} setData={setData} db={DB} reload={reload}/>,
     margins:<Margins data={data}/>,planning:<Planning {...props}/>,
     tasks:<Tasks data={data} setData={setData} db={DB} reload={reload}/>,
