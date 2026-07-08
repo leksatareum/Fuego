@@ -856,14 +856,20 @@ function SplashScreen(){
 
 function Login({users,onLogin}){
   const[sel,setSel]=useState(null);const[pin,setPin]=useState("");const[err,setErr]=useState("");const[shake,setShake]=useState(false);
+  const selUser=users.find(u=>u.id===sel);
   function tryLogin(){const u=users.find(u=>u.id===sel);if(u&&u.pin===pin){haptic(15);onLogin(u);}else{haptic(30);setErr("PIN incorrect");setPin("");setShake(true);setTimeout(()=>setShake(false),450);}}
+  // Validation automatique dès que le PIN atteint la longueur du code attendu —
+  // évite d'avoir à taper "Connexion" en plus sur mobile.
+  useEffect(()=>{
+    if(selUser && pin.length===selUser.pin.length && pin.length>=4){ tryLogin(); }
+  },[pin]);
   return(<div className="login-screen">
     <div className="fade-up" style={{marginBottom:14,display:"flex",justifyContent:"center"}}><FuegoBrand height={104}/></div>
     <div className="login-logo fade-up fade-up-1"><FuegoLogo size="login"/></div>
     <div className="login-tagline fade-up fade-up-2">Le système d'exploitation de votre restaurant</div>
     <div className="login-body fade-up fade-up-3">
     {!sel?<><p className="login-prompt">Qui êtes-vous ?</p>{users.map(u=><button key={u.id} className="role-btn" onClick={()=>setSel(u.id)}><div className="between"><div><div className="role-btn-name">{u.name}</div><div className="role-btn-sub">{u.role}</div></div><span className={`role-badge ${u.isAdmin?"rb-admin":"rb-staff"}`}>{u.isAdmin?"Admin":"Équipe"}</span></div></button>)}</>
-    :<><p className="login-prompt">Code PIN pour <b style={{color:T.text}}>{users.find(u=>u.id===sel)?.name}</b></p><div className="field"><input className={`input ${shake?"input-shake":""}`} type="password" inputMode="numeric" maxLength={6} value={pin} onChange={e=>{setPin(e.target.value);setErr("");}} onKeyDown={e=>e.key==="Enter"&&pin.length>=4&&tryLogin()} placeholder="●●●●" style={{textAlign:"center",fontSize:30,letterSpacing:10,borderColor:shake?T.bad:undefined}}/></div>{err&&<p style={{color:T.bad,fontSize:12,marginBottom:10,textAlign:"center"}}>{err}</p>}<button className="btn btn-primary mb8" onClick={tryLogin} disabled={pin.length<4}>Connexion</button><button className="btn btn-ghost" onClick={()=>{setSel(null);setPin("");setErr("");}}>← Retour</button></>}
+    :<><p className="login-prompt">Code PIN pour <b style={{color:T.text}}>{users.find(u=>u.id===sel)?.name}</b></p><div className="field"><input className={`input ${shake?"input-shake":""}`} type="password" inputMode="numeric" maxLength={6} value={pin} autoFocus onChange={e=>{setPin(e.target.value.replace(/\D/g,""));setErr("");}} onKeyDown={e=>e.key==="Enter"&&pin.length>=4&&tryLogin()} placeholder="●●●●" style={{textAlign:"center",fontSize:30,letterSpacing:10,borderColor:shake?T.bad:undefined}}/></div>{err&&<p style={{color:T.bad,fontSize:12,marginBottom:10,textAlign:"center"}}>{err}</p>}<button className="btn btn-ghost" onClick={()=>{setSel(null);setPin("");setErr("");}}>← Retour</button></>}
   </div></div>);
 }
 
@@ -2415,12 +2421,14 @@ function Planning({data,user,db,reload}){
 
         <div className="bucket-label">Créneaux — {DAYS[dayIdx]} {days[dayIdx].getDate()}</div>
         {dayShifts.length===0&&<div className="empty"><div className="empty-icon">📅</div><div className="empty-title">Aucun créneau</div><div className="empty-sub">{isAdmin?"Ajoutez les horaires de l'équipe":"Aucun membre planifié ce jour"}</div></div>}
-        {dayShifts.map(s=>{const u=users.find(x=>x.id===s.userId);return(
-          <div key={s.id} className="item" onClick={()=>isAdmin&&openEdit(s)}>
+        {dayShifts.map(s=>{const u=users.find(x=>x.id===s.userId);const row=(
+          <div className="item" style={{marginBottom:0}} onClick={()=>isAdmin&&openEdit(s)}>
             <div className="item-icon" style={{background:T.infoBg,fontWeight:700,fontSize:14}}>{u?.initials||"?"}</div>
             <div className="item-body"><div className="item-title">{u?.name||"Inconnu"}</div><div className="item-sub">{u?.role||""}</div></div>
             <span className="badge b-info tabular">{s.start} – {s.end}</span>
-          </div>);})}
+          </div>);
+          return(<SwipeToDelete key={s.id} enabled={isAdmin} confirmLabel={`Supprimer le créneau de ${u?.name||"ce membre"} (${s.start}–${s.end}) ?`} onDelete={async()=>{await db.deleteShift(s.id);await reload();}}>{row}</SwipeToDelete>);
+        })}
       </>
     )}
 
