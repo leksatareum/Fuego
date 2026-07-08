@@ -131,6 +131,8 @@ const DB = {
   async startCooling(c){return sbPost("cooling",{product:c.product,qty:c.qty,start_temp:c.startTemp,started_ms:c.startedMs,status:"active",operator:c.operator,date:c.date});},
   async finishCooling(id,{endTemp,duration,status,dlc}){return sbPatch("cooling",{end_temp:endTemp,duration,started_ms:null,status,dlc},qs(`id=eq.${id}`));},
   async addReheating(r){return sbPost("reheating",{product:r.product,end_temp:r.endTemp,duration:r.duration,operator:r.operator,status:r.status,date:r.date});},
+  async addOil(o){return sbPost("oils",{name:o.name,type:o.type,date_install:todayStr(),last_test:todayStr(),polaires:0,operator:o.operator});},
+  async deleteOil(id){return sbDelete("oils",qs(`id=eq.${id}`));},
   async updateOil(id,{polaires,operator,changed,dateInstall}){
     const body={polaires,operator,last_test:todayStr()};
     if(changed)body.date_install=dateInstall;
@@ -861,6 +863,7 @@ function Aujourdhui({data,go,user}){
 
     <div className="bucket-label" style={{marginTop:18}}><span className="bucket-label-dot" style={{background:T.textMute}}></span>Accès rapide</div>
     <div className="tiles">
+      <div className="tile" onClick={()=>go("labels")}><div className="tile-icon">🏷️</div><div className="tile-label">Étiquetage</div><div className="tile-value tabular">{data.labels.length}</div></div>
       <div className="tile" onClick={()=>go("temps")}><div className="tile-icon">🌡️</div><div className="tile-label">Températures</div><div className="tile-value tabular">{matinDone+soirDone}/{totalFridges*2}</div></div>
       <div className="tile" onClick={()=>go("trace")}><div className="tile-icon">📦</div><div className="tile-label">Traçabilité</div><div className="tile-value tabular">{data.traceability.length}</div></div>
       <div className="tile" onClick={()=>go("tasks")}><div className="tile-icon">✅</div><div className="tile-label">Mise en place</div><div className="tile-value tabular">{tasksDone}/{tasksTotal}</div></div>
@@ -1326,6 +1329,13 @@ function Reception({data,setData,user,db,reload}){
   const[form,setForm]=useState({supplier:"",product:"",qty:"",dlc:"",lot:""});
   async function save(){if(!form.product)return;await db.addReception({date:todayStr(),supplier:form.supplier,product:form.product,qty:form.qty,dlc:form.dlc,lot:form.lot,temp,tempOk:temp<=4,aspect,emballage:emb,signed:user.name});await reload();setShow(false);setTemp(3);setAspect("OK");setEmb("OK");setForm({supplier:"",product:"",qty:"",dlc:"",lot:""});}
   return(<div className="page"><div className="section-title">Réception</div><div className="section-sub">Contrôle de chaque livraison</div>
+    {data.reception.length===0 && (
+      <div className="empty">
+        <div className="empty-icon">🚚</div>
+        <div className="empty-title">Aucune réception</div>
+        <div className="empty-sub">Enregistre ta prochaine livraison avec le bouton +</div>
+      </div>
+    )}
     {data.reception.map(r=><div key={r.id} className="card">
       <div className="between mb6"><div><div className="item-title">{r.product}</div><div className="item-sub">{r.supplier} · {r.qty}</div></div><span className={`badge ${r.tempOk?"b-good":"b-bad"} tabular`}>{r.temp}°C</span></div>
       <div className="row gap6 mb6" style={{flexWrap:"wrap"}}><span className={`badge ${r.aspect==="OK"?"b-good":"b-bad"}`}>Aspect {r.aspect}</span><span className={`badge ${r.emballage==="OK"?"b-good":"b-bad"}`}>Emb. {r.emballage}</span><span className="badge b-mute">{r.signed}</span></div>
@@ -1436,21 +1446,71 @@ function Reheating({data,setData,user,db,reload}){
   </div>);
 }
 
-function Oils({data,setData,user,db,reload}){
+function Oils({data,setData,user,db,reload,go}){
   const[selOil,setSelOil]=useState(null);const[polaires,setPolaires]=useState(15);const[action,setAction]=useState("filtered");
+  const[showAdd,setShowAdd]=useState(false);const[newOil,setNewOil]=useState({name:"",type:"Tournesol"});
   const max=data.haccpSettings.oilPolarMax;
+
   async function save(){await db.updateOil(selOil.id,{polaires,operator:user.name,changed:action==="changed",dateInstall:todayStr()});await reload();setSelOil(null);setPolaires(15);setAction("filtered");}
-  return(<div className="page"><div className="section-title">Huiles de friture</div><div className="section-sub">Polaires — seuil légal : {max}%</div>
-    {data.oils.map(o=>{const danger=o.polaires>=max;const warn=o.polaires>=max-5&&!danger;return(<div key={o.id} className="card">
-      <div className="between mb10"><div><div className="item-title">{o.name}</div><div className="item-sub">Huile {o.type} · depuis {o.dateInstall}</div></div><div style={{textAlign:"right"}}><div className="tabular" style={{fontFamily:"'Inter',sans-serif",letterSpacing:"-.03em",fontSize:28,fontWeight:700,lineHeight:1,color:danger?T.bad:warn?T.warn:T.good}}>{o.polaires}%</div><div className="text-xs text-dim">polaires</div></div></div>
-      <div className="pbar mb10"><div className="pfill" style={{width:`${safePct(o.polaires,max)}%`,background:danger?T.bad:warn?T.warn:T.good}}></div></div>
-      <div className="row gap6 mb10"><span className={`badge ${danger?"b-bad":warn?"b-warn":"b-good"}`}>{danger?"🚨 Changer":warn?"⚠ Surveiller":"✓ OK"}</span><span className="badge b-mute">Test {o.lastTest}</span></div>
-      {selOil?.id===o.id?<>
-        <div className="field"><label className="label">Composés polaires</label><TapDial value={polaires} onChange={setPolaires} center={15} step={2} colorFn={v=>v<max-5?"good":v<max?"warn":"bad"} format={v=>`${v}%`}/></div>
-        <div className="field"><label className="label">Action</label><SegmentedControl value={action} onChange={setAction} options={[{value:"none",label:"Aucune"},{value:"filtered",label:"Filtrée"},{value:"changed",label:"Changée"}]}/></div>
-        <div className="row gap6 mt8"><button className="btn btn-ghost btn-sm" style={{flex:1}} onClick={()=>setSelOil(null)}>Annuler</button><button className="btn btn-primary btn-sm" style={{flex:2}} onClick={save}>Enregistrer</button></div>
-      </>:<button className="btn btn-primary btn-sm" onClick={()=>{setSelOil(o);setPolaires(15);setAction("filtered");}}>+ Nouveau test</button>}
-    </div>);})}
+
+  async function addOil(){
+    if(!newOil.name.trim())return;
+    await db.addOil({name:newOil.name.trim(),type:newOil.type,operator:user.name});
+    await reload();setShowAdd(false);setNewOil({name:"",type:"Tournesol"});
+  }
+
+  async function removeOil(o){
+    if(!window.confirm(`Retirer "${o.name}" du suivi des huiles ?`))return;
+    await db.deleteOil(o.id);await reload();
+  }
+
+  return(<div className="page">
+    <GbphHelpButton section="temp" go={go}/>
+    <div className="section-title">Huiles de friture</div>
+    <div className="section-sub">Polaires — seuil légal : {max}%</div>
+
+    {data.oils.length===0 ? (
+      <div className="empty">
+        <div className="empty-icon">🍟</div>
+        <div className="empty-title">Aucune friteuse suivie</div>
+        <div className="empty-sub">Ajoute tes friteuses pour commencer le suivi des huiles</div>
+        <button className="btn btn-primary mt14" onClick={()=>setShowAdd(true)} style={{maxWidth:220}}>+ Ajouter une friteuse</button>
+      </div>
+    ) : (
+      <>
+        {data.oils.map(o=>{const danger=o.polaires>=max;const warn=o.polaires>=max-5&&!danger;return(<div key={o.id} className="card">
+          <div className="between mb10">
+            <div><div className="item-title">{o.name}</div><div className="item-sub">Huile {o.type} · depuis {o.dateInstall}</div></div>
+            <div style={{textAlign:"right"}}><div className="tabular" style={{fontFamily:"'Inter',sans-serif",letterSpacing:"-.03em",fontSize:28,fontWeight:700,lineHeight:1,color:danger?T.bad:warn?T.warn:T.good}}>{o.polaires}%</div><div className="text-xs text-dim">polaires</div></div>
+          </div>
+          <div className="pbar mb10"><div className="pfill" style={{width:`${safePct(o.polaires,max)}%`,background:danger?T.bad:warn?T.warn:T.good}}></div></div>
+          <div className="row gap6 mb10"><span className={`badge ${danger?"b-bad":warn?"b-warn":"b-good"}`}>{danger?"🚨 Changer":warn?"⚠ Surveiller":"✓ OK"}</span><span className="badge b-mute">Test {o.lastTest}</span></div>
+          {selOil?.id===o.id?<>
+            <div className="field"><label className="label">Composés polaires</label><TapDial value={polaires} onChange={setPolaires} center={15} step={2} colorFn={v=>v<max-5?"good":v<max?"warn":"bad"} format={v=>`${v}%`}/></div>
+            <div className="field"><label className="label">Action</label><SegmentedControl value={action} onChange={setAction} options={[{value:"none",label:"Aucune"},{value:"filtered",label:"Filtrée"},{value:"changed",label:"Changée"}]}/></div>
+            <div className="row gap6 mt8"><button className="btn btn-ghost btn-sm" style={{flex:1}} onClick={()=>setSelOil(null)}>Annuler</button><button className="btn btn-primary btn-sm" style={{flex:2}} onClick={save}>Enregistrer</button></div>
+          </>:(
+            <div className="row gap6">
+              <button className="btn btn-primary btn-sm" style={{flex:1}} onClick={()=>{setSelOil(o);setPolaires(15);setAction("filtered");}}>+ Nouveau test</button>
+              <button className="btn btn-ghost btn-sm" style={{flex:"0 0 auto",width:40,color:T.bad}} onClick={()=>removeOil(o)}>🗑</button>
+            </div>
+          )}
+        </div>);})}
+        <button className="btn btn-ghost mt8" onClick={()=>setShowAdd(true)}>+ Ajouter une autre friteuse</button>
+      </>
+    )}
+
+    {showAdd&&<div className="overlay" onClick={()=>setShowAdd(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
+      <div className="sheet-handle"></div>
+      <div className="sheet-title">Nouvelle friteuse</div>
+      <div className="field"><label className="label">Nom</label><input className="input" value={newOil.name} onChange={e=>setNewOil({...newOil,name:e.target.value})} placeholder="ex : Friteuse 1 — Frites" autoFocus/></div>
+      <div className="field"><label className="label">Type d'huile</label>
+        <QuickPick value={newOil.type} onChange={v=>setNewOil({...newOil,type:v})} options={[
+          {value:"Tournesol",label:"Tournesol"},{value:"Arachide",label:"Arachide"},{value:"Colza",label:"Colza"},{value:"Spéciale friture",label:"Spéciale friture"},
+        ]}/>
+      </div>
+      <button className="btn btn-primary mt8" onClick={addOil} disabled={!newOil.name.trim()}>Ajouter</button>
+    </div></div>}
   </div>);
 }
 
