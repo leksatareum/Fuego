@@ -480,6 +480,13 @@ function SwipeToDelete({enabled,onDelete,confirmLabel="Supprimer ?",children}){
 
   closeSelf.current=()=>setDragX(0);
 
+  // Nettoyage : si ce composant est démonté (changement d'écran) pendant qu'il
+  // était la carte ouverte, on retire sa référence du registre global pour ne
+  // jamais appeler une fonction fantôme depuis un composant qui n'existe plus.
+  useEffect(()=>{
+    return ()=>{ if(_swipeOpenRegistry.current===closeSelf.current) _swipeOpenRegistry.current=null; };
+  },[]);
+
   if(!enabled) return children;
 
   function onTouchStart(e){
@@ -849,7 +856,7 @@ function SplashScreen(){
       .splash-wrap{animation:splashFade 300ms ease-out;}
     `}</style>
     <div className="splash-wrap" style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
-      <img className="splash-flame" src="/fuego-logo.png" alt="Fuego" style={{height:96,objectFit:"contain"}}/>
+      <img className="splash-flame" src="/fuego-logo.png" alt="Fuego" style={{height:180,objectFit:"contain"}}/>
     </div>
   </div>);
 }
@@ -1429,7 +1436,13 @@ function HaccpHub({data,go}){
 function Temperatures({data,setData,user,db,reload,go}){
   const[editing,setEditing]=useState(null);const[pickedTemp,setPickedTemp]=useState(null);
   function openSlot(f,p){const e=getReleve(data,f.id,p);setEditing({fridge:f,period:p});setPickedTemp(e?e.temp:tempCenter(f.target));}
-  async function save(){if(!editing||pickedTemp===null)return;const date=todayStr();await db.saveReleve({fridgeId:editing.fridge.id,date,period:editing.period,temp:pickedTemp,time:nowTime(),operatorId:user.id});await reload();setEditing(null);setPickedTemp(null);}
+  async function save(){
+    if(!editing||pickedTemp===null)return;
+    const date=todayStr();
+    const res=await db.saveReleve({fridgeId:editing.fridge.id,date,period:editing.period,temp:pickedTemp,time:nowTime(),operatorId:user.id});
+    if(res?.error){alert("Le relevé n'a pas été enregistré. Vérifie la connexion Supabase.");await reload();return;}
+    await reload();setEditing(null);setPickedTemp(null);
+  }
   function cancel(){setEditing(null);setPickedTemp(null);}
   const userById=id=>data.users.find(u=>u.id===id);
   const allBad=data.haccpSettings.fridgeTargets.filter(f=>{const m=getReleve(data,f.id,"matin"),s=getReleve(data,f.id,"soir");return(m&&tempStatus(m.temp,f.target)==="bad")||(s&&tempStatus(s.temp,f.target)==="bad");});
@@ -1465,7 +1478,12 @@ function Temperatures({data,setData,user,db,reload,go}){
 function Reception({data,setData,user,db,reload,go}){
   const[show,setShow]=useState(false);const[temp,setTemp]=useState(3);const[aspect,setAspect]=useState("OK");const[emb,setEmb]=useState("OK");
   const[form,setForm]=useState({supplier:"",product:"",qty:"",dlc:"",lot:""});
-  async function save(){if(!form.product)return;await db.addReception({date:todayStr(),supplier:form.supplier,product:form.product,qty:form.qty,dlc:form.dlc,lot:form.lot,temp,tempOk:temp<=4,aspect,emballage:emb,signed:user.name});await reload();setShow(false);setTemp(3);setAspect("OK");setEmb("OK");setForm({supplier:"",product:"",qty:"",dlc:"",lot:""});}
+  async function save(){
+    if(!form.product)return;
+    const res=await db.addReception({date:todayStr(),supplier:form.supplier,product:form.product,qty:form.qty,dlc:form.dlc,lot:form.lot,temp,tempOk:temp<=4,aspect,emballage:emb,signed:user.name});
+    if(res?.error){alert("La réception n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload();return;}
+    await reload();setShow(false);setTemp(3);setAspect("OK");setEmb("OK");setForm({supplier:"",product:"",qty:"",dlc:"",lot:""});
+  }
   return(<div className="page">
     <GbphHelpButton section="trace" go={go}/>
     <div className="section-title">Réception</div><div className="section-sub">Contrôle de chaque livraison</div>
@@ -1572,7 +1590,13 @@ function Cooling({data,setData,user,db,reload,go}){
 function Reheating({data,setData,user,db,reload,go}){
   const[show,setShow]=useState(false);const[form,setForm]=useState({product:""});const[endTemp,setEndTemp]=useState(65);const[duration,setDuration]=useState(30);
   const{reheatMin,reheatMaxTime}=data.haccpSettings;
-  async function save(){if(!form.product)return;const status=endTemp>=reheatMin&&duration<=reheatMaxTime?"ok":"alert";await db.addReheating({product:form.product,endTemp,duration,operator:user.name,status,date:todayStr()});await reload();setShow(false);setForm({product:""});setEndTemp(65);setDuration(30);}
+  async function save(){
+    if(!form.product)return;
+    const status=endTemp>=reheatMin&&duration<=reheatMaxTime?"ok":"alert";
+    const res=await db.addReheating({product:form.product,endTemp,duration,operator:user.name,status,date:todayStr()});
+    if(res?.error){alert("La remise en température n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload();return;}
+    await reload();setShow(false);setForm({product:""});setEndTemp(65);setDuration(30);
+  }
   return(<div className="page">
     <GbphHelpButton section="temp" go={go}/>
     <div className="section-title">Remise en T°</div><div className="section-sub">≥ {reheatMin}°C en moins de {reheatMaxTime} min</div>
@@ -1598,7 +1622,11 @@ function Oils({data,setData,user,db,reload,go}){
   const[showAdd,setShowAdd]=useState(false);const[newOil,setNewOil]=useState({name:"",type:"Tournesol"});
   const max=data.haccpSettings.oilPolarMax;
 
-  async function save(){await db.updateOil(selOil.id,{polaires,operator:user.name,changed:action==="changed",dateInstall:todayStr()});await reload();setSelOil(null);setPolaires(15);setAction("filtered");}
+  async function save(){
+    const res=await db.updateOil(selOil.id,{polaires,operator:user.name,changed:action==="changed",dateInstall:todayStr()});
+    if(res?.error){alert("Le test n'a pas été enregistré. Vérifie la connexion Supabase.");await reload();return;}
+    await reload();setSelOil(null);setPolaires(15);setAction("filtered");
+  }
 
   async function addOil(){
     if(!newOil.name.trim())return;
@@ -1666,7 +1694,12 @@ function Traceability({data,setData,db,reload,go}){
   const[filter,setFilter]=useState("all");
   const[form,setForm]=useState({product:"",supplier:"",lot:"",dlc:"",qty:"",allergenes:""});
   async function handleScan(e){const file=e.target.files[0];if(!file)return;setScanning(true);setScanOk(false);setScanErr("");const reader=new FileReader();reader.onload=async(ev)=>{const b64=ev.target.result.split(",")[1];try{const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:file.type,data:b64}},{type:"text",text:"Analyse cette etiquette alimentaire. Reponds UNIQUEMENT avec ce JSON : {\"product\":\"\",\"supplier\":\"\",\"lot\":\"\",\"dlc\":\"YYYY-MM-DD\",\"qty\":\"\",\"allergenes\":[]}"}]}]})});const d=await res.json();const raw=d.content&&d.content[0]&&d.content[0].text?d.content[0].text:"{}";const p=JSON.parse(raw.replace(/```json/g,"").replace(/```/g,"").trim());setForm({product:p.product||"",supplier:p.supplier||"",lot:p.lot||"",dlc:p.dlc||"",qty:p.qty||"",allergenes:(p.allergenes||[]).join(", ")});setScanOk(true);}catch{setScanErr("Analyse impossible — remplir manuellement.");}setScanning(false);};reader.readAsDataURL(file);}
-  async function save(){if(!form.product)return;await db.addTraceability({product:form.product,emoji:"📦",supplier:form.supplier,lot:form.lot,dlc:form.dlc,qty:form.qty,allergenes:form.allergenes?form.allergenes.split(",").map(a=>a.trim()).filter(Boolean):[],status:"ok"});await reload();setShow(false);setScanOk(false);setScanErr("");setForm({product:"",supplier:"",lot:"",dlc:"",qty:"",allergenes:""});}
+  async function save(){
+    if(!form.product)return;
+    const res=await db.addTraceability({product:form.product,emoji:"📦",supplier:form.supplier,lot:form.lot,dlc:form.dlc,qty:form.qty,allergenes:form.allergenes?form.allergenes.split(",").map(a=>a.trim()).filter(Boolean):[],status:"ok"});
+    if(res?.error){alert("Le produit n'a pas été enregistré. Vérifie la connexion Supabase.");await reload();return;}
+    await reload();setShow(false);setScanOk(false);setScanErr("");setForm({product:"",supplier:"",lot:"",dlc:"",qty:"",allergenes:""});
+  }
   const filtered=filter==="all"?data.traceability:filter==="alerts"?data.traceability.filter(t=>t.status!=="ok"):data.traceability.filter(t=>t.status==="ok");
   return(<div className="page">
     <GbphHelpButton section="trace" go={go}/>
@@ -2044,7 +2077,12 @@ function Labels({data,setData,user,db,reload,go}){
 function TestMeals({data,setData,user,db,reload,go}){
   const[show,setShow]=useState(false);const[form,setForm]=useState({product:"",service:"Midi",qty:"100 g"});
   const days=data.haccpSettings.testMealDays;
-  async function save(){const destroy=new Date(Date.now()+days*86400000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});await db.addTestMeal({date:todayStr(),product:form.product,service:form.service,qty:form.qty,destroyAt:destroy,operator:user.name});await reload();setShow(false);setForm({product:"",service:"Midi",qty:"100 g"});}
+  async function save(){
+    const destroy=new Date(Date.now()+days*86400000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
+    const res=await db.addTestMeal({date:todayStr(),product:form.product,service:form.service,qty:form.qty,destroyAt:destroy,operator:user.name});
+    if(res?.error){alert("Le plat témoin n'a pas été enregistré. Vérifie la connexion Supabase.");await reload();return;}
+    await reload();setShow(false);setForm({product:"",service:"Midi",qty:"100 g"});
+  }
   return(<div className="page">
     <GbphHelpButton section="dlc" go={go}/>
     <div className="section-title">Plats témoins</div><div className="section-sub">Conservation {days} jours à ≤ 3°C</div>
@@ -2062,7 +2100,11 @@ function TestMeals({data,setData,user,db,reload,go}){
 
 function Pests({data,setData,db,reload,go}){
   const[show,setShow]=useState(false);const[form,setForm]=useState({type:"Visite contrat",company:"",result:"RAS",nextVisit:""});
-  async function save(){await db.addPest({date:todayStr(),type:form.type,company:form.company,result:form.result,nextVisit:form.nextVisit});await reload();setShow(false);setForm({type:"Visite contrat",company:"",result:"RAS",nextVisit:""});}
+  async function save(){
+    const res=await db.addPest({date:todayStr(),type:form.type,company:form.company,result:form.result,nextVisit:form.nextVisit});
+    if(res?.error){alert("L'intervention n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload();return;}
+    await reload();setShow(false);setForm({type:"Visite contrat",company:"",result:"RAS",nextVisit:""});
+  }
   return(<div className="page">
     <GbphHelpButton section="pest" go={go}/>
     <div className="section-title">Nuisibles</div><div className="section-sub">Plan de lutte 3D</div>
