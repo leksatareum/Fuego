@@ -847,11 +847,13 @@ function FuegoLogo({size="topbar"}) {
 function SplashScreen(){
   return(<div style={{position:"fixed",inset:0,background:"#090909",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}}>
     <style>{`
-      @keyframes splashRise{
-        0%{opacity:0;transform:scale(.92) translateY(8px);}
-        100%{opacity:1;transform:scale(1) translateY(0);}
+      @keyframes splashPop{
+        0%{opacity:0;transform:scale(.4);}
+        60%{opacity:1;transform:scale(1.08);}
+        80%{transform:scale(.97);}
+        100%{opacity:1;transform:scale(1);}
       }
-      .splash-logo{height:190px;object-fit:contain;animation:splashRise .7s cubic-bezier(.22,1,.36,1) both;}
+      .splash-logo{height:200px;object-fit:contain;animation:splashPop .8s cubic-bezier(.34,1.56,.64,1) both;filter:drop-shadow(0 6px 30px rgba(255,107,0,.4));}
     `}</style>
     <img className="splash-logo" src="/fuego-logo.png" alt="Fuego"/>
   </div>);
