@@ -114,7 +114,7 @@ const DB = {
       pests: pests.map(p=>({id:p.id,date:p.date,type:p.type,company:p.company,result:p.result,nextVisit:p.next_visit})),
       recipes: recipes.map(r=>({id:r.id,name:r.name,emoji:r.emoji,type:r.type,category:r.category,price:r.price,portions:r.portions,yield:r.yield_qty?{qty:r.yield_qty,unit:r.yield_unit}:undefined,components:r.components||[],steps:r.steps||[],allergens:r.allergens||[]})),
       taskCategories: cats.map(c=>({id:c.id,name:c.name,icon:c.icon,color:c.color})),
-      tasks: tasks.map(t=>({id:t.id,categoryId:t.category_id,task:t.task,resp:t.resp,qty:t.qty,done:t.done,prio:t.prio})),
+      tasks: tasks.map(t=>({id:t.id,categoryId:t.category_id,task:t.task,resp:t.resp,qty:t.qty,done:t.done,prio:t.prio,date:t.date,service:t.service||"midi"})),
       products: products.map(p=>({id:p.id,name:p.name,price:p.price,unit:p.unit})),
       shifts: shifts.map(s=>({id:s.id,userId:s.user_id,date:s.date,start:s.start,end:s.end})),
     };
@@ -149,9 +149,12 @@ const DB = {
     return sbPost("recipes",row);
   },
   async deleteRecipe(id){return sbDelete("recipes",qs(`id=eq.${id}`));},
-  async addTask(t){return sbPost("tasks",{category_id:t.categoryId,task:t.task,resp:t.resp,qty:t.qty,prio:t.prio,done:false,date:todayStr()});},
+  async addTask(t){return sbPost("tasks",{category_id:t.categoryId,task:t.task,resp:t.resp,qty:t.qty,prio:t.prio,done:false,date:t.date||todayStr(),service:t.service||"midi"});},
   async toggleTask(id,done){return sbPatch("tasks",{done},qs(`id=eq.${id}`));},
-  async clearTasks(){return sbDelete("tasks",qs("id=not.is.null"));},
+  async clearTasks(dateStr,service){
+    if(dateStr&&service)return sbDelete("tasks",qs(`date=eq.${dateStr}`,`service=eq.${service}`));
+    return sbDelete("tasks",qs("id=not.is.null")); // fallback : tout (ne devrait plus servir)
+  },
   async saveTaskCategory(c){
     if(c.id)return sbPatch("task_categories",{name:c.name,icon:c.icon,color:c.color},qs(`id=eq.${c.id}`));
     return sbPost("task_categories",{name:c.name,icon:c.icon,color:c.color});
@@ -202,6 +205,14 @@ const T = {
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+  :root{
+    /* Système d'animation unifié — 3 durées, 2 courbes, comme un design system Apple */
+    --dur-fast:.15s;      /* micro-interactions : press, toggle, hover */
+    --dur-base:.28s;      /* transitions standard : apparition, changement d'état */
+    --dur-slow:.45s;      /* entrées de contenu, séquences */
+    --ease-out:cubic-bezier(.22,1,.36,1);   /* décélération douce (défaut) */
+    --ease-spring:cubic-bezier(.34,1.4,.5,1); /* léger rebond pour les entrées marquantes */
+  }
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
   :focus-visible{outline:2px solid #FF6B00;outline-offset:2px;border-radius:4px;}
   @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;}}
@@ -213,29 +224,33 @@ const S = `
 
   .shell{display:flex;flex-direction:column;width:100%;height:100vh;height:100dvh;max-width:480px;margin:0 auto;background:${T.bg0};position:relative;overflow:hidden;}
   .topbar{background:${T.bg1};padding:calc(12px + env(safe-area-inset-top)) 18px 12px;border-bottom:1px solid ${T.border};flex-shrink:0;display:flex;align-items:center;justify-content:space-between;}
-  .topbar-back{width:36px;height:36px;border-radius:50%;background:${T.bg2};border:none;display:flex;align-items:center;justify-content:center;font-size:20px;color:${T.text};transition:transform .15s;}
+  .topbar-back{width:36px;height:36px;border-radius:50%;background:${T.bg2};border:none;display:flex;align-items:center;justify-content:center;font-size:20px;color:${T.text};transition:transform var(--dur-fast);}
   .topbar-back:active{transform:scale(.92);}
   .topbar-center{flex:1;text-align:center;min-width:0;padding:0 8px;}
   .topbar-logo{font-family:'Inter',sans-serif;font-size:17px;font-weight:800;letter-spacing:.22em;text-transform:uppercase;}
   .topbar-logo .flame{background:linear-gradient(135deg,#FF6B00,#E8390A);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;color:transparent;}
   .topbar-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'Inter',sans-serif;font-size:15px;font-weight:700;color:${T.text};letter-spacing:.01em;}
-  .topbar-avatar{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#FF6B00,#E8390A);border:none;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:white;transition:transform .15s;}
+  .topbar-avatar{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#FF6B00,#E8390A);border:none;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:white;transition:transform var(--dur-fast);}
   .topbar-avatar:active{transform:scale(.92);}
 
   .scroll{flex:1;overflow-y:auto;padding:18px 14px 110px;position:relative;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
   .scroll::-webkit-scrollbar{width:0;}
   @keyframes pageIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
   @keyframes pageInFade{from{opacity:0;}to{opacity:1;}}
+  @keyframes slideFromRight{from{opacity:.4;transform:translateX(28px);}to{opacity:1;transform:translateX(0);}}
+  @keyframes slideFromLeft{from{opacity:.4;transform:translateX(-28px);}to{opacity:1;transform:translateX(0);}}
   @keyframes loadBar{0%{transform:translateX(-100%);}100%{transform:translateX(250%);}}
   @keyframes fadeUp{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}
   @keyframes inputShake{0%,100%{transform:translateX(0);}20%{transform:translateX(-7px);}40%{transform:translateX(7px);}60%{transform:translateX(-4px);}80%{transform:translateX(4px);}}
   .input-shake{animation:inputShake .4s ease-in-out;}
-  .fade-up{animation:fadeUp .45s cubic-bezier(.22,1,.36,1) both;}
+  .fade-up{animation:fadeUp var(--dur-slow) var(--ease-out) both;}
   .fade-up-1{animation-delay:.05s;}.fade-up-2{animation-delay:.12s;}.fade-up-3{animation-delay:.19s;}
-  .page{animation:pageInFade 180ms ease-out;}
+  .scroll.nav-forward{animation:slideFromRight var(--dur-base) var(--ease-out);}
+  .scroll.nav-back{animation:slideFromLeft var(--dur-base) var(--ease-out);}
+  .scroll.nav-fade{animation:pageInFade var(--dur-base) var(--ease-out);}
   @keyframes pulseGlow{0%,100%{box-shadow:0 0 0 0 rgba(232,57,10,.5);}50%{box-shadow:0 0 0 10px rgba(232,57,10,0);}}
   /* ── VOICE ── */
-  .voice-fab{position:fixed;bottom:calc(110px + env(safe-area-inset-bottom));left:max(14px,calc((100vw - 480px)/2 + 14px));width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;border:none;font-size:22px;box-shadow:0 8px 24px rgba(232,57,10,.5);z-index:35;display:flex;align-items:center;justify-content:center;transition:transform .15s;}
+  .voice-fab{position:fixed;bottom:calc(110px + env(safe-area-inset-bottom));left:max(14px,calc((100vw - 480px)/2 + 14px));width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;border:none;font-size:22px;box-shadow:0 8px 24px rgba(232,57,10,.5);z-index:35;display:flex;align-items:center;justify-content:center;transition:transform var(--dur-fast);}
   .voice-fab:active{transform:scale(.92);}
   .voice-fab.listening{animation:voicePulse 1.2s ease-in-out infinite;}
   @keyframes voicePulse{0%,100%{box-shadow:0 0 0 0 rgba(232,57,10,.6);}50%{box-shadow:0 0 0 14px rgba(232,57,10,0);}}
@@ -255,18 +270,18 @@ const S = `
   @keyframes toastIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
   .save-toast{position:fixed;bottom:calc(96px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:rgba(10,10,10,.96);border:1px solid #2A2A2A;color:#5FB075;font-size:13px;font-weight:600;padding:8px 16px;border-radius:999px;z-index:200;display:flex;align-items:center;gap:6px;animation:toastIn .2s ease-out;box-shadow:0 8px 24px rgba(0,0,0,.4);}
   @keyframes pressShrink{to{transform:scale(.96);}}
-  .ed-row{position:relative;transition:transform .12s,background .2s;}
+  .ed-row{position:relative;transition:transform var(--dur-fast),background var(--dur-base);}
   .ed-row.pressing{transform:scale(.96);background:#2D1818;}
-  .ed-field{background:transparent;border:none;border-bottom:1.5px solid transparent;color:#F5F1E8;font-family:inherit;outline:none;width:100%;transition:border-color .15s;padding:2px 0;}
+  .ed-field{background:transparent;border:none;border-bottom:1.5px solid transparent;color:#F5F1E8;font-family:inherit;outline:none;width:100%;transition:border-color var(--dur-fast);padding:2px 0;}
   .ed-field:focus{border-bottom-color:#B8503F;}
-  .inline-add{display:flex;align-items:center;gap:10px;padding:14px;border:1.5px dashed #3A3A3A;border-radius:12px;color:#A8A29A;font-size:14px;font-weight:600;background:transparent;width:100%;justify-content:center;transition:all .15s;}
+  .inline-add{display:flex;align-items:center;gap:10px;padding:14px;border:1.5px dashed #3A3A3A;border-radius:12px;color:#A8A29A;font-size:14px;font-weight:600;background:transparent;width:100%;justify-content:center;transition:all var(--dur-fast);}
   .inline-add:active{border-color:#B8503F;color:#F5F1E8;}
   .pulse{animation:pulseGlow 1.8s ease-in-out infinite;}
 
-  .bottomnav{position:absolute;bottom:0;left:0;right:0;background:rgba(17,17,17,.88);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid ${T.border};display:flex;padding:8px 4px calc(12px + env(safe-area-inset-bottom));z-index:20;transition:opacity .15s,transform .15s;}
+  .bottomnav{position:absolute;bottom:0;left:0;right:0;background:rgba(17,17,17,.88);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid ${T.border};display:flex;padding:8px 4px calc(12px + env(safe-area-inset-bottom));z-index:20;transition:opacity var(--dur-fast),transform var(--dur-fast);}
   .shell:has(.overlay) .bottomnav,.shell:has(.voice-overlay) .bottomnav{opacity:0;pointer-events:none;transform:translateY(100%);}
   .shell:has(.overlay) .btn-fab,.shell:has(.overlay) .voice-fab,.shell:has(.voice-overlay) .voice-fab{opacity:0;pointer-events:none;transform:scale(.9);}
-  .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;border:none;background:transparent;color:${T.textMute};transition:color .18s;position:relative;}
+  .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;border:none;background:transparent;color:${T.textMute};transition:color var(--dur-fast);position:relative;}
   .nav-item.active{color:#FF6B00;}
   .nav-item.active::before{content:"";position:absolute;top:0;left:50%;transform:translateX(-50%);width:24px;height:2px;background:linear-gradient(90deg,#FF6B00,#E8390A);border-radius:0 0 2px 2px;}
   .nav-icon{font-size:20px;line-height:1;}
@@ -275,11 +290,11 @@ const S = `
   .greet-block{margin-bottom:16px;}
   .greet-line{display:flex;align-items:center;gap:8px;color:${T.textDim};font-size:13px;margin-bottom:2px;}
   .greet-dot{width:6px;height:6px;border-radius:50%;background:#FF6B00;box-shadow:0 0 8px rgba(255,107,0,.6);}
-  .greet-name{font-family:'Inter',sans-serif;font-size:22px;font-weight:700;color:${T.text};line-height:1.1;}
+  .greet-name{font-family:'Inter',sans-serif;font-size:28px;font-weight:800;color:${T.text};line-height:1.05;letter-spacing:-.02em;}
   .greet-context{font-size:12px;color:#606060;margin-top:2px;text-transform:capitalize;letter-spacing:.02em;}
 
-  .section-title{font-family:'Inter',sans-serif;font-size:20px;font-weight:800;color:${T.text};margin-bottom:3px;line-height:1.1;letter-spacing:-.01em;}
-  .section-sub{font-size:12px;color:#A0A0A0;margin-bottom:16px;letter-spacing:.02em;}
+  .section-title{font-family:'Inter',sans-serif;font-size:26px;font-weight:800;color:${T.text};margin-bottom:4px;line-height:1.08;letter-spacing:-.02em;}
+  .section-sub{font-size:13px;color:#A0A0A0;margin-bottom:20px;letter-spacing:.01em;}
   .bucket-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:${T.textMute};margin-bottom:8px;margin-left:2px;display:flex;align-items:center;gap:6px;}
   .bucket-label-dot{width:5px;height:5px;border-radius:50%;}
 
@@ -300,18 +315,18 @@ const S = `
   .live-widget-timer{font-family:'Inter',sans-serif;font-size:20px;font-weight:800;color:${T.text};line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.02em;}
   .live-widget-sub{font-size:11px;color:${T.textDim};margin-bottom:8px;}
 
-  .check-row{display:flex;align-items:center;gap:12px;padding:10px 14px;background:${T.bg2};border-radius:12px;margin-bottom:6px;border:1px solid ${T.border};box-shadow:inset 0 1px 0 rgba(255,255,255,.025);transition:transform .12s,border-color .12s;}
+  .check-row{display:flex;align-items:center;gap:12px;padding:10px 14px;background:${T.bg2};border-radius:12px;margin-bottom:6px;border:1px solid ${T.border};box-shadow:inset 0 1px 0 rgba(255,255,255,.025);transition:transform var(--dur-fast),border-color var(--dur-fast);}
   .check-row:active{transform:scale(.99);border-color:${T.borderHi};}
   .check-row-icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;}
   .check-row-body{flex:1;min-width:0;}
   .check-row-title{font-size:13px;font-weight:600;color:${T.text};}
   .check-row-progress{font-size:11px;color:${T.textDim};margin-top:2px;display:flex;align-items:center;gap:6px;}
   .check-row-bar{flex:1;height:3px;background:${T.border};border-radius:2px;overflow:hidden;}
-  .check-row-fill{height:100%;border-radius:2px;transition:width .4s;}
+  .check-row-fill{height:100%;border-radius:2px;transition:width var(--dur-slow);}
   .check-row-pct{font-size:12px;font-weight:600;color:${T.text};flex-shrink:0;}
 
   .tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;}
-  .tile{background:${T.bg2};border-radius:12px;padding:12px;border:1px solid ${T.border};box-shadow:inset 0 1px 0 rgba(255,255,255,.025);transition:transform .12s,border-color .12s;}
+  .tile{background:${T.bg2};border-radius:12px;padding:12px;border:1px solid ${T.border};box-shadow:inset 0 1px 0 rgba(255,255,255,.025);transition:transform var(--dur-fast),border-color var(--dur-fast);}
   .tile:active{transform:scale(.97);border-color:${T.borderHi};}
   .tile-icon{font-size:18px;margin-bottom:6px;color:${T.textDim};}
   .tile-label{font-size:11px;color:${T.textMute};font-weight:500;margin-bottom:2px;text-transform:uppercase;letter-spacing:.04em;}
@@ -324,7 +339,7 @@ const S = `
   .b-info{background:${T.infoBg};color:${T.info};}
   .b-mute{background:${T.bg3};color:${T.textDim};}
 
-  .item{display:flex;align-items:center;gap:12px;padding:12px 14px;background:${T.bg2};border-radius:12px;margin-bottom:6px;border:1px solid ${T.border};box-shadow:inset 0 1px 0 rgba(255,255,255,.025);transition:transform .12s,border-color .12s;}
+  .item{display:flex;align-items:center;gap:12px;padding:12px 14px;background:${T.bg2};border-radius:12px;margin-bottom:6px;border:1px solid ${T.border};box-shadow:inset 0 1px 0 rgba(255,255,255,.025);transition:transform var(--dur-fast),border-color var(--dur-fast);}
   .item:active{transform:scale(.99);border-color:${T.borderHi};}
   .item-icon{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;}
   .item-body{flex:1;min-width:0;}
@@ -332,7 +347,7 @@ const S = `
   .item-sub{font-size:12px;color:${T.textDim};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .item-arrow{color:${T.textMute};font-size:18px;flex-shrink:0;}
 
-  .btn{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;min-height:50px;padding:13px;border-radius:13px;border:none;font-size:15px;font-weight:700;transition:transform .12s,opacity .12s,background .12s;letter-spacing:.01em;}
+  .btn{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;min-height:50px;padding:13px;border-radius:13px;border:none;font-size:15px;font-weight:700;transition:transform var(--dur-fast),opacity var(--dur-fast),background var(--dur-fast);letter-spacing:.01em;}
   .btn:disabled{opacity:.4;}
   .btn:active{transform:scale(.98);}
   .btn-primary{background:linear-gradient(135deg,#FF6B00 0%,#E8390A 100%);color:white;box-shadow:0 4px 16px rgba(232,57,10,.28),inset 0 1px 0 rgba(255,255,255,.18);}
@@ -340,33 +355,33 @@ const S = `
   .btn-ghost{background:${T.bg2};color:${T.text};border:1px solid ${T.border};}
   .btn-sm{padding:8px 14px;font-size:13px;}
   .fab-anchor{display:contents;}
-  .btn-fab{position:fixed;bottom:calc(110px + env(safe-area-inset-bottom));right:14px;width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;border:none;font-size:24px;box-shadow:0 8px 24px rgba(232,57,10,.5);display:flex;align-items:center;justify-content:center;transition:transform .15s;z-index:35;}
+  .btn-fab{position:fixed;bottom:calc(110px + env(safe-area-inset-bottom));right:14px;width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;border:none;font-size:24px;box-shadow:0 8px 24px rgba(232,57,10,.5);display:flex;align-items:center;justify-content:center;transition:transform var(--dur-fast);z-index:35;}
   .btn-fab:active{transform:scale(.92);}
 
   .dial{display:flex;align-items:center;gap:4px;background:${T.bg1};border-radius:11px;padding:3px;border:1px solid ${T.border};}
   .dial-arrow{width:38px;height:40px;flex-shrink:0;border-radius:8px;border:none;background:transparent;color:${T.textDim};font-size:17px;font-weight:600;display:flex;align-items:center;justify-content:center;}
   .dial-arrow:active{background:${T.bg2};}
   .dial-vals{display:flex;flex:1;gap:3px;}
-  .dial-val{flex:1;height:40px;border-radius:8px;border:none;background:transparent;color:${T.textDim};font-size:14px;font-weight:600;display:flex;align-items:center;justify-content:center;transition:all .12s;}
+  .dial-val{flex:1;height:40px;border-radius:8px;border:none;background:transparent;color:${T.textDim};font-size:14px;font-weight:600;display:flex;align-items:center;justify-content:center;transition:all var(--dur-fast);}
   .dial-val.sel{background:${T.text};color:${T.bg0};font-weight:700;}
   .dial-val.sel.good{background:${T.good};color:${T.bg0};}
   .dial-val.sel.warn{background:${T.warn};color:${T.bg0};}
   .dial-val.sel.bad{background:${T.bad};color:${T.bg0};}
 
   .binary{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
-  .binary-btn{height:46px;border-radius:10px;border:1.5px solid ${T.border};background:${T.bg2};color:${T.textDim};font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;transition:all .12s;}
+  .binary-btn{height:46px;border-radius:10px;border:1.5px solid ${T.border};background:${T.bg2};color:${T.textDim};font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;transition:all var(--dur-fast);}
   .binary-btn:active{transform:scale(.97);}
   .binary-btn.sel.good{background:${T.goodBg};border-color:${T.good};color:${T.good};}
   .binary-btn.sel.bad{background:${T.badBg};border-color:${T.bad};color:${T.bad};}
   .binary-btn.sel.neutral{background:${T.bg3};border-color:${T.text};color:${T.text};}
 
   .seg{display:flex;background:${T.bg1};border-radius:10px;padding:3px;border:1px solid ${T.border};}
-  .seg-btn{flex:1;height:32px;border:none;background:transparent;border-radius:7px;color:${T.textDim};font-size:12px;font-weight:600;transition:all .12s;}
+  .seg-btn{flex:1;height:32px;border:none;background:transparent;border-radius:7px;color:${T.textDim};font-size:12px;font-weight:600;transition:all var(--dur-fast);}
   .seg-btn.sel{background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;}
 
   .chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;}
   .chips::-webkit-scrollbar{display:none;}
-  .chip{flex-shrink:0;padding:7px 14px;border-radius:999px;background:${T.bg2};color:${T.textDim};border:1px solid ${T.border};font-size:13px;font-weight:600;white-space:nowrap;transition:all .12s;}
+  .chip{flex-shrink:0;padding:7px 14px;border-radius:999px;background:${T.bg2};color:${T.textDim};border:1px solid ${T.border};font-size:13px;font-weight:600;white-space:nowrap;transition:all var(--dur-fast);}
   .chip.sel{background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;border-color:#E8390A;}
   .dial.swipeable::after{content:"Glisser pour faire défiler";display:block;position:absolute;left:50%;transform:translateX(-50%);bottom:-17px;font-size:10px;color:${T.textMute};white-space:nowrap;}
   .dial{position:relative;}
@@ -388,7 +403,7 @@ const S = `
   .dial.swipeable{touch-action:pan-y;}
   .sheet-title{font-family:'Inter',sans-serif;font-size:20px;font-weight:800;margin-bottom:16px;color:${T.text};}
 
-  .temp-slot{flex:1;min-height:62px;border-radius:11px;border:1.5px solid ${T.border};background:${T.bg1};display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px;transition:all .15s;}
+  .temp-slot{flex:1;min-height:62px;border-radius:11px;border:1.5px solid ${T.border};background:${T.bg1};display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px;transition:all var(--dur-fast);}
   .temp-slot:active{transform:scale(.98);}
   .temp-slot.good{border-color:${T.good};background:${T.goodBg};}
   .temp-slot.warn{border-color:${T.warn};background:${T.warnBg};}
@@ -408,7 +423,7 @@ const S = `
 
   .timer-display{font-family:'Inter',sans-serif;font-size:54px;font-weight:800;text-align:center;letter-spacing:-.04em;line-height:1;margin:14px 0;font-variant-numeric:tabular-nums;}
   .step-num{width:24px;height:24px;border-radius:50%;background:${T.accent};color:white;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;}
-  .check{width:28px;height:28px;border-radius:50%;border:2px solid ${T.border};display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s;color:transparent;font-size:14px;}
+  .check{width:28px;height:28px;border-radius:50%;border:2px solid ${T.border};display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all var(--dur-fast);color:transparent;font-size:14px;}
   .check.on{background:${T.good};border-color:${T.good};color:white;animation:checkPop .28s cubic-bezier(.34,1.56,.64,1);}
   @keyframes checkPop{0%{transform:scale(.7);}55%{transform:scale(1.15);}100%{transform:scale(1);}}
   .scan{border:1.5px dashed ${T.accent};border-radius:14px;padding:24px 18px;text-align:center;background:${T.accentLt};margin-bottom:14px;}
@@ -422,7 +437,7 @@ const S = `
   .login-tagline{font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:${T.textDim};margin-bottom:44px;text-align:center;width:100%;}
   .login-body{width:100%;max-width:340px;}
   .login-prompt{font-size:13px;color:${T.textDim};margin-bottom:14px;text-align:center;}
-  .role-btn{width:100%;padding:16px;border-radius:12px;border:1px solid ${T.border};background:${T.bg2};color:${T.text};text-align:left;transition:border-color .15s;margin-bottom:8px;}
+  .role-btn{width:100%;padding:16px;border-radius:12px;border:1px solid ${T.border};background:${T.bg2};color:${T.text};text-align:left;transition:border-color var(--dur-fast);margin-bottom:8px;}
   .role-btn:active{border-color:${T.accent};}
   .role-btn-name{font-size:16px;font-weight:600;margin-bottom:1px;}
   .role-btn-sub{font-size:11px;color:${T.textDim};}
@@ -457,7 +472,7 @@ const S = `
   .empty-title{font-size:16px;font-weight:700;color:${T.text};margin-bottom:4px;}
   .empty-sub{font-size:13px;color:${T.textDim};}
   .pbar{height:5px;background:${T.border};border-radius:3px;overflow:hidden;}
-  .pfill{height:100%;border-radius:3px;transition:width .4s;}
+  .pfill{height:100%;border-radius:3px;transition:width var(--dur-slow);}
 `;
 
 // ─── HOOKS & MICRO-UX ────────────────────────────────────────────────────────
@@ -573,7 +588,7 @@ function useLongPress(onLongPress, ms=550){
 
 function useSaveToast(){
   const [show,setShow]=useState(false);
-  const ping=()=>{haptic(10);setShow(true);setTimeout(()=>setShow(false),1400);};
+  const ping=()=>{haptic.light();setShow(true);setTimeout(()=>setShow(false),1400);};
   const node = show ? <div className="save-toast">✓ Enregistré</div> : null;
   return {ping,node};
 }
@@ -583,7 +598,7 @@ function TapDial({value,onChange,center,step=1,colorFn,format=(v)=>`${v}°`}){
   const startX=useRef(null);
   const startY=useRef(null);
   const moved=useRef(false);
-  const shift=(dir)=>{haptic(6);setOffset(o=>o+(dir*step));};
+  const shift=(dir)=>{haptic.light();setOffset(o=>o+(dir*step));};
   const start=(e)=>{const t=e.touches?e.touches[0]:e;startX.current=t.clientX;startY.current=t.clientY;moved.current=false;};
   const move=(e)=>{
     if(startX.current===null)return;
@@ -604,7 +619,7 @@ function TapDial({value,onChange,center,step=1,colorFn,format=(v)=>`${v}°`}){
   const vals=[center-2*step+offset,center-step+offset,center+offset,center+step+offset,center+2*step+offset];
   return(<div className="dial swipeable" onTouchStart={start} onTouchMove={move} onTouchEnd={end} onMouseDown={start} onMouseMove={move} onMouseUp={end}>
     <button className="dial-arrow" onClick={()=>shift(-1)}>‹</button>
-    <div className="dial-vals">{vals.map((v,i)=>{const cls=colorFn?colorFn(v):"";return(<button key={i} className={`dial-val ${value===v?"sel":""} ${value===v?cls:""}`} onClick={()=>{haptic(10);onChange(v);}}>{format(v)}</button>);})}</div>
+    <div className="dial-vals">{vals.map((v,i)=>{const cls=colorFn?colorFn(v):"";return(<button key={i} className={`dial-val ${value===v?"sel":""} ${value===v?cls:""}`} onClick={()=>{haptic.light();onChange(v);}}>{format(v)}</button>);})}</div>
     <button className="dial-arrow" onClick={()=>shift(1)}>›</button>
   </div>);
 }
@@ -633,7 +648,7 @@ function GlobalSheetSwipe(){
       const dy=t?t.clientY-sy:0, dx=t?t.clientX-sx:0;
       const targetSheet=sheet; dragging=false; sheet=null;
       if(dy>92 && Math.abs(dy)>Math.abs(dx)*1.1){
-        haptic(12);
+        haptic.light();
         targetSheet.style.transition='transform .18s ease, opacity .18s ease';
         targetSheet.style.transform='translateY(110%)';
         targetSheet.style.opacity='0';
@@ -652,9 +667,9 @@ function GlobalSheetSwipe(){
   },[]);
   return null;
 }
-function BinaryChoice({value,onChange,options}){return(<div className="binary">{options.map(o=><button key={o.value} className={`binary-btn ${value===o.value?"sel":""} ${o.style||"neutral"}`} onClick={()=>{haptic(10);onChange(o.value);}}>{o.icon&&<span>{o.icon}</span>} {o.label}</button>)}</div>);}
-function SegmentedControl({value,onChange,options}){return(<div className="seg">{options.map(o=><button key={o.value} className={`seg-btn ${value===o.value?"sel":""}`} onClick={()=>{haptic(8);onChange(o.value);}}>{o.label}</button>)}</div>);}
-function QuickPick({value,onChange,options}){return(<div className="chips">{options.map(o=><button key={o.value} className={`chip ${value===o.value?"sel":""}`} onClick={()=>{haptic(8);onChange(o.value);}}>{o.label}</button>)}</div>);}
+function BinaryChoice({value,onChange,options}){return(<div className="binary">{options.map(o=><button key={o.value} className={`binary-btn ${value===o.value?"sel":""} ${o.style||"neutral"}`} onClick={()=>{haptic.light();onChange(o.value);}}>{o.icon&&<span>{o.icon}</span>} {o.label}</button>)}</div>);}
+function SegmentedControl({value,onChange,options}){return(<div className="seg">{options.map(o=><button key={o.value} className={`seg-btn ${value===o.value?"sel":""}`} onClick={()=>{haptic.light();onChange(o.value);}}>{o.label}</button>)}</div>);}
+function QuickPick({value,onChange,options}){return(<div className="chips">{options.map(o=><button key={o.value} className={`chip ${value===o.value?"sel":""}`} onClick={()=>{haptic.light();onChange(o.value);}}>{o.label}</button>)}</div>);}
 
 const INIT={
   restaurant:{name:"Ô Grain de Sable",address:"123 Boulevard de la Mer, 34000 Montpellier",phone:"04 67 00 00 00",siret:"123 456 789 00012"},
@@ -766,7 +781,14 @@ const INIT={
   ],
 };
 
+// Système haptique sémantique — une grammaire unique et cohérente, à la Apple :
+// tap léger pour une sélection, medium pour une validation, motif distinct pour
+// une erreur. Reste appelable comme haptic(ms) pour compatibilité.
 const haptic=(ms=12)=>{try{if(navigator.vibrate)navigator.vibrate(ms);}catch{}};
+haptic.light=()=>haptic(8);      // sélection, tap sur un élément
+haptic.medium=()=>haptic(15);    // validation d'une action
+haptic.success=()=>haptic(25);   // succès (enregistrement, clôture)
+haptic.error=()=>{try{if(navigator.vibrate)navigator.vibrate([30,40,30]);}catch{}}; // motif d'erreur distinct
 const todayStr=()=>new Date().toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
 const nowTime=()=>new Date().toTimeString().slice(0,5);
 const fmtDateTime=(iso)=>{if(!iso)return "";try{return new Date(iso).toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});}catch{return "";}};
@@ -862,7 +884,7 @@ function SplashScreen(){
 function Login({users,onLogin}){
   const[sel,setSel]=useState(null);const[pin,setPin]=useState("");const[err,setErr]=useState("");const[shake,setShake]=useState(false);
   const selUser=users.find(u=>u.id===sel);
-  function tryLogin(){const u=users.find(u=>u.id===sel);if(u&&u.pin===pin){haptic(15);onLogin(u);}else{haptic(30);setErr("PIN incorrect");setPin("");setShake(true);setTimeout(()=>setShake(false),450);}}
+  function tryLogin(){const u=users.find(u=>u.id===sel);if(u&&u.pin===pin){haptic.success();onLogin(u);}else{haptic.error();setErr("PIN incorrect");setPin("");setShake(true);setTimeout(()=>setShake(false),450);}}
   // Validation automatique dès que le PIN atteint la longueur du code attendu —
   // évite d'avoir à taper "Connexion" en plus sur mobile.
   useEffect(()=>{
@@ -877,7 +899,7 @@ function Login({users,onLogin}){
       <p className="login-prompt">Qui êtes-vous ?</p>
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
         {users.map(u=>(
-          <button key={u.id} onClick={()=>{haptic(8);setSel(u.id);}} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:7,padding:"16px 8px",borderRadius:16,background:T.bg2,border:`1px solid ${T.border}`,cursor:"pointer",position:"relative"}}>
+          <button key={u.id} onClick={()=>{haptic.light();setSel(u.id);}} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:7,padding:"16px 8px",borderRadius:16,background:T.bg2,border:`1px solid ${T.border}`,cursor:"pointer",position:"relative"}}>
             <div style={{width:52,height:52,borderRadius:"50%",background:u.isAdmin?"linear-gradient(135deg,#FF6B00,#E8390A)":T.bg3,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:800,color:u.isAdmin?"#fff":T.text}}>{u.initials||u.name.split(" ").map(p=>p[0]).slice(0,2).join("")}</div>
             <div style={{fontSize:12.5,fontWeight:600,color:T.text,textAlign:"center",lineHeight:1.2}}>{u.name.split(" ")[0]}</div>
             {u.isAdmin&&<div style={{position:"absolute",top:7,right:7,width:7,height:7,borderRadius:"50%",background:"#FF6B00"}}></div>}
@@ -1112,8 +1134,8 @@ function Registre({data}){
 
     <div className="group-label mt14">Module</div>
     <div className="chips">
-      <button className={`chip ${moduleFilter==="tous"?"sel":""}`} onClick={()=>{haptic(8);setModuleFilter("tous");}}>Tous</button>
-      {modules.map(m=><button key={m} className={`chip ${moduleFilter===m?"sel":""}`} onClick={()=>{haptic(8);setModuleFilter(m);}}>{m}</button>)}
+      <button className={`chip ${moduleFilter==="tous"?"sel":""}`} onClick={()=>{haptic.light();setModuleFilter("tous");}}>Tous</button>
+      {modules.map(m=><button key={m} className={`chip ${moduleFilter===m?"sel":""}`} onClick={()=>{haptic.light();setModuleFilter(m);}}>{m}</button>)}
     </div>
 
     <div className="group-label mt14">Statut</div>
@@ -1370,7 +1392,7 @@ function GbphGuide({initialSection}){
       <>
         <div className="chips" style={{marginBottom:16}}>
           {GBPH_SECTIONS.map(s=>(
-            <button key={s.key} className={`chip ${section===s.key?"sel":""}`} onClick={()=>{haptic(8);setSection(s.key);}}>{s.icon} {s.title}</button>
+            <button key={s.key} className={`chip ${section===s.key?"sel":""}`} onClick={()=>{haptic.light();setSection(s.key);}}>{s.icon} {s.title}</button>
           ))}
         </div>
         <div className="bucket-label">{current.icon} {current.title}</div>
@@ -1571,7 +1593,7 @@ function Cooling({data,setData,user,db,reload,go}){
         <div className="text-sm text-dim center mb14">Quel type d'opération ?</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:8}}>
           {Object.values(CELL_MODES).map(cm=>(
-            <button key={cm.key} onClick={()=>{haptic(10);setMode(cm.key);setEndTemp(cm.endCenter);setStep(1);}}
+            <button key={cm.key} onClick={()=>{haptic.light();setMode(cm.key);setEndTemp(cm.endCenter);setStep(1);}}
               style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,padding:"22px 10px",borderRadius:16,border:`1.5px solid ${T.border}`,background:T.bg2,color:T.text,cursor:"pointer"}}>
               <span style={{fontSize:34}}>{cm.icon}</span>
               <span style={{fontSize:14,fontWeight:800}}>{cm.label}</span>
@@ -1759,7 +1781,7 @@ function Cleaning({data,setData,db,reload,go}){
 
   async function toggle(id){
     if(busy)return;
-    haptic(10);
+    haptic.light();
     const c=data.cleaning.find(x=>x.id===id);
     const next=!c.done;
     const stamp=next?new Date().toISOString():null;
@@ -1795,7 +1817,7 @@ function Cleaning({data,setData,db,reload,go}){
     <div className="tabs" style={{marginBottom:16}}>
       {CLEAN_FREQS.map(f=>{
         const n=byFreq[f.key]?.length||0;
-        return <button key={f.key} className={`tab ${tab===f.key?"active":""}`} onClick={()=>{haptic(8);setTab(f.key);}}>{f.icon} {f.label}{n>0?` (${n})`:""}</button>;
+        return <button key={f.key} className={`tab ${tab===f.key?"active":""}`} onClick={()=>{haptic.light();setTab(f.key);}}>{f.icon} {f.label}{n>0?` (${n})`:""}</button>;
       })}
     </div>
 
@@ -2028,7 +2050,7 @@ function Labels({data,setData,user,db,reload,go}){
       <div className="field"><label className="label">Type d'opération</label>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
           {DATE_TYPES.map(o=>(
-            <button key={o.key} onClick={()=>{haptic(10);setDateType(o.key);setCustomDlc(null);}}
+            <button key={o.key} onClick={()=>{haptic.light();setDateType(o.key);setCustomDlc(null);}}
               style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"11px 4px",borderRadius:12,
                 border:`1.5px solid ${dateType===o.key?T.accentOrange:T.border}`,
                 background:dateType===o.key?"linear-gradient(135deg,rgba(255,107,0,.16),rgba(232,57,10,.16))":T.bg2,
@@ -2302,11 +2324,21 @@ function Recipes({data,setData,db,reload,user}){
 function Tasks({data,setData,db,reload}){
   const[show,setShow]=useState(false);const[filter,setFilter]=useState("all");const[busy,setBusy]=useState(false);
   const[form,setForm]=useState({task:"",resp:"",qty:"",prio:"med",categoryId:null});
+  // Créneau sélectionné : décalage en jours (0=aujourd'hui) + service (midi/soir)
+  const[dayOffset,setDayOffset]=useState(0);
+  const[service,setService]=useState(()=>{const h=new Date().getHours();return h>=15?"soir":"midi";});
   const categories=data.taskCategories||[];
-  const currentService=getServiceWindow();
+
+  const crenauDate=new Date();crenauDate.setDate(crenauDate.getDate()+dayOffset);
+  const crenauDateStr=isoDate(crenauDate);
+  const dayLabel=dayOffset===0?"Aujourd'hui":dayOffset===1?"Demain":crenauDate.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"short"});
+
+  // Ne garde que les tâches du créneau affiché.
+  const crenauTasks=data.tasks.filter(t=>t.date===crenauDateStr&&(t.service||"midi")===service);
+
   async function toggle(id){
     if(busy)return;
-    haptic(10);
+    haptic.light();
     const t=data.tasks.find(x=>x.id===id); if(!t)return;
     const next=!t.done;
     setData(d=>({...d,tasks:d.tasks.map(x=>x.id===id?{...x,done:next}:x)}));
@@ -2318,41 +2350,50 @@ function Tasks({data,setData,db,reload}){
     const catId=form.categoryId||(categories[0]?.id);
     if(!cleanTask||!catId||busy)return;
     setBusy(true);
-    const payload={...form,task:cleanTask,resp:form.resp.trim(),qty:form.qty.trim(),categoryId:catId};
+    const payload={...form,task:cleanTask,resp:form.resp.trim(),qty:form.qty.trim(),categoryId:catId,date:crenauDateStr,service};
     const res=await db.addTask(payload);
     setBusy(false);
     if(res?.error){alert("Impossible d'ajouter la tâche. Vérifie la connexion Supabase.");return;}
     await reload();setShow(false);setForm({task:"",resp:"",qty:"",prio:"med",categoryId:null});
   }
   async function endService(){
-    if(!data.tasks.length||busy)return;
-    haptic(20);
-    const ok=window.confirm("Fin de service ?\n\nToute la liste de mise en place va disparaître afin d’en commencer une nouvelle.");
+    if(!crenauTasks.length||busy)return;
+    haptic.medium();
+    const ok=window.confirm(`Clôturer ${dayLabel} ${service} ?\n\nLes ${crenauTasks.length} tâche${crenauTasks.length>1?"s":""} de ce créneau vont disparaître. Les autres créneaux ne sont pas touchés.`);
     if(!ok)return;
     setBusy(true);
-    const res=await db.clearTasks?.();
+    const res=await db.clearTasks?.(crenauDateStr,service);
     setBusy(false);
-    if(res?.error){alert("Impossible de clôturer le service. Rien n'a été supprimé.");await reload?.();return;}
-    setData(d=>({...d,tasks:[]}));
+    if(res?.error){alert("Impossible de clôturer le créneau. Rien n'a été supprimé.");await reload?.();return;}
+    await reload();
     setFilter("all");
-    haptic(30);
+    haptic.success();
   }
   function openAddFor(catId){setForm({task:"",resp:"",qty:"",prio:"med",categoryId:catId});setShow(true);}
-  const visibleTasks=filter==="all"?data.tasks:data.tasks.filter(t=>t.categoryId===filter);
+  const visibleTasks=filter==="all"?crenauTasks:crenauTasks.filter(t=>t.categoryId===filter);
   const done=visibleTasks.filter(t=>t.done).length;const total=visibleTasks.length;const pct=safePct(done,total);
   const urgentLeft=visibleTasks.filter(t=>t.prio==="high"&&!t.done).length;
-  const filterOptions=[{value:"all",label:`Tous (${data.tasks.length})`},...categories.map(c=>({value:c.id,label:`${c.icon} ${c.name.replace("Mise en place ","")} (${data.tasks.filter(t=>t.categoryId===c.id).length})`}))];
-  const grouped=filter==="all"?categories.map(cat=>({cat,tasks:data.tasks.filter(t=>t.categoryId===cat.id)})).filter(g=>g.tasks.length>0):[{cat:categories.find(c=>c.id===filter),tasks:visibleTasks}];
+  const filterOptions=[{value:"all",label:`Tous (${crenauTasks.length})`},...categories.map(c=>({value:c.id,label:`${c.icon} ${c.name.replace("Mise en place ","")} (${crenauTasks.filter(t=>t.categoryId===c.id).length})`}))];
+  const grouped=filter==="all"?categories.map(cat=>({cat,tasks:crenauTasks.filter(t=>t.categoryId===cat.id)})).filter(g=>g.tasks.length>0):[{cat:categories.find(c=>c.id===filter),tasks:visibleTasks}];
   const prios=[{k:"high",l:"⚡ Urgent",c:T.bad},{k:"med",l:"Normal",c:T.warn},{k:"low",l:"Quand possible",c:T.textDim}];
   const suggestions=["Pain burger","Sauce du jour","Tailler tomates","Bacs de frites","Vinaigrette","Préparer garnitures"];
   return(<div className="page"><div className="section-title">Mise en place</div><div className="section-sub">{done} / {total} · {Math.round(pct)}%</div>
+
+    <div className="between mb12">
+      <button className="btn btn-ghost btn-sm" style={{width:"auto"}} onClick={()=>setDayOffset(o=>Math.max(o-1,0))} disabled={dayOffset===0}>‹</button>
+      <div style={{textAlign:"center"}}><div style={{fontWeight:800,fontSize:14,textTransform:"capitalize"}}>{dayLabel}</div></div>
+      <button className="btn btn-ghost btn-sm" style={{width:"auto"}} onClick={()=>setDayOffset(o=>o+1)}>›</button>
+    </div>
+    <SegmentedControl value={service} onChange={setService} options={[{value:"midi",label:"☀️ Midi"},{value:"soir",label:"🌙 Soir"}]}/>
+    <div style={{height:14}}></div>
+
     <div className="card mb14">
-      <div className="between mb10"><div className="row gap8"><span>{currentService.icon}</span><span className="text-xs" style={{fontWeight:800,color:T.text}}>Service en cours</span><span className="badge b-mute">{currentService.label}</span></div>{urgentLeft>0&&<span className="badge b-bad">{urgentLeft} urgent{urgentLeft>1?"s":""}</span>}</div>
+      <div className="between mb10"><div className="row gap8"><span className="text-xs" style={{fontWeight:800,color:T.text}}>{dayLabel} · {service==="midi"?"Midi":"Soir"}</span></div>{urgentLeft>0&&<span className="badge b-bad">{urgentLeft} urgent{urgentLeft>1?"s":""}</span>}</div>
       <div className="pbar"><div className="pfill" style={{width:`${pct}%`,background:T.accent}}></div></div>
     </div>
-    {data.tasks.length>0&&<button className="btn mb14" onClick={endService} disabled={busy} style={{borderColor:T.warn,color:T.warn,background:T.warnBg}}>{busy?"Clôture…":"🏁 Fin de service"}</button>}
+    {crenauTasks.length>0&&<button className="btn mb14" onClick={endService} disabled={busy} style={{borderColor:T.warn,color:T.warn,background:T.warnBg}}>{busy?"Clôture…":`🏁 Clôturer ce créneau`}</button>}
     <div className="chips mb14">{filterOptions.map(opt=><button key={opt.value} className={`chip ${filter===opt.value?"sel":""}`} onClick={()=>setFilter(opt.value)}>{opt.label}</button>)}</div>
-    {grouped.length===0&&<div className="empty"><div className="empty-icon">📋</div><div className="empty-title">Aucune tâche</div><div className="empty-sub">Ajoutez votre première tâche</div></div>}
+    {grouped.length===0&&<div className="empty"><div className="empty-icon">📋</div><div className="empty-title">Aucune tâche</div><div className="empty-sub">{dayOffset>0?`Prépare la mise en place de ${dayLabel.toLowerCase()} ${service}`:"Ajoutez votre première tâche"}</div></div>}
     {grouped.map(({cat,tasks})=>{if(!cat)return null;const catDone=tasks.filter(t=>t.done).length;return(<div key={cat.id} style={{marginBottom:18}}>
       <div className="between mb8" style={{padding:"0 4px"}}><div className="row gap8"><span style={{fontSize:18}}>{cat.icon}</span><span style={{fontSize:13,fontWeight:700,color:cat.color}}>{cat.name}</span><span className="text-xs text-dim">· {catDone}/{tasks.length}</span></div><button onClick={()=>openAddFor(cat.id)} style={{background:"transparent",border:"none",color:cat.color,fontSize:18,fontWeight:700,padding:"4px 8px",cursor:"pointer"}}>+</button></div>
       {prios.map(p=>{const pt=tasks.filter(t=>t.prio===p.k);if(!pt.length)return null;return(<div key={p.k} style={{marginBottom:8}}><div style={{fontSize:10,fontWeight:700,color:p.c,marginBottom:4,marginLeft:6,letterSpacing:".06em",textTransform:"uppercase"}}>{p.l}</div>{pt.map(t=><div key={t.id} className="item" onClick={()=>toggle(t.id)} style={{opacity:t.done?.45:1,borderLeftColor:cat.color,borderLeftWidth:3,borderLeftStyle:"solid"}}><div className={`check ${t.done?"on":""}`}>{t.done?"✓":""}</div><div className="item-body"><div className="item-title" style={{textDecoration:t.done?"line-through":"none"}}>{t.task}</div><div className="item-sub">{[t.resp,t.qty].filter(Boolean).join(" · ")||"—"}</div></div></div>)}</div>);})}
@@ -3238,7 +3279,20 @@ export default function App(){
   },[wakeEnabled,voiceOpen]);
 
   const[gbphSection,setGbphSection]=useState(null);
-  const go=(k,opts)=>{ if(opts?.section)setGbphSection(opts.section); setPage(k); setProfile(false); };
+  const[navDir,setNavDir]=useState("fade"); // forward | back | fade
+  const go=(k,opts)=>{
+    if(opts?.section)setGbphSection(opts.section);
+    // Détermine le sens de la transition, façon iOS :
+    // vers une sous-page = forward (glisse depuis la droite),
+    // retour vers une racine = back (glisse depuis la gauche),
+    // entre deux onglets racine = fade simple.
+    const goingToRoot=ROOT_PAGES.includes(k);
+    const comingFromRoot=ROOT_PAGES.includes(page);
+    if(goingToRoot&&comingFromRoot) setNavDir("fade");
+    else if(goingToRoot&&!comingFromRoot) setNavDir("back");
+    else setNavDir("forward");
+    setPage(k); setProfile(false);
+  };
   const logout=()=>{setUser(null);setPage("home");};
 
   if(showSplash)return<><style>{S}</style><SplashScreen/></>;
@@ -3299,7 +3353,7 @@ export default function App(){
       {user.isAdmin&&<button className="btn btn-ghost mb8" onClick={()=>{setProfile(false);go("settings");}}>⚙️ Paramètres</button>}
       <button className="btn" style={{background:T.badBg,color:T.bad}} onClick={logout}>Déconnexion</button>
     </div></div>}
-    <div className="scroll" key={page}>{pages[page]||pages.home}</div>
+    <div className={`scroll nav-${navDir}`} key={page}>{pages[page]||pages.home}</div>
 
     {/* Overlay vocal */}
     {voiceOpen && (
