@@ -845,44 +845,15 @@ function FuegoLogo({size="topbar"}) {
 // arrivent. La flamme "ondule" via une animation SVG légère (pas de lib
 // externe), cohérente avec l'identité visuelle FUEGO.
 function SplashScreen(){
-  return(<div style={{position:"fixed",inset:0,background:"#090909",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",zIndex:200,overflow:"hidden"}}>
+  return(<div style={{position:"fixed",inset:0,background:"#090909",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}}>
     <style>{`
-      @keyframes splashLogoIn{
-        0%{opacity:0;transform:scale(.3) translateY(20px);}
-        55%{opacity:1;transform:scale(1.12) translateY(0);}
-        70%{transform:scale(.96);}
-        85%{transform:scale(1.04);}
-        100%{opacity:1;transform:scale(1);}
+      @keyframes splashRise{
+        0%{opacity:0;transform:scale(.92) translateY(8px);}
+        100%{opacity:1;transform:scale(1) translateY(0);}
       }
-      @keyframes splashGlow{
-        0%{opacity:0;transform:scale(.5);}
-        50%{opacity:.55;}
-        100%{opacity:.35;transform:scale(1.15);}
-      }
-      @keyframes splashGlowPulse{
-        0%,100%{opacity:.3;transform:scale(1);}
-        50%{opacity:.6;transform:scale(1.12);}
-      }
-      @keyframes splashWordIn{
-        0%{opacity:0;letter-spacing:2px;transform:translateY(10px);}
-        100%{opacity:1;letter-spacing:.28em;transform:translateY(0);}
-      }
-      @keyframes splashSweep{
-        0%{transform:translateX(-120%) skewX(-18deg);}
-        100%{transform:translateX(120%) skewX(-18deg);}
-      }
-      .splash-glow{position:absolute;width:340px;height:340px;border-radius:50%;background:radial-gradient(circle,#FF6B00 0%,rgba(232,57,10,.35) 40%,transparent 70%);filter:blur(18px);animation:splashGlow .7s ease-out both,splashGlowPulse 2.2s ease-in-out .7s infinite;}
-      .splash-logo-wrap{position:relative;animation:splashLogoIn .9s cubic-bezier(.34,1.56,.64,1) both;}
-      .splash-logo{height:200px;object-fit:contain;filter:drop-shadow(0 8px 40px rgba(255,107,0,.55));}
-      .splash-sweep{position:absolute;top:0;bottom:0;width:60px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.28),transparent);animation:splashSweep 1.1s ease-in-out .55s both;pointer-events:none;}
-      .splash-word{margin-top:26px;font-family:'Inter',sans-serif;font-size:30px;font-weight:900;letter-spacing:.28em;padding-left:.28em;background:linear-gradient(135deg,#FFB067,#FF6B00 45%,#E8390A);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;animation:splashWordIn .6s ease-out .5s both;}
+      .splash-logo{height:190px;object-fit:contain;animation:splashRise .7s cubic-bezier(.22,1,.36,1) both;}
     `}</style>
-    <div className="splash-glow"></div>
-    <div className="splash-logo-wrap">
-      <img className="splash-logo" src="/fuego-logo.png" alt="Fuego"/>
-      <div className="splash-sweep"></div>
-    </div>
-    <div className="splash-word">FUEGO</div>
+    <img className="splash-logo" src="/fuego-logo.png" alt="Fuego"/>
   </div>);
 }
 
