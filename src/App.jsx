@@ -416,7 +416,7 @@ const S = `
   .scan-title{font-size:15px;font-weight:700;color:${T.text};margin-bottom:3px;}
   .scan-sub{font-size:12px;color:${T.textDim};}
 
-  .login-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;min-height:100dvh;padding:32px 20px;background:${T.bg0};width:100%;max-width:480px;margin:0 auto;}
+  .login-screen{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;min-height:100vh;min-height:100dvh;padding:calc(32px + env(safe-area-inset-top)) 20px calc(32px + env(safe-area-inset-bottom));background:${T.bg0};width:100%;max-width:480px;margin:0 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;}
   .login-logo{font-family:'Inter',sans-serif;font-size:44px;font-weight:900;letter-spacing:.28em;text-transform:uppercase;margin-bottom:6px;text-align:center;width:100%;}
   .login-logo .flame{background:linear-gradient(135deg,#FF6B00 0%,#E8390A 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;color:transparent;}
   .login-tagline{font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:${T.textDim};margin-bottom:44px;text-align:center;width:100%;}
@@ -845,19 +845,44 @@ function FuegoLogo({size="topbar"}) {
 // arrivent. La flamme "ondule" via une animation SVG légère (pas de lib
 // externe), cohérente avec l'identité visuelle FUEGO.
 function SplashScreen(){
-  return(<div style={{position:"fixed",inset:0,background:"#090909",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",zIndex:200}}>
+  return(<div style={{position:"fixed",inset:0,background:"#090909",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",zIndex:200,overflow:"hidden"}}>
     <style>{`
-      @keyframes flameBreathe{
-        0%,100%{transform:scale(1);}
-        50%{transform:scale(1.06);}
+      @keyframes splashLogoIn{
+        0%{opacity:0;transform:scale(.3) translateY(20px);}
+        55%{opacity:1;transform:scale(1.12) translateY(0);}
+        70%{transform:scale(.96);}
+        85%{transform:scale(1.04);}
+        100%{opacity:1;transform:scale(1);}
       }
-      @keyframes splashFade{from{opacity:0;}to{opacity:1;}}
-      .splash-flame{animation:flameBreathe 1.6s ease-in-out infinite;}
-      .splash-wrap{animation:splashFade 300ms ease-out;}
+      @keyframes splashGlow{
+        0%{opacity:0;transform:scale(.5);}
+        50%{opacity:.55;}
+        100%{opacity:.35;transform:scale(1.15);}
+      }
+      @keyframes splashGlowPulse{
+        0%,100%{opacity:.3;transform:scale(1);}
+        50%{opacity:.6;transform:scale(1.12);}
+      }
+      @keyframes splashWordIn{
+        0%{opacity:0;letter-spacing:2px;transform:translateY(10px);}
+        100%{opacity:1;letter-spacing:.28em;transform:translateY(0);}
+      }
+      @keyframes splashSweep{
+        0%{transform:translateX(-120%) skewX(-18deg);}
+        100%{transform:translateX(120%) skewX(-18deg);}
+      }
+      .splash-glow{position:absolute;width:340px;height:340px;border-radius:50%;background:radial-gradient(circle,#FF6B00 0%,rgba(232,57,10,.35) 40%,transparent 70%);filter:blur(18px);animation:splashGlow .7s ease-out both,splashGlowPulse 2.2s ease-in-out .7s infinite;}
+      .splash-logo-wrap{position:relative;animation:splashLogoIn .9s cubic-bezier(.34,1.56,.64,1) both;}
+      .splash-logo{height:200px;object-fit:contain;filter:drop-shadow(0 8px 40px rgba(255,107,0,.55));}
+      .splash-sweep{position:absolute;top:0;bottom:0;width:60px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.28),transparent);animation:splashSweep 1.1s ease-in-out .55s both;pointer-events:none;}
+      .splash-word{margin-top:26px;font-family:'Inter',sans-serif;font-size:30px;font-weight:900;letter-spacing:.28em;padding-left:.28em;background:linear-gradient(135deg,#FFB067,#FF6B00 45%,#E8390A);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;animation:splashWordIn .6s ease-out .5s both;}
     `}</style>
-    <div className="splash-wrap" style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
-      <img className="splash-flame" src="/fuego-logo.png" alt="Fuego" style={{height:180,objectFit:"contain"}}/>
+    <div className="splash-glow"></div>
+    <div className="splash-logo-wrap">
+      <img className="splash-logo" src="/fuego-logo.png" alt="Fuego"/>
+      <div className="splash-sweep"></div>
     </div>
+    <div className="splash-word">FUEGO</div>
   </div>);
 }
 
@@ -875,7 +900,18 @@ function Login({users,onLogin}){
     <div className="login-logo fade-up fade-up-1"><FuegoLogo size="login"/></div>
     <div className="login-tagline fade-up fade-up-2">Le système d'exploitation de votre restaurant</div>
     <div className="login-body fade-up fade-up-3">
-    {!sel?<><p className="login-prompt">Qui êtes-vous ?</p>{users.map(u=><button key={u.id} className="role-btn" onClick={()=>setSel(u.id)}><div className="between"><div><div className="role-btn-name">{u.name}</div><div className="role-btn-sub">{u.role}</div></div><span className={`role-badge ${u.isAdmin?"rb-admin":"rb-staff"}`}>{u.isAdmin?"Admin":"Équipe"}</span></div></button>)}</>
+    {!sel?<>
+      <p className="login-prompt">Qui êtes-vous ?</p>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
+        {users.map(u=>(
+          <button key={u.id} onClick={()=>{haptic(8);setSel(u.id);}} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:7,padding:"16px 8px",borderRadius:16,background:T.bg2,border:`1px solid ${T.border}`,cursor:"pointer",position:"relative"}}>
+            <div style={{width:52,height:52,borderRadius:"50%",background:u.isAdmin?"linear-gradient(135deg,#FF6B00,#E8390A)":T.bg3,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:800,color:u.isAdmin?"#fff":T.text}}>{u.initials||u.name.split(" ").map(p=>p[0]).slice(0,2).join("")}</div>
+            <div style={{fontSize:12.5,fontWeight:600,color:T.text,textAlign:"center",lineHeight:1.2}}>{u.name.split(" ")[0]}</div>
+            {u.isAdmin&&<div style={{position:"absolute",top:7,right:7,width:7,height:7,borderRadius:"50%",background:"#FF6B00"}}></div>}
+          </button>
+        ))}
+      </div>
+    </>
     :<><p className="login-prompt">Code PIN pour <b style={{color:T.text}}>{users.find(u=>u.id===sel)?.name}</b></p><div className="field"><input className={`input ${shake?"input-shake":""}`} type="password" inputMode="numeric" maxLength={6} value={pin} autoFocus onChange={e=>{setPin(e.target.value.replace(/\D/g,""));setErr("");}} onKeyDown={e=>e.key==="Enter"&&pin.length>=4&&tryLogin()} placeholder="●●●●" style={{textAlign:"center",fontSize:30,letterSpacing:10,borderColor:shake?T.bad:undefined}}/></div>{err&&<p style={{color:T.bad,fontSize:12,marginBottom:10,textAlign:"center"}}>{err}</p>}<button className="btn btn-ghost" onClick={()=>{setSel(null);setPin("");setErr("");}}>← Retour</button></>}
   </div></div>);
 }
@@ -1435,6 +1471,7 @@ function HaccpHub({data,go}){
 
 function Temperatures({data,setData,user,db,reload,go}){
   const[editing,setEditing]=useState(null);const[pickedTemp,setPickedTemp]=useState(null);
+  const[tempTab,setTempTab]=useState("positif"); // positif = frigos, negatif = congélateurs
   function openSlot(f,p){const e=getReleve(data,f.id,p);setEditing({fridge:f,period:p});setPickedTemp(e?e.temp:tempCenter(f.target));}
   async function save(){
     if(!editing||pickedTemp===null)return;
@@ -1446,11 +1483,19 @@ function Temperatures({data,setData,user,db,reload,go}){
   function cancel(){setEditing(null);setPickedTemp(null);}
   const userById=id=>data.users.find(u=>u.id===id);
   const allBad=data.haccpSettings.fridgeTargets.filter(f=>{const m=getReleve(data,f.id,"matin"),s=getReleve(data,f.id,"soir");return(m&&tempStatus(m.temp,f.target)==="bad")||(s&&tempStatus(s.temp,f.target)==="bad");});
+  // Un équipement sans type explicite est considéré comme un frigo (positif) par défaut.
+  const isNeg=f=>f.type==="negatif";
+  const frigos=data.haccpSettings.fridgeTargets.filter(f=>!isNeg(f));
+  const congels=data.haccpSettings.fridgeTargets.filter(f=>isNeg(f));
+  const shown=tempTab==="negatif"?congels:frigos;
   return(<div className="page">
     <GbphHelpButton section="temp" go={go}/>
-    <div className="section-title">Températures</div><div className="section-sub">Un relevé matin et un soir, par frigo</div>
-    {allBad.length>0&&<div className="urgent-card" style={{padding:"12px 14px",margin:"0 0 12px"}}><div className="urgent-label" style={{marginBottom:4}}>🚨 {allBad.length} frigo{allBad.length>1?"s":""} hors norme</div><div style={{fontSize:12,opacity:.9}}>Vérification immédiate requise</div></div>}
-    {data.haccpSettings.fridgeTargets.map(f=>{
+    <div className="section-title">Températures</div><div className="section-sub">Un relevé matin et un soir, par équipement</div>
+    {allBad.length>0&&<div className="urgent-card" style={{padding:"12px 14px",margin:"0 0 12px"}}><div className="urgent-label" style={{marginBottom:4}}>🚨 {allBad.length} équipement{allBad.length>1?"s":""} hors norme</div><div style={{fontSize:12,opacity:.9}}>Vérification immédiate requise</div></div>}
+    <SegmentedControl value={tempTab} onChange={setTempTab} options={[{value:"positif",label:`❄️ Frigos${frigos.length?` (${frigos.length})`:""}`},{value:"negatif",label:`🧊 Congélateurs${congels.length?` (${congels.length})`:""}`}]}/>
+    <div style={{height:14}}></div>
+    {shown.length===0&&<div className="empty"><div className="empty-icon">{tempTab==="negatif"?"🧊":"❄️"}</div><div className="empty-title">Aucun {tempTab==="negatif"?"congélateur":"frigo"}</div><div className="empty-sub">Ajoute tes équipements dans Paramètres → Réglages HACCP</div></div>}
+    {shown.map(f=>{
       const m=getReleve(data,f.id,"matin"),s=getReleve(data,f.id,"soir");
       const mOp=m?userById(m.operatorId):null,sOp=s?userById(s.operatorId):null;
       const mC=m?tempStatus(m.temp,f.target):"",sC=s?tempStatus(s.temp,f.target):"";
@@ -2138,7 +2183,7 @@ function RecipeDetail({recipe,allRecipes,onBack,onEdit}){
   const allergens=recipeAllergens(recipe,allRecipes);
   const usedIn=recipe.type==="mere"?findUsedIn(recipe.id,allRecipes):[];
   return(<div className="page"><button className="btn btn-ghost mb14" onClick={onBack}>← Retour</button>
-    <div className="card"><div style={{fontSize:42,textAlign:"center",marginBottom:8}}>{recipe.emoji}</div><div className="center" style={{fontFamily:"'Inter',sans-serif",letterSpacing:"-.03em",fontSize:22,fontWeight:600,color:T.text}}>{recipe.name}</div><div className="center text-xs text-dim mb14">{recipe.type==="mere"?`🧪 Recette mère · Rendement ${recipe.yield.qty} ${recipe.yield.unit}`:`${recipe.category} · ${recipe.portions} portion${recipe.portions>1?"s":""}`}</div>
+    <div className="card"><div style={{fontSize:42,textAlign:"center",marginBottom:8}}>{recipe.emoji}</div><div className="center" style={{fontFamily:"'Inter',sans-serif",letterSpacing:"-.03em",fontSize:22,fontWeight:600,color:T.text}}>{recipe.name}</div><div className="center text-xs text-dim mb14">{recipe.type==="mere"?`🧪 Préparation · Rendement ${recipe.yield.qty} ${recipe.yield.unit}`:`${recipe.category} · ${recipe.portions} portion${recipe.portions>1?"s":""}`}</div>
       <div className="tiles">
         {recipe.type==="plat"&&<div style={{background:T.infoBg,padding:12,borderRadius:10,textAlign:"center"}}><div className="text-xs text-dim mb6">PRIX</div><div className="tabular" style={{fontFamily:"'Inter',sans-serif",letterSpacing:"-.03em",fontSize:24,fontWeight:700,color:T.info}}>{recipe.price} €</div></div>}
         <div style={{background:m>=70?T.goodBg:T.infoBg,padding:12,borderRadius:10,textAlign:"center"}}><div className="text-xs text-dim mb6">COÛT {recipe.type==="mere"?"TOTAL":"/ PORTION"}</div><div className="tabular" style={{fontFamily:"'Inter',sans-serif",letterSpacing:"-.03em",fontSize:24,fontWeight:700,color:T.text}}>{recipe.type==="mere"?cost.toFixed(2):costPerPortion.toFixed(2)} €</div></div>
@@ -2161,9 +2206,9 @@ function RecipeDetail({recipe,allRecipes,onBack,onEdit}){
   </div>);
 }
 
-function RecipeEditor({recipe,allRecipes,products=[],onSave,onCancel}){
+function RecipeEditor({recipe,allRecipes,products=[],defaultType="plat",onSave,onCancel}){
   const isEditing=!!recipe;
-  const[type,setType]=useState(recipe?.type||"plat");
+  const[type,setType]=useState(recipe?.type||defaultType);
   const[name,setName]=useState(recipe?.name||"");
   const[emoji,setEmoji]=useState(recipe?.emoji||"🍽️");
   const[category,setCategory]=useState(recipe?.category||"");
@@ -2176,7 +2221,7 @@ function RecipeEditor({recipe,allRecipes,products=[],onSave,onCancel}){
   const[allergensStr,setAllergensStr]=useState((recipe?.allergens||[]).join(", "));
   const otherRecipes=allRecipes.filter(r=>r.type==="mere"&&(!recipe||r.id!==recipe.id));
   function addIngredient(){setComponents([...components,{kind:"ingredient",item:"",qty:"",unit:"g",cost:"",productId:null}]);}
-  function addSubrecipe(){if(!otherRecipes.length)return alert("Créez d'abord une recette mère");setComponents([...components,{kind:"subrecipe",subrecipeId:otherRecipes[0].id,qty:"",unit:otherRecipes[0].yield.unit}]);}
+  function addSubrecipe(){if(!otherRecipes.length)return alert("Créez d'abord une préparation");setComponents([...components,{kind:"subrecipe",subrecipeId:otherRecipes[0].id,qty:"",unit:otherRecipes[0].yield.unit}]);}
   function updateComp(i,patch){setComponents(components.map((c,idx)=>idx===i?{...c,...patch}:c));}
   function removeComp(i){setComponents(components.filter((_,idx)=>idx!==i));}
   function addStep(){setSteps([...steps,""]);}
@@ -2210,7 +2255,7 @@ function RecipeEditor({recipe,allRecipes,products=[],onSave,onCancel}){
   return(<div className="page"><div className="between mb14"><button className="btn btn-ghost btn-sm" style={{width:"auto"}} onClick={onCancel}>← Annuler</button><button className="btn btn-primary btn-sm" style={{width:"auto"}} onClick={save}>✓ {isEditing?"Mettre à jour":"Créer"}</button></div>
     <div className="section-title">{isEditing?"Modifier":"Nouvelle recette"}</div><div className="section-sub">Coûts calculés automatiquement</div>
     <div className="card">
-      <div className="field"><label className="label">Type</label><SegmentedControl value={type} onChange={setType} options={[{value:"plat",label:"Plat servi"},{value:"mere",label:"Recette mère"}]}/></div>
+      <div className="field"><label className="label">Type</label><SegmentedControl value={type} onChange={setType} options={[{value:"plat",label:"🍽️ Plat"},{value:"mere",label:"🧪 Préparation"}]}/></div>
       <div className="row gap8"><div style={{flex:0}}><label className="label">Icône</label><input className="input input-sm" style={{width:60,textAlign:"center"}} value={emoji} onChange={e=>setEmoji(e.target.value)} maxLength={2}/></div><div style={{flex:1}}><label className="label">Nom</label><input className="input input-sm" value={name} onChange={e=>setName(e.target.value)}/></div></div>
       <div style={{height:14}}></div>
       <div className="field"><label className="label">Catégorie</label><input className="input input-sm" value={category} onChange={e=>setCategory(e.target.value)} placeholder={type==="plat"?"ex : Côté Mer":"ex : Bases"}/></div>
@@ -2219,7 +2264,7 @@ function RecipeEditor({recipe,allRecipes,products=[],onSave,onCancel}){
     <div className="card" style={{background:T.bg3}}><div className="bucket-label mb8">Aperçu coûts</div>
       <div className="row gap12" style={{flexWrap:"wrap"}}>{type==="plat"?<><div><div className="text-xs text-dim">Coût/portion</div><div className="fw7 tabular" style={{color:T.text}}>{previewCost.toFixed(2)} €</div></div>{price&&<div><div className="text-xs text-dim">Marge</div><div className="fw7 tabular" style={{color:previewMargin>=70?T.good:previewMargin>=50?T.info:T.bad}}>{previewMargin}%</div></div>}</>:<><div><div className="text-xs text-dim">Coût total</div><div className="fw7 tabular" style={{color:T.text}}>{normForPreview.reduce((a,c)=>a+(c.cost||0),0).toFixed(2)} €</div></div></>}</div>
     </div>
-    <div className="card"><div className="between mb8"><div className="bucket-label">Ingrédients</div><div className="row gap6"><button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={addIngredient}>+ Ingrédient</button>{otherRecipes.length>0&&<button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={addSubrecipe}>+ 🧪</button>}</div></div>
+    <div className="card"><div className="between mb8"><div className="bucket-label">Ingrédients</div><div className="row gap6"><button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={addIngredient}>+ Ingrédient</button>{otherRecipes.length>0&&<button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={addSubrecipe}>+ 🧪 Prépa</button>}</div></div>
       {components.length===0&&<div className="text-xs text-dim center" style={{padding:"10px 0"}}>Aucun ingrédient</div>}
       {components.map((c,i)=>{
         if(c.kind!=="ingredient")return(<div key={i} style={{padding:"10px 0",borderBottom:i<components.length-1?`1px solid ${T.border}`:"none"}}><div className="row gap6 mb6"><span style={{fontSize:16}}>🧪</span><select className="input input-sm" style={{flex:1}} value={c.subrecipeId} onChange={e=>{const sub=allRecipes.find(r=>r.id===parseInt(e.target.value));updateComp(i,{subrecipeId:parseInt(e.target.value),unit:sub.yield.unit});}}>{otherRecipes.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}</select></div><div className="row gap6"><input className="input input-sm" style={{flex:1}} type="text" inputMode="decimal" value={c.qty} onChange={e=>{const v=e.target.value;if(/^\d*[.,]?\d*$/.test(v))updateComp(i,{qty:v.replace(",",".")});}}/><span style={{padding:"9px 12px",color:T.textDim,fontSize:13}}>{c.unit}</span><button style={{width:34,height:34,borderRadius:9,background:T.badBg,color:T.bad,border:"none",fontSize:16,flexShrink:0}} onClick={()=>removeComp(i)}>×</button></div></div>);
@@ -2261,19 +2306,21 @@ function RecipeEditor({recipe,allRecipes,products=[],onSave,onCancel}){
 }
 
 function Recipes({data,setData,db,reload,user}){
-  const[view,setView]=useState("list");const[sel,setSel]=useState(null);const[typeFilter,setTypeFilter]=useState("all");
+  const[view,setView]=useState("list");const[sel,setSel]=useState(null);const[typeFilter,setTypeFilter]=useState("plat");
   const allRecipes=data.recipes;
-  const filtered=allRecipes.filter(r=>typeFilter==="all"||r.type===typeFilter);
-  if(view==="edit")return<RecipeEditor recipe={sel?allRecipes.find(r=>r.id===sel):null} allRecipes={allRecipes} products={data.products||[]} onSave={async(rec)=>{await db.saveRecipe(rec);await reload();setView("list");setSel(null);}} onCancel={()=>{setView("list");setSel(null);}}/>;
+  const filtered=allRecipes.filter(r=>r.type===typeFilter);
+  const nbPlats=allRecipes.filter(r=>r.type==="plat").length;
+  const nbPreps=allRecipes.filter(r=>r.type==="mere").length;
+  if(view==="edit")return<RecipeEditor recipe={sel?allRecipes.find(r=>r.id===sel):null} defaultType={typeFilter} allRecipes={allRecipes} products={data.products||[]} onSave={async(rec)=>{await db.saveRecipe(rec);await reload();setView("list");setSel(null);}} onCancel={()=>{setView("list");setSel(null);}}/>;
   if(view==="detail"&&sel)return<RecipeDetail recipe={allRecipes.find(r=>r.id===sel)} allRecipes={allRecipes} onBack={()=>{setView("list");setSel(null);}} onEdit={()=>setView("edit")}/>;
-  return(<div className="page"><div className="section-title">Fiches techniques</div><div className="section-sub">{allRecipes.filter(r=>r.type==="plat").length} plats · {allRecipes.filter(r=>r.type==="mere").length} mères</div>
-    <SegmentedControl value={typeFilter} onChange={setTypeFilter} options={[{value:"all",label:"Tous"},{value:"plat",label:"Plats"},{value:"mere",label:"Mères"}]}/>
+  return(<div className="page"><div className="section-title">Fiches techniques</div><div className="section-sub">{nbPlats} plat{nbPlats>1?"s":""} · {nbPreps} préparation{nbPreps>1?"s":""}</div>
+    <SegmentedControl value={typeFilter} onChange={setTypeFilter} options={[{value:"plat",label:`🍽️ Plats${nbPlats?` (${nbPlats})`:""}`},{value:"mere",label:`🧪 Préparations${nbPreps?` (${nbPreps})`:""}`}]}/>
     <div style={{height:14}}></div>
-    {filtered.length===0 && <div className="empty"><div className="empty-icon">📖</div><div className="empty-title">Aucune fiche</div><div className="empty-sub">Crée ta première recette avec le bouton +</div></div>}
+    {filtered.length===0 && <div className="empty"><div className="empty-icon">{typeFilter==="mere"?"🧪":"🍽️"}</div><div className="empty-title">Aucun{typeFilter==="mere"?"e préparation":" plat"}</div><div className="empty-sub">{typeFilter==="mere"?"Crée tes bases (sauces, fonds…) avec le bouton +":"Crée ton premier plat avec le bouton +"}</div></div>}
     {filtered.map(rec=>{
       const cost=recipeCostPerPortion(rec,allRecipes);const m=recipeMargin(rec,allRecipes);
-      const row=<div className="item" style={{marginBottom:0}} onClick={()=>{setSel(rec.id);setView("detail");}}><div className="item-icon" style={{background:rec.type==="mere"?T.warnBg:T.infoBg}}>{rec.emoji}</div><div className="item-body"><div className="item-title">{rec.name}</div><div className="item-sub">{rec.type==="mere"?<>🧪 Mère · {rec.yield?.qty||0} {rec.yield?.unit||"u"} · {cost.toFixed(2)}€/{rec.yield?.unit||"u"}</>:<>{rec.category} · {rec.price} €</>}</div></div>{rec.type==="plat"?<span className={`badge ${m>=70?"b-good":m>=50?"b-info":"b-bad"}`}>{m}%</span>:<span className="badge b-warn">Base</span>}</div>;
-      return(<SwipeToDelete key={rec.id} enabled={!!user?.isAdmin} confirmLabel={`Supprimer la fiche "${rec.name}" ?`} onDelete={async()=>{await db.deleteRecipe(rec.id);await reload();}}>{row}</SwipeToDelete>);
+      const row=<div className="item" style={{marginBottom:0}} onClick={()=>{setSel(rec.id);setView("detail");}}><div className="item-icon" style={{background:rec.type==="mere"?T.warnBg:T.infoBg}}>{rec.emoji}</div><div className="item-body"><div className="item-title">{rec.name}</div><div className="item-sub">{rec.type==="mere"?<>{rec.yield?.qty||0} {rec.yield?.unit||"u"} · {cost.toFixed(2)} €/{rec.yield?.unit||"u"}</>:<>{rec.category} · {rec.price} €</>}</div></div>{rec.type==="plat"?<span className={`badge ${m>=70?"b-good":m>=50?"b-info":"b-bad"}`}>{m}%</span>:<span className="badge b-warn tabular">{cost.toFixed(2)} €</span>}</div>;
+      return(<SwipeToDelete key={rec.id} enabled={!!user?.isAdmin} confirmLabel={`Supprimer "${rec.name}" ?`} onDelete={async()=>{await db.deleteRecipe(rec.id);await reload();}}>{row}</SwipeToDelete>);
     })}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>{setSel(null);setView("edit");}}>+</button></div>
   </div>);
@@ -2624,7 +2671,9 @@ function SettingsHaccp({data,setData,db,reload}){
   async function commitSeuils(){
     const s={coolingMax:parseInt(seuils.coolingMax)||0,reheatMin:parseInt(seuils.reheatMin)||0,reheatMaxTime:parseInt(seuils.reheatMaxTime)||0,oilPolarMax:parseInt(seuils.oilPolarMax)||0,testMealDays:parseInt(seuils.testMealDays)||0,labelDlcDefault:parseInt(seuils.labelDlcDefault)||0};
     setData(d=>({...d,haccpSettings:{...d.haccpSettings,...s}}));
-    await db.saveHaccpSettings(s); toast.ping();
+    const res=await db.saveHaccpSettings(s);
+    if(res?.error){alert("Les seuils n'ont pas été enregistrés. Vérifie la connexion Supabase.");await reload?.();return;}
+    toast.ping();
   }
 
   function openFridge(f){ setFForm(f?{name:f.name,icon:f.icon,target:f.target,type:f.type}:{name:"",icon:"🧊",target:"0–4",type:"positif"}); setSheet({kind:"fridge",item:f||null}); }
@@ -2632,37 +2681,45 @@ function SettingsHaccp({data,setData,db,reload}){
 
   async function saveFridge(){
     if(!fForm.name)return;
+    let res;
     if(sheet.item){
       const upd=fridges.map(f=>f.id===sheet.item.id?{...f,...fForm}:f);
       setData(d=>({...d,haccpSettings:{...d.haccpSettings,fridgeTargets:upd}}));
-      await db.updateFridgeTarget?.(sheet.item.id,fForm);
+      res=await db.updateFridgeTarget?.(sheet.item.id,fForm);
     }else{
       const nf={id:Date.now(),...fForm};
       setData(d=>({...d,haccpSettings:{...d.haccpSettings,fridgeTargets:[...fridges,nf]}}));
-      await db.addFridgeTarget?.(fForm);
+      res=await db.addFridgeTarget?.(fForm);
     }
+    if(res?.error){alert("L'équipement n'a pas été enregistré. Vérifie la connexion Supabase.");await reload?.();return;}
     setSheet(null); toast.ping(); reload?.();
   }
   async function delFridge(f){
     setData(d=>({...d,haccpSettings:{...d.haccpSettings,fridgeTargets:fridges.filter(x=>x.id!==f.id)}}));
-    await db.deleteFridgeTarget?.(f.id); toast.ping();
+    const res=await db.deleteFridgeTarget?.(f.id);
+    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload?.();return;}
+    toast.ping();
   }
   async function saveClean(){
     if(!cForm.zone)return;
+    let res;
     if(sheet.item){
       const upd=cleaningItems.map(c=>c.id===sheet.item.id?{...c,...cForm}:c);
       setData(d=>({...d,cleaning:upd}));
-      await db.updateCleaningItem?.(sheet.item.id,cForm);
+      res=await db.updateCleaningItem?.(sheet.item.id,cForm);
     }else{
       const nc={id:Date.now(),...cForm,done:false};
       setData(d=>({...d,cleaning:[...cleaningItems,nc]}));
-      await db.addCleaningItem?.(cForm);
+      res=await db.addCleaningItem?.(cForm);
     }
+    if(res?.error){alert("La zone n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload?.();return;}
     setSheet(null); toast.ping(); reload?.();
   }
   async function delClean(c){
     setData(d=>({...d,cleaning:cleaningItems.filter(x=>x.id!==c.id)}));
-    await db.deleteCleaningItem?.(c.id); toast.ping();
+    const res=await db.deleteCleaningItem?.(c.id);
+    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload?.();return;}
+    toast.ping();
   }
 
   return(<>
