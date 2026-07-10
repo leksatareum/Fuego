@@ -1885,22 +1885,64 @@ async function testRelay(url){
 
 // Construit la commande ESC/POS brute pour une étiquette texte simple.
 // (Format basique — suffisant pour du texte, sans mise en page avancée.)
+// ─── Générateur ESC/P Brother (langage RÉEL des imprimantes d'étiquettes
+// Brother QL/TD, dont la TD-2125NWB) ───────────────────────────────────────
+// À ne pas confondre avec l'ESC/POS générique (imprimantes de tickets de
+// caisse Epson) : les deux partagent le préfixe "ESC" mais sont des langages
+// différents. Brother documente explicitement que ses imprimantes d'étiquettes
+// n'exécutent pas de vrai ESC/POS. Référence officielle : "Software Developer's
+// Manual — ESC/P Command Reference" (séries QL/TD Brother).
+function escpBytes(...parts){
+  // Assemble une suite d'octets (nombres 0-255) ou de chaînes ASCII en une
+  // seule chaîne binaire, prête à être envoyée telle quelle sur le port 9100.
+  let out = "";
+  for(const p of parts){
+    if(typeof p === "number") out += String.fromCharCode(p & 0xFF);
+    else out += p; // chaîne déjà en caractères ASCII simples
+  }
+  return out;
+}
+
 function buildEscPos({product, qty, dateType, startDateStr, dlc, lot, allergens, operator}){
   const dt = dateTypeByKey(dateType||"fabrique");
-  const ESC = "\x1B", INIT = ESC+"@", BOLD_ON = ESC+"E\x01", BOLD_OFF = ESC+"E\x00";
-  const CENTER = ESC+"a\x01", LEFT = ESC+"a\x00", CUT = "\x1D"+"V"+"\x41"+"\x00";
-  const dlcLabel = dt.key==="congele" ? "À consommer avant" : "DLC";
-  let out = INIT + CENTER + BOLD_ON + "FUEGO\n" + BOLD_OFF + LEFT;
-  out += "--------------------------------\n";
-  out += BOLD_ON + product + BOLD_OFF + "\n";
-  if(qty) out += `Qté : ${qty}\n`;
-  out += `${dt.verb} le : ${startDateStr}\n`;
-  out += BOLD_ON + `${dlcLabel} : ${dlc}` + BOLD_OFF + "\n";
-  out += `Lot : ${lot}\n`;
-  out += "--------------------------------\n";
-  out += `ALLERGENES : ${(allergens||"Aucun").toUpperCase()}\n`;
-  out += `Par ${operator} - ${nowTime()}\n\n\n`;
-  out += CUT;
+  const dlcLabel = dt.key==="congele" ? "A consommer avant" : "DLC";
+  // Le firmware Brother attend de l'ASCII simple pour le texte (pas d'accents
+  // fiables selon le jeu de caractères) — on neutralise les accents du texte
+  // variable pour éviter des caractères mal imprimés.
+  const strip = s => (s||"").normalize("NFD").replace(/[̀-ͯ]/g,"");
+
+  const lines = [
+    "FUEGO",
+    "----------------------------",
+    strip(product),
+    qty ? `Qte : ${strip(qty)}` : null,
+    `${strip(dt.verb)} le : ${startDateStr}`,
+    `${dlcLabel} : ${dlc}`,
+    `Lot : ${lot}`,
+    "----------------------------",
+    `ALLERGENES : ${strip(allergens||"Aucun").toUpperCase()}`,
+    `Par ${strip(operator)} - ${nowTime()}`,
+  ].filter(Boolean);
+
+  let out = "";
+  out += escpBytes(0x1B, 0x69, 0x61, 0x00);      // ESC i a 00h — mode ESC/P standard
+  out += escpBytes(0x1B, 0x40);                   // ESC @ — initialise, efface le buffer
+  out += escpBytes(0x1B, 0x69, 0x4C, 0x01);       // ESC i L 01h — orientation paysage (adaptée au format large de l'étiquette)
+  out += escpBytes(0x1B, 0x61, 0x01);             // ESC a 01h — alignement centré
+
+  lines.forEach((line, i)=>{
+    if(i===0 || line.startsWith(dlcLabel)){
+      out += escpBytes(0x1B, 0x45);               // ESC E — gras ON pour le titre et la DLC
+      out += line;
+      out += escpBytes(0x1B, 0x46);               // ESC F — gras OFF
+    } else {
+      out += line;
+    }
+    out += escpBytes(0x0A);                        // LF — retour à la ligne
+  });
+
+  out += escpBytes(0x1B, 0x69, 0x43, 0x01);       // ESC i C 01h — active la découpe automatique
+  out += escpBytes(0x0C);                          // FF — déclenche réellement l'impression (manquait en ESC/POS)
   return out;
 }
 
