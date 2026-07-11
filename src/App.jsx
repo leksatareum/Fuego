@@ -107,7 +107,7 @@ const DB = {
       reheating: reheat.map(r=>({id:r.id,product:r.product,endTemp:r.end_temp,duration:r.duration,operator:r.operator,status:r.status,date:r.date})),
       oils: oils.map(o=>({id:o.id,name:o.name,type:o.type,dateInstall:o.date_install,lastTest:o.last_test,polaires:o.polaires,operator:o.operator})),
       cleaning: clean.map(c=>({id:c.id,zone:c.zone,icon:c.icon,freq:c.freq,produit:c.produit,dilution:c.dilution,done:c.done,doneAt:c.done_at})),
-      traceability: trace.map(t=>({id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status})),
+      traceability: trace.map(t=>({id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status,photo:t.photo||null})),
       labels: labels.map(l=>({id:l.id,product:l.product,dateProd:l.date_prod,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator})),
       testMeals: tm.map(m=>({id:m.id,date:m.date,service:m.service,product:m.product,qty:m.qty,destroyAt:m.destroy_at,operator:m.operator})),
       training: train.map(t=>({id:t.id,name:t.name,role:t.role,haccpExp:t.haccp_exp,visaExp:t.visa_exp})),
@@ -139,7 +139,7 @@ const DB = {
     return sbPatch("oils",body,qs(`id=eq.${id}`));
   },
   async toggleCleaning(id,done){return sbPatch("cleaning",{done,done_at:done?new Date().toISOString():null},qs(`id=eq.${id}`));},
-  async addTraceability(t){return sbPost("traceability",{product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes,status:t.status});},
+  async addTraceability(t){return sbPost("traceability",{product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes,status:t.status,photo:t.photo||null});},
   async addLabel(l){return sbPost("labels",{product:l.product,date_prod:l.dateProd,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator});},
   async addTestMeal(m){return sbPost("test_meals",{date:m.date,service:m.service,product:m.product,qty:m.qty,destroy_at:m.destroyAt,operator:m.operator});},
   async addPest(p){return sbPost("pests",{date:p.date,type:p.type,company:p.company,result:p.result,next_visit:p.nextVisit});},
@@ -326,6 +326,8 @@ const S = `
   .check-row-pct{font-size:12px;font-weight:600;color:${T.text};flex-shrink:0;}
 
   .tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;}
+  .tile{position:relative;}
+  .tile-dot{position:absolute;top:8px;right:8px;width:10px;height:10px;border-radius:50%;box-shadow:0 0 0 2px ${T.bg2};}
   .tile{background:${T.bg2};border-radius:12px;padding:12px;border:1px solid ${T.border};box-shadow:inset 0 1px 0 rgba(255,255,255,.025);transition:transform var(--dur-fast),border-color var(--dur-fast);}
   .tile:active{transform:scale(.97);border-color:${T.borderHi};}
   .tile-icon{font-size:18px;margin-bottom:6px;color:${T.textDim};}
@@ -911,6 +913,12 @@ function Login({users,onLogin}){
   </div></div>);
 }
 
+// Dictée vocale masquée temporairement : l'API SpeechRecognition du navigateur
+// ne fonctionne pas de façon fiable sur iOS Safari. Le code de la fonctionnalité
+// reste entièrement en place plus bas (useSpeechRecognition, VoiceOverlay) —
+// il suffit de repasser ce drapeau à true pour tout réafficher d'un coup.
+const VOICE_FEATURE_ENABLED = false;
+
 function Aujourdhui({data,go,user,onVoiceOpen}){
   const[,setTick]=useState(0);
   useEffect(()=>{const i=setInterval(()=>setTick(t=>t+1),30000);return()=>clearInterval(i);},[]);
@@ -930,6 +938,14 @@ function Aujourdhui({data,go,user,onVoiceOpen}){
   const soirDone=data.haccpSettings.fridgeTargets.filter(f=>getReleve(data,f.id,"soir")).length;
   const tasksTotal=data.tasks.length;const tasksDone=data.tasks.filter(t=>t.done).length;
   const cleanTotal=data.cleaning.length;const cleanDone=data.cleaning.filter(c=>c.done).length;
+
+  // Statut de chaque module pour la pastille d'accès rapide : vert = complet
+  // (ou rien à faire), rouge = il reste des actions en attente aujourd'hui.
+  const tempComplete = totalFridges===0 || (matinDone+soirDone)>=totalFridges*2;
+  const tasksComplete = tasksTotal===0 || tasksDone>=tasksTotal;
+  const cleanComplete = cleanTotal===0 || cleanDone>=cleanTotal;
+  const traceAlerts = data.traceability.filter(t=>t.status!=="ok").length;
+  const traceComplete = traceAlerts===0;
 
   const nowItems=[];const upcomingItems=[];
   if(win.id==="morning"){
@@ -958,7 +974,7 @@ function Aujourdhui({data,go,user,onVoiceOpen}){
           <div className="greet-name">{greeting}, {user.name.split(" ")[0]}</div>
           <div className="greet-context tabular">{today}</div>
         </div>
-        {onVoiceOpen&&<button onClick={onVoiceOpen} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 14px",borderRadius:20,background:T.bg2,border:`1px solid ${T.border}`,color:T.text,fontSize:13,fontWeight:600,flexShrink:0,marginTop:2}}><span style={{color:"#FF6B00"}}>🎤</span> Dicter</button>}
+        {VOICE_FEATURE_ENABLED&&onVoiceOpen&&<button onClick={onVoiceOpen} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 14px",borderRadius:20,background:T.bg2,border:`1px solid ${T.border}`,color:T.text,fontSize:13,fontWeight:600,flexShrink:0,marginTop:2}}><span style={{color:"#FF6B00"}}>🎤</span> Dicter</button>}
       </div>
     </div>
 
@@ -1010,10 +1026,10 @@ function Aujourdhui({data,go,user,onVoiceOpen}){
     <div className="bucket-label" style={{marginTop:18}}><span className="bucket-label-dot" style={{background:T.textMute}}></span>Accès rapide</div>
     <div className="tiles">
       <div className="tile" onClick={()=>go("labels")}><div className="tile-icon">🏷️</div><div className="tile-label">Étiquetage</div><div className="tile-value tabular">{data.labels.length}</div></div>
-      <div className="tile" onClick={()=>go("temps")}><div className="tile-icon">🌡️</div><div className="tile-label">Températures</div><div className="tile-value tabular">{matinDone+soirDone}/{totalFridges*2}</div></div>
-      <div className="tile" onClick={()=>go("trace")}><div className="tile-icon">📦</div><div className="tile-label">Traçabilité</div><div className="tile-value tabular">{data.traceability.length}</div></div>
-      <div className="tile" onClick={()=>go("tasks")}><div className="tile-icon">✅</div><div className="tile-label">Mise en place</div><div className="tile-value tabular">{tasksDone}/{tasksTotal}</div></div>
-      <div className="tile" onClick={()=>go("clean")}><div className="tile-icon">🧹</div><div className="tile-label">Nettoyage</div><div className="tile-value tabular">{cleanDone}/{cleanTotal}</div></div>
+      <div className="tile" onClick={()=>go("temps")}><span className="tile-dot" style={{background:tempComplete?T.good:T.bad}}></span><div className="tile-icon">🌡️</div><div className="tile-label">Températures</div><div className="tile-value tabular">{matinDone+soirDone}/{totalFridges*2}</div></div>
+      <div className="tile" onClick={()=>go("trace")}><span className="tile-dot" style={{background:traceComplete?T.good:T.bad}}></span><div className="tile-icon">📦</div><div className="tile-label">Traçabilité</div><div className="tile-value tabular">{data.traceability.length}</div></div>
+      <div className="tile" onClick={()=>go("tasks")}><span className="tile-dot" style={{background:tasksComplete?T.good:T.bad}}></span><div className="tile-icon">✅</div><div className="tile-label">Mise en place</div><div className="tile-value tabular">{tasksDone}/{tasksTotal}</div></div>
+      <div className="tile" onClick={()=>go("clean")}><span className="tile-dot" style={{background:cleanComplete?T.good:T.bad}}></span><div className="tile-icon">🧹</div><div className="tile-label">Nettoyage</div><div className="tile-value tabular">{cleanDone}/{cleanTotal}</div></div>
     </div>
   </div>);
 }
@@ -1730,15 +1746,21 @@ function Oils({data,setData,user,db,reload,go}){
 }
 
 function Traceability({data,setData,db,reload,go}){
-  const[show,setShow]=useState(false);const[scanning,setScanning]=useState(false);const[scanOk,setScanOk]=useState(false);const[scanErr,setScanErr]=useState("");
+  const[show,setShow]=useState(false);const[photo,setPhoto]=useState(null); // base64 de la photo capturée, en attente d'enregistrement
   const[filter,setFilter]=useState("all");
+  const[detail,setDetail]=useState(null); // fiche sélectionnée pour voir sa photo en grand
   const[form,setForm]=useState({product:"",supplier:"",lot:"",dlc:"",qty:"",allergenes:""});
-  async function handleScan(e){const file=e.target.files[0];if(!file)return;setScanning(true);setScanOk(false);setScanErr("");const reader=new FileReader();reader.onload=async(ev)=>{const b64=ev.target.result.split(",")[1];try{const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:file.type,data:b64}},{type:"text",text:"Analyse cette etiquette alimentaire. Reponds UNIQUEMENT avec ce JSON : {\"product\":\"\",\"supplier\":\"\",\"lot\":\"\",\"dlc\":\"YYYY-MM-DD\",\"qty\":\"\",\"allergenes\":[]}"}]}]})});const d=await res.json();const raw=d.content&&d.content[0]&&d.content[0].text?d.content[0].text:"{}";const p=JSON.parse(raw.replace(/```json/g,"").replace(/```/g,"").trim());setForm({product:p.product||"",supplier:p.supplier||"",lot:p.lot||"",dlc:p.dlc||"",qty:p.qty||"",allergenes:(p.allergenes||[]).join(", ")});setScanOk(true);}catch{setScanErr("Analyse impossible — remplir manuellement.");}setScanning(false);};reader.readAsDataURL(file);}
+  function handlePhoto(e){
+    const file=e.target.files[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=(ev)=>{ setPhoto(ev.target.result); }; // garde le data-URL tel quel (ré-affichable directement dans une <img>)
+    reader.readAsDataURL(file);
+  }
   async function save(){
     if(!form.product)return;
-    const res=await db.addTraceability({product:form.product,emoji:"📦",supplier:form.supplier,lot:form.lot,dlc:form.dlc,qty:form.qty,allergenes:form.allergenes?form.allergenes.split(",").map(a=>a.trim()).filter(Boolean):[],status:"ok"});
+    const res=await db.addTraceability({product:form.product,emoji:"📦",supplier:form.supplier,lot:form.lot,dlc:form.dlc,qty:form.qty,allergenes:form.allergenes?form.allergenes.split(",").map(a=>a.trim()).filter(Boolean):[],status:"ok",photo});
     if(res?.error){alert("Le produit n'a pas été enregistré. Vérifie la connexion Supabase.");await reload();return;}
-    await reload();setShow(false);setScanOk(false);setScanErr("");setForm({product:"",supplier:"",lot:"",dlc:"",qty:"",allergenes:""});
+    await reload();setShow(false);setPhoto(null);setForm({product:"",supplier:"",lot:"",dlc:"",qty:"",allergenes:""});
   }
   const filtered=filter==="all"?data.traceability:filter==="alerts"?data.traceability.filter(t=>t.status!=="ok"):data.traceability.filter(t=>t.status==="ok");
   return(<div className="page">
@@ -1746,14 +1768,24 @@ function Traceability({data,setData,db,reload,go}){
     <div className="section-title">Traçabilité</div><div className="section-sub">{data.traceability.length} produits</div>
     <SegmentedControl value={filter} onChange={setFilter} options={[{value:"all",label:"Tous"},{value:"alerts",label:"⚠ Alertes"},{value:"ok",label:"✓ OK"}]}/>
     <div style={{height:14}}></div>
-    {filtered.length===0?<div className="empty"><div className="empty-icon">✓</div><div className="empty-title">Tout est en ordre</div></div>:filtered.map(t=><div key={t.id} className="item"><div className="item-icon" style={{background:t.status==="expired"?T.badBg:t.status==="warn"?T.warnBg:T.infoBg}}>{t.emoji}</div><div className="item-body"><div className="item-title">{t.product}</div><div className="item-sub">{t.supplier} · DLC {t.dlc}</div></div><span className={`badge ${t.status==="ok"?"b-good":t.status==="warn"?"b-warn":"b-bad"}`}>{t.status==="ok"?"OK":t.status==="warn"?"Proche":"Expiré"}</span></div>)}
+    {filtered.length===0?<div className="empty"><div className="empty-icon">✓</div><div className="empty-title">Tout est en ordre</div></div>:filtered.map(t=><div key={t.id} className="item" onClick={()=>t.photo&&setDetail(t)} style={{cursor:t.photo?"pointer":"default"}}>
+      {t.photo?<img src={t.photo} alt="" style={{width:40,height:40,borderRadius:10,objectFit:"cover",flexShrink:0}}/>:<div className="item-icon" style={{background:t.status==="expired"?T.badBg:t.status==="warn"?T.warnBg:T.infoBg}}>{t.emoji}</div>}
+      <div className="item-body"><div className="item-title">{t.product}</div><div className="item-sub">{t.supplier} · DLC {t.dlc}</div></div>
+      <span className={`badge ${t.status==="ok"?"b-good":t.status==="warn"?"b-warn":"b-bad"}`}>{t.status==="ok"?"OK":t.status==="warn"?"Proche":"Expiré"}</span>
+    </div>)}
+    {detail&&<div className="overlay" onClick={()=>setDetail(null)}><div className="sheet" onClick={e=>e.stopPropagation()}>
+      <div className="sheet-handle"></div><div className="sheet-title">{detail.product}</div>
+      {detail.photo&&<img src={detail.photo} alt="" style={{width:"100%",borderRadius:14,marginBottom:12}}/>}
+      <div className="text-sm text-dim">{detail.supplier} · DLC {detail.dlc} · Lot {detail.lot}</div>
+      <button className="btn btn-ghost mt14" onClick={()=>setDetail(null)}>Fermer</button>
+    </div></div>}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">Ajouter un produit</div>
-      <label className="scan" style={{cursor:"pointer",display:"block"}}><div className="scan-icon">📸</div><div className="scan-title">Scanner l'étiquette</div><div className="scan-sub">L'IA remplit les champs</div><input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handleScan}/></label>
-      {scanning&&<div className="center" style={{color:T.accent,fontWeight:600,padding:10}}>Analyse en cours…</div>}
-      {scanErr&&<div className="banner banner-bad mb12"><span>⚠️</span><div>{scanErr}</div></div>}
-      {scanOk&&<div className="banner banner-good mb12"><span>✓</span><div><b>Pré-rempli.</b> Vérifiez.</div></div>}
+      {photo
+        ? <div style={{position:"relative",marginBottom:14}}><img src={photo} alt="" style={{width:"100%",borderRadius:14}}/><button onClick={()=>setPhoto(null)} style={{position:"absolute",top:8,right:8,width:32,height:32,borderRadius:"50%",background:"rgba(0,0,0,.6)",border:"none",color:"#fff",fontSize:16}}>✕</button></div>
+        : <label className="scan" style={{cursor:"pointer",display:"block"}}><div className="scan-icon">📸</div><div className="scan-title">Photo de l'étiquette</div><div className="scan-sub">Conservée avec la fiche</div><input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handlePhoto}/></label>
+      }
       <div className="field"><label className="label">Produit</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})}/></div>
       <div className="field"><label className="label">Fournisseur</label><input className="input" value={form.supplier} onChange={e=>setForm({...form,supplier:e.target.value})}/></div>
       <div className="row gap8 mb14"><div style={{flex:1}}><label className="label">Lot</label><input className="input input-sm" value={form.lot} onChange={e=>setForm({...form,lot:e.target.value})}/></div><div style={{flex:1}}><label className="label">Qté</label><input className="input input-sm" value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})}/></div></div>
@@ -1903,6 +1935,19 @@ function escpBytes(...parts){
   return out;
 }
 
+// Tailles de police valides pour les polices bitmap Brother (ESC X) : 24, 32
+// ou 48 dots. On s'appuie sur ces 3 paliers pour construire une vraie
+// hiérarchie visuelle (titre discret / produit en gros / texte normal).
+function escpCharSize(dots){
+  // ESC X m nL nH — m est ignoré par le firmware mais doit être présent.
+  return escpBytes(0x1B, 0x58, 0x00, dots, 0x00);
+}
+function escpFont(n){
+  // ESC k n — sélectionne une police. n=3 = Helsinki (proportionnelle,
+  // plus lisible en petite taille que la police fixe par défaut Brougham).
+  return escpBytes(0x1B, 0x6B, n);
+}
+
 function buildEscPos({product, qty, dateType, startDateStr, dlc, lot, allergens, operator}){
   const dt = dateTypeByKey(dateType||"fabrique");
   const dlcLabel = dt.key==="congele" ? "A consommer avant" : "DLC";
@@ -1911,38 +1956,45 @@ function buildEscPos({product, qty, dateType, startDateStr, dlc, lot, allergens,
   // variable pour éviter des caractères mal imprimés.
   const strip = s => (s||"").normalize("NFD").replace(/[̀-ͯ]/g,"");
 
-  const lines = [
-    "FUEGO",
-    "----------------------------",
-    strip(product),
-    qty ? `Qte : ${strip(qty)}` : null,
-    `${strip(dt.verb)} le : ${startDateStr}`,
-    `${dlcLabel} : ${dlc}`,
-    `Lot : ${lot}`,
-    "----------------------------",
-    `ALLERGENES : ${strip(allergens||"Aucun").toUpperCase()}`,
-    `Par ${strip(operator)} - ${nowTime()}`,
-  ].filter(Boolean);
-
   let out = "";
   out += escpBytes(0x1B, 0x69, 0x61, 0x00);      // ESC i a 00h — mode ESC/P standard
   out += escpBytes(0x1B, 0x40);                   // ESC @ — initialise, efface le buffer
-  out += escpBytes(0x1B, 0x69, 0x4C, 0x01);       // ESC i L 01h — orientation paysage (adaptée au format large de l'étiquette)
+  out += escpBytes(0x1B, 0x69, 0x4C, 0x01);       // ESC i L 01h — orientation paysage
+  out += escpFont(3);                              // Helsinki, proportionnelle — plus lisible que la police fixe par défaut
   out += escpBytes(0x1B, 0x61, 0x01);             // ESC a 01h — alignement centré
 
-  lines.forEach((line, i)=>{
-    if(i===0 || line.startsWith(dlcLabel)){
-      out += escpBytes(0x1B, 0x45);               // ESC E — gras ON pour le titre et la DLC
-      out += line;
-      out += escpBytes(0x1B, 0x46);               // ESC F — gras OFF
-    } else {
-      out += line;
-    }
-    out += escpBytes(0x0A);                        // LF — retour à la ligne
-  });
+  // ─── En-tête discret ───
+  out += escpCharSize(24);
+  out += "FUEGO" + escpBytes(0x0A);
+  out += "----------------------------" + escpBytes(0x0A);
+
+  // ─── Nom du produit : le plus visible de l'étiquette ───
+  out += escpCharSize(48);
+  out += escpBytes(0x1B, 0x45);                   // gras ON
+  out += strip(product);
+  out += escpBytes(0x1B, 0x46);                   // gras OFF
+  out += escpBytes(0x0A);
+
+  // ─── Corps : infos secondaires en taille normale ───
+  out += escpCharSize(24);
+  if(qty) out += `Qte : ${strip(qty)}` + escpBytes(0x0A);
+  out += `${strip(dt.verb)} le : ${startDateStr}` + escpBytes(0x0A);
+
+  // ─── DLC : en gras, taille intermédiaire pour ressortir sans dominer ───
+  out += escpCharSize(32);
+  out += escpBytes(0x1B, 0x45);
+  out += `${dlcLabel} : ${dlc}`;
+  out += escpBytes(0x1B, 0x46);
+  out += escpBytes(0x0A);
+
+  out += escpCharSize(24);
+  out += `Lot : ${lot}` + escpBytes(0x0A);
+  out += "----------------------------" + escpBytes(0x0A);
+  out += `ALLERGENES : ${strip(allergens||"Aucun").toUpperCase()}` + escpBytes(0x0A);
+  out += `Par ${strip(operator)} - ${nowTime()}` + escpBytes(0x0A);
 
   out += escpBytes(0x1B, 0x69, 0x43, 0x01);       // ESC i C 01h — active la découpe automatique
-  out += escpBytes(0x0C);                          // FF — déclenche réellement l'impression (manquait en ESC/POS)
+  out += escpBytes(0x0C);                          // FF — déclenche l'impression
   return out;
 }
 
@@ -3385,6 +3437,7 @@ export default function App(){
     {profile&&<div className="overlay" onClick={()=>setProfile(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="profile-avatar">{user.initials}</div><div className="profile-name">{user.name}</div><div className="profile-role">{user.role}</div>
       <div className="center mb14"><span className={`badge ${user.isAdmin?"b-bad":"b-mute"}`}>{user.isAdmin?"Administrateur":"Équipe"}</span></div>
+      {VOICE_FEATURE_ENABLED&&<>
       <button className="voice-toggle" style={{width:"100%",justifyContent:"space-between",cursor:"pointer"}} onClick={()=>setWakeEnabled(w=>!w)}>
         <span style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:18}}>🎤</span><span style={{fontSize:13,fontWeight:600}}>Mot-clé « Fuego »</span></span>
         <span style={{width:42,height:24,borderRadius:999,background:wakeEnabled?"linear-gradient(135deg,#FF6B00,#E8390A)":"#2A2A2A",position:"relative",transition:"background .2s",flexShrink:0}}>
@@ -3392,6 +3445,7 @@ export default function App(){
         </span>
       </button>
       <div className="text-xs text-mute mb12" style={{paddingLeft:4}}>{wakeEnabled?"Dites « Fuego » pour activer la commande vocale sans toucher l'écran":"Activez pour piloter à la voix, mains libres"}</div>
+      </>}
       {user.isAdmin&&<button className="btn btn-ghost mb8" onClick={()=>{setProfile(false);go("settings");}}>⚙️ Paramètres</button>}
       <button className="btn" style={{background:T.badBg,color:T.bad}} onClick={logout}>Déconnexion</button>
     </div></div>}
