@@ -1924,79 +1924,158 @@ async function testRelay(url){
 // différents. Brother documente explicitement que ses imprimantes d'étiquettes
 // n'exécutent pas de vrai ESC/POS. Référence officielle : "Software Developer's
 // Manual — ESC/P Command Reference" (séries QL/TD Brother).
-function escpBytes(...parts){
-  // Assemble une suite d'octets (nombres 0-255) ou de chaînes ASCII en une
-  // seule chaîne binaire, prête à être envoyée telle quelle sur le port 9100.
-  let out = "";
-  for(const p of parts){
-    if(typeof p === "number") out += String.fromCharCode(p & 0xFF);
-    else out += p; // chaîne déjà en caractères ASCII simples
-  }
-  return out;
-}
+// ─── Génération d'étiquette en mode RASTER (image pixel par pixel) ────────
+// Contrairement à l'ESC/P texte (qui laisse l'imprimante interpréter les
+// tailles de police — peu fiable selon le firmware), on dessine ici
+// l'étiquette nous-mêmes sur un <canvas>, puis on l'envoie comme une image
+// déjà prête. L'imprimante n'a plus qu'à la reproduire telle quelle.
+// Référence protocole : commandes raster Brother (ESC i a 01h = mode raster,
+// ESC i z = info média, "g" = ligne raster, 0x1A = fin de job).
 
-// Tailles de police valides pour les polices bitmap Brother (ESC X) : 24, 32
-// ou 48 dots. On s'appuie sur ces 3 paliers pour construire une vraie
-// hiérarchie visuelle (titre discret / produit en gros / texte normal).
-function escpCharSize(dots){
-  // ESC X m nL nH — m est ignoré par le firmware mais doit être présent.
-  return escpBytes(0x1B, 0x58, 0x00, dots, 0x00);
-}
-function escpFont(n){
-  // ESC k n — sélectionne une police. n=3 = Helsinki (proportionnelle,
-  // plus lisible en petite taille que la police fixe par défaut Brougham).
-  return escpBytes(0x1B, 0x6B, n);
-}
+const LABEL_DPI = 300; // résolution native de la gamme Brother TD/QL
+const LABEL_WIDTH_MM = 57.15, LABEL_HEIGHT_MM = 50.8;
+const mmToPx = mm => Math.round(mm / 25.4 * LABEL_DPI);
 
-function buildEscPos({product, qty, dateType, startDateStr, dlc, lot, allergens, operator}){
+async function drawLabelCanvas({product, qty, dateType, startDateStr, dlc, lot, allergens, operator}){
   const dt = dateTypeByKey(dateType||"fabrique");
   const dlcLabel = dt.key==="congele" ? "A consommer avant" : "DLC";
-  // Le firmware Brother attend de l'ASCII simple pour le texte (pas d'accents
-  // fiables selon le jeu de caractères) — on neutralise les accents du texte
-  // variable pour éviter des caractères mal imprimés.
-  const strip = s => (s||"").normalize("NFD").replace(/[̀-ͯ]/g,"");
+  const strip = s => (s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"");
 
+  const W = mmToPx(LABEL_WIDTH_MM), H = mmToPx(LABEL_HEIGHT_MM);
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = "#000"; ctx.textAlign = "center";
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+
+  const cx = W/2;
+  const marginX = W*0.1;
+  let y = Math.round(H*0.08);
+  const lineGap = size => Math.round(size*1.32);
+  const thinLine = (yPos, widthFactor=0.7)=>{
+    const lw = W*widthFactor;
+    ctx.beginPath();
+    ctx.moveTo(cx-lw/2, yPos); ctx.lineTo(cx+lw/2, yPos);
+    ctx.lineWidth = Math.max(1.5, H*0.0022);
+    ctx.strokeStyle = "#000";
+    ctx.stroke();
+  };
+
+  // ─── Titre "FUEGO" en haut, discret ────────────────────────────────────
+  ctx.font = `700 ${Math.round(H*0.06)}px Arial`;
+  ctx.fillText("FUEGO", cx, y+H*0.05);
+  y += Math.round(H*0.09);
+
+  thinLine(y, 0.62);
+  y += lineGap(H*0.05);
+
+  // ─── Nom du produit — le plus visible, avec léger tracking pour le style ──
+  const productText = strip(product).toUpperCase();
+  let productSize = Math.round(H*0.135);
+  ctx.font = `800 ${productSize}px Arial`;
+  while(ctx.measureText(productText).width > W-marginX*2 && productSize>Math.round(H*0.065)){
+    productSize -= 2; ctx.font = `800 ${productSize}px Arial`;
+  }
+  ctx.fillText(productText, cx, y+productSize*0.72);
+  y += lineGap(productSize) + Math.round(H*0.025);
+
+  // ─── Corps normal, espacement aéré ─────────────────────────────────────
+  ctx.font = `400 ${Math.round(H*0.05)}px Arial`;
+  ctx.fillStyle = "#222";
+  if(qty){ ctx.fillText(`Qte : ${strip(qty)}`, cx, y); y += lineGap(H*0.05); }
+  ctx.fillText(`${strip(dt.verb)} le ${startDateStr}`, cx, y);
+  y += lineGap(H*0.065);
+  ctx.fillStyle = "#000";
+
+  // ─── DLC — encadrée légèrement pour ressortir sans être écrasante ──────
+  const dlcSize = Math.round(H*0.072);
+  ctx.font = `800 ${dlcSize}px Arial`;
+  const dlcText = `${dlcLabel} : ${dlc}`;
+  const dlcW = ctx.measureText(dlcText).width + W*0.08;
+  const dlcH = dlcSize*1.5;
+  const dlcBoxTop = y;
+  ctx.strokeStyle = "#000"; ctx.lineWidth = Math.max(1.5,H*0.0022);
+  ctx.strokeRect(cx-dlcW/2, dlcBoxTop, dlcW, dlcH);
+  // Centre le texte verticalement dans le cadre via textBaseline="middle",
+  // plus fiable que de recalculer une position de ligne de base à la main.
+  ctx.textBaseline = "middle";
+  ctx.fillText(dlcText, cx, dlcBoxTop + dlcH/2);
+  ctx.textBaseline = "alphabetic"; // remet la valeur par défaut pour le reste du dessin
+  y = dlcBoxTop + dlcH + Math.round(H*0.035);
+
+  thinLine(y, 0.62);
+  y += lineGap(H*0.055);
+
+  // ─── Signature, discrète ───────────────────────────────────────────────
+  ctx.font = `400 ${Math.round(H*0.044)}px Arial`;
+  ctx.fillStyle = "#444";
+  ctx.fillText(`Par ${strip(operator)} · ${nowTime()}`, cx, y);
+
+  return {canvas, W, H};
+}
+
+function canvasToRasterBits(canvas, W, H){
+  const ctx = canvas.getContext("2d");
+  const img = ctx.getImageData(0,0,W,H).data;
+  const bytesPerRow = Math.ceil(W/8);
+  const rows = [];
+  for(let py=0; py<H; py++){
+    const row = new Uint8Array(bytesPerRow);
+    for(let px=0; px<W; px++){
+      const idx = (py*W+px)*4;
+      // Luminance simple ; seuil à mi-chemin (fonctionne bien pour du texte noir sur blanc).
+      const lum = (img[idx]+img[idx+1]+img[idx+2])/3;
+      if(lum < 128){
+        const byteIndex = Math.floor(px/8);
+        const bitIndex = 7-(px%8);
+        row[byteIndex] |= (1<<bitIndex);
+      }
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+function buildRasterCommand(rows, W, H){
+  const bytesPerRow = Math.ceil(W/8);
+  const parts = [];
+  const push = (...bytes)=>{ for(const b of bytes) parts.push(b & 0xFF); };
+
+  push(0x1B,0x40);                                  // ESC @ — initialise
+  push(0x1B,0x69,0x61,0x01);                        // ESC i a 01h — mode raster
+  push(0x1B,0x69,0x7A, 0x02,                        // ESC i z — info média (étiquette découpée, pas continue)
+       W & 0xFF, (W>>8)&0xFF, H & 0xFF, (H>>8)&0xFF, 0x00,0x00);
+  push(0x1B,0x69,0x4D,0x40);                        // ESC i M 40h — découpe auto activée
+  push(0x1B,0x69,0x4B,0x08);                        // ESC i K 08h — découpe à chaque étiquette
+  push(0x1B,0x69,0x64,0x00,0x00);                   // ESC i d — marges à 0 (on gère l'espacement nous-mêmes dans le dessin)
+  push(0x4D,0x00);                                  // M 00h — compression désactivée (lignes envoyées telles quelles)
+
+  for(const row of rows){
+    const isBlank = row.every(b=>b===0);
+    if(isBlank){ push(0x5A); }                      // Z — ligne vide (raccourci)
+    else{ push(0x67,0x00,bytesPerRow); for(const b of row) push(b); } // g 00 NN <données>
+  }
+  push(0x1A);                                        // fin de job
+
+  // Convertit en chaîne binaire (1 caractère = 1 octet), pour rester
+  // compatible avec le body texte déjà envoyé au relais via fetch().
   let out = "";
-  out += escpBytes(0x1B, 0x69, 0x61, 0x00);      // ESC i a 00h — mode ESC/P standard
-  out += escpBytes(0x1B, 0x40);                   // ESC @ — initialise, efface le buffer
-  out += escpBytes(0x1B, 0x69, 0x4C, 0x01);       // ESC i L 01h — orientation paysage
-  out += escpFont(3);                              // Helsinki, proportionnelle — plus lisible que la police fixe par défaut
-  out += escpBytes(0x1B, 0x61, 0x01);             // ESC a 01h — alignement centré
-
-  // ─── En-tête discret ───
-  out += escpCharSize(24);
-  out += "FUEGO" + escpBytes(0x0A);
-  out += "----------------------------" + escpBytes(0x0A);
-
-  // ─── Nom du produit : le plus visible de l'étiquette ───
-  out += escpCharSize(48);
-  out += escpBytes(0x1B, 0x45);                   // gras ON
-  out += strip(product);
-  out += escpBytes(0x1B, 0x46);                   // gras OFF
-  out += escpBytes(0x0A);
-
-  // ─── Corps : infos secondaires en taille normale ───
-  out += escpCharSize(24);
-  if(qty) out += `Qte : ${strip(qty)}` + escpBytes(0x0A);
-  out += `${strip(dt.verb)} le : ${startDateStr}` + escpBytes(0x0A);
-
-  // ─── DLC : en gras, taille intermédiaire pour ressortir sans dominer ───
-  out += escpCharSize(32);
-  out += escpBytes(0x1B, 0x45);
-  out += `${dlcLabel} : ${dlc}`;
-  out += escpBytes(0x1B, 0x46);
-  out += escpBytes(0x0A);
-
-  out += escpCharSize(24);
-  out += `Lot : ${lot}` + escpBytes(0x0A);
-  out += "----------------------------" + escpBytes(0x0A);
-  out += `ALLERGENES : ${strip(allergens||"Aucun").toUpperCase()}` + escpBytes(0x0A);
-  out += `Par ${strip(operator)} - ${nowTime()}` + escpBytes(0x0A);
-
-  out += escpBytes(0x1B, 0x69, 0x43, 0x01);       // ESC i C 01h — active la découpe automatique
-  out += escpBytes(0x0C);                          // FF — déclenche l'impression
+  for(const b of parts) out += String.fromCharCode(b);
   return out;
 }
+
+async function buildEscPos(labelData){
+  // Devenue asynchrone : drawLabelCanvas attend maintenant le chargement du
+  // logo Fuego avant de dessiner. Nom conservé pour compatibilité avec le
+  // reste de l'app (printBrotherLabel appelle buildEscPos).
+  const {canvas, W, H} = await drawLabelCanvas(labelData);
+  const rows = canvasToRasterBits(canvas, W, H);
+  return buildRasterCommand(rows, W, H);
+}
+
+
 
 async function printBrotherLabel(labelData){
   const relayUrl = getRelayUrl();
@@ -2004,11 +2083,18 @@ async function printBrotherLabel(labelData){
   // Méthode 1 — relais réseau configuré : envoi direct, sans passer par Safari
   if(relayUrl){
     try{
-      const escpos = buildEscPos(labelData);
+      const escpos = await buildEscPos(labelData);
+      // Important : escpos est une chaîne où chaque caractère représente UN
+      // octet brut (0-255) — construite via String.fromCharCode(). Envoyée
+      // telle quelle comme texte, fetch() l'encoderait en UTF-8 et
+      // corromprait tout octet supérieur à 127 (multi-octets), détruisant
+      // l'image raster. On la convertit donc explicitement en octets bruts.
+      const bytes = new Uint8Array(escpos.length);
+      for(let i=0;i<escpos.length;i++) bytes[i] = escpos.charCodeAt(i) & 0xFF;
       const res = await fetch(`${relayUrl}/print`, {
         method:"POST",
-        headers:{"Content-Type":"text/plain"},
-        body: escpos,
+        headers:{"Content-Type":"application/octet-stream"},
+        body: bytes,
         signal: AbortSignal.timeout(8000),
       });
       const result = await res.json();
