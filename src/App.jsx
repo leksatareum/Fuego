@@ -1932,7 +1932,13 @@ async function testRelay(url){
 // Référence protocole : commandes raster Brother (ESC i a 01h = mode raster,
 // ESC i z = info média, "g" = ligne raster, 0x1A = fin de job).
 
-const LABEL_DPI = 300; // résolution native de la gamme Brother TD/QL
+const LABEL_DPI = 203; // résolution RÉELLE de la TD-2125NWB — confirmée par plusieurs
+// fiches techniques Brother officielles. La série TD-2000 a deux variantes :
+// 203 dpi (TD-2020A/2120N/2125N/2125NWB — la nôtre) et 300 dpi (2130N/2135N/2135NWB).
+// La valeur précédente (300) causait un débordement massif du texte hors de
+// l'étiquette physique : l'imprimante interprète chaque pixel envoyé selon SA
+// propre résolution, donc une image dimensionnée pour 300 dpi s'affiche à une
+// taille réelle ~48% plus grande que prévu (675px/203dpi ≈ 84mm au lieu de 57mm).
 const LABEL_WIDTH_MM = 57.15, LABEL_HEIGHT_MM = 50.8;
 const mmToPx = mm => Math.round(mm / 25.4 * LABEL_DPI);
 
@@ -2017,7 +2023,19 @@ async function drawLabelCanvas({product, qty, dateType, startDateStr, dlc, lot, 
 }
 
 function canvasToRasterBits(canvas, W, H){
-  const ctx = canvas.getContext("2d");
+  // Logique confirmée par l'utilisateur : la toute première version (aperçu à
+  // l'endroit) est sortie à l'envers/en miroir sur la vraie imprimante. Donc un
+  // aperçu déjà retourné devrait, par symétrie, ressortir correctement sur le
+  // papier — l'imprimante applique une transformation fixe qu'on doit
+  // anticiper en amont. On réapplique donc le flip vertical.
+  const flipped = document.createElement("canvas");
+  flipped.width = W; flipped.height = H;
+  const rctx = flipped.getContext("2d");
+  rctx.translate(0, H);
+  rctx.scale(1, -1);
+  rctx.drawImage(canvas, 0, 0);
+
+  const ctx = flipped.getContext("2d");
   const img = ctx.getImageData(0,0,W,H).data;
   const bytesPerRow = Math.ceil(W/8);
   const rows = [];
