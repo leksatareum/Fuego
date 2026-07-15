@@ -1487,9 +1487,20 @@ function Temperatures({data,setData,user,db,reload,go}){
   async function save(){
     if(!editing||pickedTemp===null)return;
     const date=todayStr();
-    const res=await db.saveReleve({fridgeId:editing.fridge.id,date,period:editing.period,temp:pickedTemp,time:nowTime(),operatorId:user.id});
+    const fridgeId=editing.fridge.id, period=editing.period, time=nowTime();
+    const res=await db.saveReleve({fridgeId,date,period,temp:pickedTemp,time,operatorId:user.id});
     if(res?.error){alert("Le relevé n'a pas été enregistré. Vérifie la connexion Supabase.");await reload();return;}
-    await reload();setEditing(null);setPickedTemp(null);
+    // Mise à jour locale immédiate (pas de reload complet des 20 tables juste
+    // pour un relevé) : on remplace ou ajoute l'entrée directement dans l'état.
+    setData(d=>{
+      const existingIdx=d.fridgeReleves.findIndex(r=>r.fridgeId===fridgeId&&r.date===date&&r.period===period);
+      const entry={id:existingIdx>=0?d.fridgeReleves[existingIdx].id:Date.now(),fridgeId,date,period,temp:pickedTemp,time,operatorId:user.id};
+      const next=existingIdx>=0
+        ? d.fridgeReleves.map((r,i)=>i===existingIdx?entry:r)
+        : [...d.fridgeReleves,entry];
+      return {...d,fridgeReleves:next};
+    });
+    setEditing(null);setPickedTemp(null);
   }
   function cancel(){setEditing(null);setPickedTemp(null);}
   const userById=id=>data.users.find(u=>u.id===id);
@@ -1538,7 +1549,13 @@ function Reception({data,setData,user,db,reload,go}){
     if(!form.product)return;
     const res=await db.addReception({date:todayStr(),supplier:form.supplier,product:form.product,qty:form.qty,dlc:form.dlc,lot:form.lot,temp,tempOk:temp<=4,aspect,emballage:emb,signed:user.name});
     if(res?.error){alert("La réception n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload();return;}
-    await reload();setShow(false);setTemp(3);setAspect("OK");setEmb("OK");setForm({supplier:"",product:"",qty:"",dlc:"",lot:""});
+    // Mise à jour locale immédiate à partir de la ligne réellement créée
+    // (avec son vrai id Supabase) — pas de reload complet des 20 tables.
+    if(res?.data){
+      const r=res.data;
+      setData(d=>({...d,reception:[{id:r.id,date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,tempOk:r.temp_ok,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed},...d.reception]}));
+    }
+    setShow(false);setTemp(3);setAspect("OK");setEmb("OK");setForm({supplier:"",product:"",qty:"",dlc:"",lot:""});
   }
   return(<div className="page">
     <GbphHelpButton section="trace" go={go}/>
@@ -1651,7 +1668,9 @@ function Reheating({data,setData,user,db,reload,go}){
     const status=endTemp>=reheatMin&&duration<=reheatMaxTime?"ok":"alert";
     const res=await db.addReheating({product:form.product,endTemp,duration,operator:user.name,status,date:todayStr()});
     if(res?.error){alert("La remise en température n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload();return;}
-    await reload();setShow(false);setForm({product:""});setEndTemp(65);setDuration(30);
+    // Mise à jour locale immédiate — évite de recharger les 20 tables.
+    if(res?.data){const r=res.data;setData(d=>({...d,reheating:[{id:r.id,product:r.product,endTemp:r.end_temp,duration:r.duration,operator:r.operator,status:r.status,date:r.date},...d.reheating]}));}
+    setShow(false);setForm({product:""});setEndTemp(65);setDuration(30);
   }
   return(<div className="page">
     <GbphHelpButton section="temp" go={go}/>
@@ -1679,20 +1698,29 @@ function Oils({data,setData,user,db,reload,go}){
   const max=data.haccpSettings.oilPolarMax;
 
   async function save(){
-    const res=await db.updateOil(selOil.id,{polaires,operator:user.name,changed:action==="changed",dateInstall:todayStr()});
+    const oilId=selOil.id, changed=action==="changed", today=todayStr();
+    const res=await db.updateOil(oilId,{polaires,operator:user.name,changed,dateInstall:today});
     if(res?.error){alert("Le test n'a pas été enregistré. Vérifie la connexion Supabase.");await reload();return;}
-    await reload();setSelOil(null);setPolaires(15);setAction("filtered");
+    // Mise à jour locale immédiate — évite de recharger les 20 tables.
+    setData(d=>({...d,oils:d.oils.map(o=>o.id===oilId
+      ? {...o,polaires,operator:user.name,lastTest:today,...(changed?{dateInstall:today}:{})}
+      : o)}));
+    setSelOil(null);setPolaires(15);setAction("filtered");
   }
 
   async function addOil(){
     if(!newOil.name.trim())return;
-    await db.addOil({name:newOil.name.trim(),type:newOil.type,operator:user.name});
-    await reload();setShowAdd(false);setNewOil({name:"",type:"Tournesol"});
+    const res=await db.addOil({name:newOil.name.trim(),type:newOil.type,operator:user.name});
+    if(res?.error){alert("La friteuse n'a pas été ajoutée. Vérifie la connexion Supabase.");await reload();return;}
+    if(res?.data){const o=res.data;setData(d=>({...d,oils:[...d.oils,{id:o.id,name:o.name,type:o.type,dateInstall:o.date_install,lastTest:o.last_test,polaires:o.polaires,operator:o.operator}]}));}
+    setShowAdd(false);setNewOil({name:"",type:"Tournesol"});
   }
 
   async function removeOil(o){
     if(!window.confirm(`Retirer "${o.name}" du suivi des huiles ?`))return;
-    await db.deleteOil(o.id);await reload();
+    const res=await db.deleteOil(o.id);
+    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload();return;}
+    setData(d=>({...d,oils:d.oils.filter(x=>x.id!==o.id)}));
   }
 
   return(<div className="page">
@@ -1760,7 +1788,8 @@ function Traceability({data,setData,db,reload,go}){
     if(!form.product)return;
     const res=await db.addTraceability({product:form.product,emoji:"📦",supplier:form.supplier,lot:form.lot,dlc:form.dlc,qty:form.qty,allergenes:form.allergenes?form.allergenes.split(",").map(a=>a.trim()).filter(Boolean):[],status:"ok",photo});
     if(res?.error){alert("Le produit n'a pas été enregistré. Vérifie la connexion Supabase.");await reload();return;}
-    await reload();setShow(false);setPhoto(null);setForm({product:"",supplier:"",lot:"",dlc:"",qty:"",allergenes:""});
+    if(res?.data){const t=res.data;setData(d=>({...d,traceability:[{id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status,photo:t.photo||null},...d.traceability]}));}
+    setShow(false);setPhoto(null);setForm({product:"",supplier:"",lot:"",dlc:"",qty:"",allergenes:""});
   }
   const filtered=filter==="all"?data.traceability:filter==="alerts"?data.traceability.filter(t=>t.status!=="ok"):data.traceability.filter(t=>t.status==="ok");
   return(<div className="page">
@@ -1841,6 +1870,30 @@ function Cleaning({data,setData,db,reload,go}){
   const totalDone = data.cleaning.filter(c=>c.done).length;
   const totalPct = safePct(totalDone, data.cleaning.length);
 
+  // Coche d'un coup toutes les zones restantes de la fréquence affichée.
+  // Chaque zone est enregistrée individuellement en base (Supabase n'a pas de
+  // requête groupée simple ici), mais toutes partent en parallèle et l'écran
+  // se met à jour immédiatement.
+  async function markAllDone(){
+    const pending = list.filter(c=>!c.done);
+    if(!pending.length || busy) return;
+    const ok = window.confirm(`Marquer les ${pending.length} zone${pending.length>1?"s":""} restante${pending.length>1?"s":""} de « ${tab} » comme faite${pending.length>1?"s":""} ?`);
+    if(!ok) return;
+    haptic.medium();
+    setBusy("all");
+    const stamp = new Date().toISOString();
+    const ids = pending.map(c=>c.id);
+    setData(d=>({...d,cleaning:d.cleaning.map(x=>ids.includes(x.id)?{...x,done:true,doneAt:stamp}:x)}));
+    const results = await Promise.all(ids.map(id=>db.toggleCleaning(id,true)));
+    setBusy(null);
+    if(results.some(r=>r?.error)){
+      alert("Certaines zones n'ont pas été enregistrées. Vérifie la connexion Supabase.");
+      await reload?.();
+      return;
+    }
+    haptic.success();
+  }
+
   return(<div className="page">
     <GbphHelpButton section="clean" go={go}/>
     <div className="section-title">Nettoyage</div>
@@ -1855,6 +1908,12 @@ function Cleaning({data,setData,db,reload,go}){
 
     {list.length>0 && (
       <div className="card mb14"><div className="pbar"><div className="pfill" style={{width:`${pct}%`,background:T.accent}}></div></div></div>
+    )}
+
+    {list.some(c=>!c.done) && (
+      <button className="btn mb14" onClick={markAllDone} disabled={busy==="all"} style={{borderColor:T.good,color:T.good,background:T.goodBg}}>
+        {busy==="all" ? "Enregistrement…" : `✓ Tout marquer fait — ${tab}`}
+      </button>
     )}
 
     {list.length===0
@@ -2319,7 +2378,8 @@ function TestMeals({data,setData,user,db,reload,go}){
     const destroy=new Date(Date.now()+days*86400000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
     const res=await db.addTestMeal({date:todayStr(),product:form.product,service:form.service,qty:form.qty,destroyAt:destroy,operator:user.name});
     if(res?.error){alert("Le plat témoin n'a pas été enregistré. Vérifie la connexion Supabase.");await reload();return;}
-    await reload();setShow(false);setForm({product:"",service:"Midi",qty:"100 g"});
+    if(res?.data){const m=res.data;setData(d=>({...d,testMeals:[{id:m.id,date:m.date,service:m.service,product:m.product,qty:m.qty,destroyAt:m.destroy_at,operator:m.operator},...d.testMeals]}));}
+    setShow(false);setForm({product:"",service:"Midi",qty:"100 g"});
   }
   return(<div className="page">
     <GbphHelpButton section="dlc" go={go}/>
@@ -2341,7 +2401,8 @@ function Pests({data,setData,db,reload,go}){
   async function save(){
     const res=await db.addPest({date:todayStr(),type:form.type,company:form.company,result:form.result,nextVisit:form.nextVisit});
     if(res?.error){alert("L'intervention n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload();return;}
-    await reload();setShow(false);setForm({type:"Visite contrat",company:"",result:"RAS",nextVisit:""});
+    if(res?.data){const p=res.data;setData(d=>({...d,pests:[{id:p.id,date:p.date,type:p.type,company:p.company,result:p.result,nextVisit:p.next_visit},...d.pests]}));}
+    setShow(false);setForm({type:"Visite contrat",company:"",result:"RAS",nextVisit:""});
   }
   return(<div className="page">
     <GbphHelpButton section="pest" go={go}/>
@@ -2513,7 +2574,11 @@ function Recipes({data,setData,db,reload,user}){
     {filtered.map(rec=>{
       const cost=recipeCostPerPortion(rec,allRecipes);const m=recipeMargin(rec,allRecipes);
       const row=<div className="item" style={{marginBottom:0}} onClick={()=>{setSel(rec.id);setView("detail");}}><div className="item-icon" style={{background:rec.type==="mere"?T.warnBg:T.infoBg}}>{rec.emoji}</div><div className="item-body"><div className="item-title">{rec.name}</div><div className="item-sub">{rec.type==="mere"?<>{rec.yield?.qty||0} {rec.yield?.unit||"u"} · {cost.toFixed(2)} €/{rec.yield?.unit||"u"}</>:<>{rec.category} · {rec.price} €</>}</div></div>{rec.type==="plat"?<span className={`badge ${m>=70?"b-good":m>=50?"b-info":"b-bad"}`}>{m}%</span>:<span className="badge b-warn tabular">{cost.toFixed(2)} €</span>}</div>;
-      return(<SwipeToDelete key={rec.id} enabled={!!user?.isAdmin} confirmLabel={`Supprimer "${rec.name}" ?`} onDelete={async()=>{await db.deleteRecipe(rec.id);await reload();}}>{row}</SwipeToDelete>);
+      return(<SwipeToDelete key={rec.id} enabled={!!user?.isAdmin} confirmLabel={`Supprimer "${rec.name}" ?`} onDelete={async()=>{
+        const res=await db.deleteRecipe(rec.id);
+        if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload();return;}
+        setData(d=>({...d,recipes:d.recipes.filter(r=>r.id!==rec.id)}));
+      }}>{row}</SwipeToDelete>);
     })}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>{setSel(null);setView("edit");}}>+</button></div>
   </div>);
@@ -2728,7 +2793,11 @@ function Planning({data,user,db,reload}){
             <div className="item-body"><div className="item-title">{u?.name||"Inconnu"}</div><div className="item-sub">{u?.role||""}</div></div>
             <span className="badge b-info tabular">{s.start} – {s.end}</span>
           </div>);
-          return(<SwipeToDelete key={s.id} enabled={isAdmin} confirmLabel={`Supprimer le créneau de ${u?.name||"ce membre"} (${s.start}–${s.end}) ?`} onDelete={async()=>{await db.deleteShift(s.id);await reload();}}>{row}</SwipeToDelete>);
+          return(<SwipeToDelete key={s.id} enabled={isAdmin} confirmLabel={`Supprimer le créneau de ${u?.name||"ce membre"} (${s.start}–${s.end}) ?`} onDelete={async()=>{
+            const res=await db.deleteShift(s.id);
+            if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload();return;}
+            setData(d=>({...d,shifts:d.shifts.filter(x=>x.id!==s.id)}));
+          }}>{row}</SwipeToDelete>);
         })}
       </>
     )}
@@ -2770,7 +2839,12 @@ function ProductsEditor({data,setData,db,reload}){
     if(editing)await db.updateProduct(editing.id,payload); else await db.addProduct(payload);
     await reload(); setShowAdd(false); setEditing(null);
   }
-  async function remove(p){if(!window.confirm(`Supprimer "${p.name}" du catalogue ?`))return;await db.deleteProduct(p.id);await reload();}
+  async function remove(p){
+    if(!window.confirm(`Supprimer "${p.name}" du catalogue ?`))return;
+    const res=await db.deleteProduct(p.id);
+    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload();return;}
+    setData(d=>({...d,products:d.products.filter(x=>x.id!==p.id)}));
+  }
   const sorted=[...(data.products||[])].sort((a,b)=>a.name.localeCompare(b.name));
   return(<><div className="text-xs text-dim mb12" style={{lineHeight:1.5}}>Prix d'achat de vos matières premières. Utilisés pour calculer automatiquement le coût de vos fiches techniques.</div>
     {sorted.length===0&&<div className="empty"><div className="empty-icon">🧾</div><div className="empty-title">Aucun produit</div><div className="empty-sub">Ajoutez vos matières premières et leurs prix</div></div>}
