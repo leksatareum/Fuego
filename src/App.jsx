@@ -115,7 +115,7 @@ const DB = {
       recipes: recipes.map(r=>({id:r.id,name:r.name,emoji:r.emoji,type:r.type,category:r.category,price:r.price,portions:r.portions,yield:r.yield_qty?{qty:r.yield_qty,unit:r.yield_unit}:undefined,components:r.components||[],steps:r.steps||[],allergens:r.allergens||[]})),
       taskCategories: cats.map(c=>({id:c.id,name:c.name,icon:c.icon,color:c.color})),
       tasks: tasks.map(t=>({id:t.id,categoryId:t.category_id,task:t.task,resp:t.resp,qty:t.qty,done:t.done,prio:t.prio,date:t.date,service:t.service||"midi"})),
-      products: products.map(p=>({id:p.id,name:p.name,price:p.price,unit:p.unit})),
+      products: products.map(p=>({id:p.id,name:p.name,price:p.price,unit:p.unit,category:p.category||"Épicerie"})),
       shifts: shifts.map(s=>({id:s.id,userId:s.user_id,date:s.date,start:s.start,end:s.end})),
     };
   },
@@ -177,8 +177,8 @@ const DB = {
   async setAppState(key,value){const r=await sbGet("app_state",qs(`key=eq.${key}`,q.select()));if(r.data&&r.data.length)return sbPatch("app_state",{value},qs(`key=eq.${key}`));return sbPost("app_state",{key,value});},
   // Remet à zéro les listes de travail (mise en place + nettoyage) — idempotent
   async resetServiceLists(){await sbPatch("tasks",{done:false},qs("done=eq.true"));await sbPatch("cleaning",{done:false,done_at:null},qs("done=eq.true"));},
-  async addProduct(p){return sbPost("products",{name:p.name,price:p.price,unit:p.unit});},
-  async updateProduct(id,p){return sbPatch("products",{name:p.name,price:p.price,unit:p.unit},qs(`id=eq.${id}`));},
+  async addProduct(p){return sbPost("products",{name:p.name,price:p.price,unit:p.unit,category:p.category||"Épicerie"});},
+  async updateProduct(id,p){return sbPatch("products",{name:p.name,price:p.price,unit:p.unit,category:p.category||"Épicerie"},qs(`id=eq.${id}`));},
   async deleteProduct(id){return sbDelete("products",qs(`id=eq.${id}`));},
   async saveHaccpSettings(s){return sbPatch("haccp_settings",{cooling_max:s.coolingMax,reheat_min:s.reheatMin,reheat_max_time:s.reheatMaxTime,oil_polar_max:s.oilPolarMax,test_meal_days:s.testMealDays,label_dlc_default:s.labelDlcDefault},qs("id=eq.1"));},
   async saveRestaurant(r){const id=r.id;const body={name:r.name,address:r.address,phone:r.phone,siret:r.siret};if(id)return sbPatch("restaurant",body,qs(`id=eq.${id}`));return sbPost("restaurant",body);},
@@ -476,6 +476,17 @@ const S = `
   .text-sm{font-size:12px;}.text-xs{font-size:11px;}.text-dim{color:${T.textDim};}.text-mute{color:${T.textMute};}
   .fw6{font-weight:600;}.fw7{font-weight:700;}.center{text-align:center;}
   .group-label{font-size:11px;font-weight:800;color:${T.textMute};text-transform:uppercase;letter-spacing:.12em;margin:4px 2px 8px;}
+  /* Section repliable — esprit réglages iOS : en-tête cliquable, chevron qui
+     pivote, contenu qui se déploie en douceur. */
+  .collapse-head{display:flex;align-items:center;justify-content:space-between;width:100%;padding:13px 14px;background:${T.bg2};border:1px solid ${T.border};border-radius:12px;cursor:pointer;transition:background var(--dur-fast) var(--ease-out);}
+  .collapse-head:active{background:${T.bg3};transform:scale(.995);}
+  .collapse-head-left{display:flex;align-items:center;gap:10px;min-width:0;}
+  .collapse-title{font-size:14px;font-weight:700;color:${T.text};}
+  .collapse-count{font-size:11px;font-weight:700;color:${T.textMute};background:${T.bg3};padding:2px 7px;border-radius:20px;flex-shrink:0;}
+  .collapse-chevron{color:${T.textDim};font-size:13px;transition:transform var(--dur-base) var(--ease-out);flex-shrink:0;}
+  .collapse-chevron.open{transform:rotate(90deg);}
+  .collapse-body{overflow:hidden;animation:collapseIn var(--dur-base) var(--ease-out);}
+  @keyframes collapseIn{from{opacity:0;transform:translateY(-6px);}to{opacity:1;transform:translateY(0);}}
   .empty{text-align:center;padding:36px 18px;background:${T.bg2};border-radius:14px;border:1px solid ${T.border};}
   .empty-icon{font-size:38px;margin-bottom:10px;opacity:.6;}
   .empty-title{font-size:16px;font-weight:700;color:${T.text};margin-bottom:4px;}
@@ -1487,7 +1498,7 @@ function HaccpHub({data,go}){
   </div>);
 }
 
-function Temperatures({data,setData,user,db,reload,go}){
+function Temperatures({data,setData,user,db,reload,go,markLocalWrite}){
   const[editing,setEditing]=useState(null);const[pickedTemp,setPickedTemp]=useState(null);
   const[tempTab,setTempTab]=useState("positif"); // positif = frigos, negatif = congélateurs
   function openSlot(f,p){const e=getReleve(data,f.id,p);setEditing({fridge:f,period:p});setPickedTemp(e?e.temp:tempCenter(f.target));}
@@ -1496,9 +1507,10 @@ function Temperatures({data,setData,user,db,reload,go}){
     const date=todayStr();
     const fridgeId=editing.fridge.id, period=editing.period, time=nowTime();
     const res=await db.saveReleve({fridgeId,date,period,temp:pickedTemp,time,operatorId:user.id});
-    if(res?.error){alert("Le relevé n'a pas été enregistré. Vérifie la connexion Supabase.");await reload();return;}
+    if(res?.error){alert("Le relevé n'a pas été enregistré. Vérifie la connexion Supabase.");await reload({force:true});return;}
     // Mise à jour locale immédiate (pas de reload complet des 20 tables juste
     // pour un relevé) : on remplace ou ajoute l'entrée directement dans l'état.
+    markLocalWrite?.();
     setData(d=>{
       const existingIdx=d.fridgeReleves.findIndex(r=>r.fridgeId===fridgeId&&r.date===date&&r.period===period);
       const entry={id:existingIdx>=0?d.fridgeReleves[existingIdx].id:Date.now(),fridgeId,date,period,temp:pickedTemp,time,operatorId:user.id};
@@ -1549,17 +1561,18 @@ function Temperatures({data,setData,user,db,reload,go}){
   </div>);
 }
 
-function Reception({data,setData,user,db,reload,go}){
+function Reception({data,setData,user,db,reload,go,markLocalWrite}){
   const[show,setShow]=useState(false);const[temp,setTemp]=useState(3);const[aspect,setAspect]=useState("OK");const[emb,setEmb]=useState("OK");
   const[form,setForm]=useState({supplier:"",product:"",qty:"",dlc:"",lot:""});
   async function save(){
     if(!form.product)return;
     const res=await db.addReception({date:todayStr(),supplier:form.supplier,product:form.product,qty:form.qty,dlc:form.dlc,lot:form.lot,temp,tempOk:temp<=4,aspect,emballage:emb,signed:user.name});
-    if(res?.error){alert("La réception n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload();return;}
+    if(res?.error){alert("La réception n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload({force:true});return;}
     // Mise à jour locale immédiate à partir de la ligne réellement créée
     // (avec son vrai id Supabase) — pas de reload complet des 20 tables.
     if(res?.data){
       const r=res.data;
+      markLocalWrite?.();
       setData(d=>({...d,reception:[{id:r.id,date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,tempOk:r.temp_ok,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed},...d.reception]}));
     }
     setShow(false);setTemp(3);setAspect("OK");setEmb("OK");setForm({supplier:"",product:"",qty:"",dlc:"",lot:""});
@@ -1610,12 +1623,12 @@ function Cooling({data,setData,user,db,reload,go}){
   useEffect(()=>{if(step!==2)return;const i=setInterval(()=>setElapsed(Math.floor((Date.now()-startMs)/1000)),1000);return()=>clearInterval(i);},[step,startMs]);
   const fmt=s=>`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
   const limitSec=Math.max(1,safeNum(maxMin,120))*60;const overtime=elapsed>limitSec;const progress=startMs?safePct(elapsed,limitSec):0;
-  async function start(){const r=await db.startCooling({product:form.product,qty:form.qty,startTemp,startedMs:Date.now(),operator:user.name,date:todayStr()});if(r.data)setActiveCoolingId(r.data.id);setStartMs(Date.now());setElapsed(0);setStep(2);await reload();}
+  async function start(){const r=await db.startCooling({product:form.product,qty:form.qty,startTemp,startedMs:Date.now(),operator:user.name,date:todayStr()});if(r.data)setActiveCoolingId(r.data.id);setStartMs(Date.now());setElapsed(0);setStep(2);await reload({force:true});}
   async function finish(){const dur=Math.floor(elapsed/60);const conform=mode==="surgel"?(endTemp<=-18):(dur<=maxMin&&endTemp<=10);const status=conform?"ok":"alert";
     const dlc=M.dlcMonths
       ? (()=>{const d=new Date();d.setMonth(d.getMonth()+M.dlcMonths);return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"2-digit"});})()
       : new Date(Date.now()+data.haccpSettings.labelDlcDefault*86400000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
-    if(activeCoolingId)await db.finishCooling(activeCoolingId,{endTemp,duration:dur,status,dlc,mode});await reload();setShow(false);setStep(0);setMode("refroid");setStartMs(null);setElapsed(0);setStartTemp(65);setEndTemp(8);setForm({product:"",qty:""});setActiveCoolingId(null);}
+    if(activeCoolingId)await db.finishCooling(activeCoolingId,{endTemp,duration:dur,status,dlc,mode});await reload({force:true});setShow(false);setStep(0);setMode("refroid");setStartMs(null);setElapsed(0);setStartTemp(65);setEndTemp(8);setForm({product:"",qty:""});setActiveCoolingId(null);}
   const coolingDone=data.cooling.filter(c=>c.status!=="active");
   return(<div className="page">
     <GbphHelpButton section="temp" go={go}/>
@@ -1667,16 +1680,16 @@ function Cooling({data,setData,user,db,reload,go}){
   </div>);
 }
 
-function Reheating({data,setData,user,db,reload,go}){
+function Reheating({data,setData,user,db,reload,go,markLocalWrite}){
   const[show,setShow]=useState(false);const[form,setForm]=useState({product:""});const[endTemp,setEndTemp]=useState(65);const[duration,setDuration]=useState(30);
   const{reheatMin,reheatMaxTime}=data.haccpSettings;
   async function save(){
     if(!form.product)return;
     const status=endTemp>=reheatMin&&duration<=reheatMaxTime?"ok":"alert";
     const res=await db.addReheating({product:form.product,endTemp,duration,operator:user.name,status,date:todayStr()});
-    if(res?.error){alert("La remise en température n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload();return;}
+    if(res?.error){alert("La remise en température n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload({force:true});return;}
     // Mise à jour locale immédiate — évite de recharger les 20 tables.
-    if(res?.data){const r=res.data;setData(d=>({...d,reheating:[{id:r.id,product:r.product,endTemp:r.end_temp,duration:r.duration,operator:r.operator,status:r.status,date:r.date},...d.reheating]}));}
+    if(res?.data){const r=res.data;markLocalWrite?.();setData(d=>({...d,reheating:[{id:r.id,product:r.product,endTemp:r.end_temp,duration:r.duration,operator:r.operator,status:r.status,date:r.date},...d.reheating]}));}
     setShow(false);setForm({product:""});setEndTemp(65);setDuration(30);
   }
   return(<div className="page">
@@ -1699,7 +1712,7 @@ function Reheating({data,setData,user,db,reload,go}){
   </div>);
 }
 
-function Oils({data,setData,user,db,reload,go}){
+function Oils({data,setData,user,db,reload,go,markLocalWrite}){
   const[selOil,setSelOil]=useState(null);const[polaires,setPolaires]=useState(15);const[action,setAction]=useState("filtered");
   const[showAdd,setShowAdd]=useState(false);const[newOil,setNewOil]=useState({name:"",type:"Tournesol"});
   const max=data.haccpSettings.oilPolarMax;
@@ -1707,8 +1720,9 @@ function Oils({data,setData,user,db,reload,go}){
   async function save(){
     const oilId=selOil.id, changed=action==="changed", today=todayStr();
     const res=await db.updateOil(oilId,{polaires,operator:user.name,changed,dateInstall:today});
-    if(res?.error){alert("Le test n'a pas été enregistré. Vérifie la connexion Supabase.");await reload();return;}
+    if(res?.error){alert("Le test n'a pas été enregistré. Vérifie la connexion Supabase.");await reload({force:true});return;}
     // Mise à jour locale immédiate — évite de recharger les 20 tables.
+    markLocalWrite?.();
     setData(d=>({...d,oils:d.oils.map(o=>o.id===oilId
       ? {...o,polaires,operator:user.name,lastTest:today,...(changed?{dateInstall:today}:{})}
       : o)}));
@@ -1718,15 +1732,16 @@ function Oils({data,setData,user,db,reload,go}){
   async function addOil(){
     if(!newOil.name.trim())return;
     const res=await db.addOil({name:newOil.name.trim(),type:newOil.type,operator:user.name});
-    if(res?.error){alert("La friteuse n'a pas été ajoutée. Vérifie la connexion Supabase.");await reload();return;}
-    if(res?.data){const o=res.data;setData(d=>({...d,oils:[...d.oils,{id:o.id,name:o.name,type:o.type,dateInstall:o.date_install,lastTest:o.last_test,polaires:o.polaires,operator:o.operator}]}));}
+    if(res?.error){alert("La friteuse n'a pas été ajoutée. Vérifie la connexion Supabase.");await reload({force:true});return;}
+    if(res?.data){const o=res.data;markLocalWrite?.();setData(d=>({...d,oils:[...d.oils,{id:o.id,name:o.name,type:o.type,dateInstall:o.date_install,lastTest:o.last_test,polaires:o.polaires,operator:o.operator}]}));}
     setShowAdd(false);setNewOil({name:"",type:"Tournesol"});
   }
 
   async function removeOil(o){
     if(!window.confirm(`Retirer "${o.name}" du suivi des huiles ?`))return;
     const res=await db.deleteOil(o.id);
-    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload();return;}
+    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload({force:true});return;}
+    markLocalWrite?.();
     setData(d=>({...d,oils:d.oils.filter(x=>x.id!==o.id)}));
   }
 
@@ -1780,7 +1795,7 @@ function Oils({data,setData,user,db,reload,go}){
   </div>);
 }
 
-function Traceability({data,setData,db,reload,go}){
+function Traceability({data,setData,db,reload,go,markLocalWrite}){
   const[show,setShow]=useState(false);const[photo,setPhoto]=useState(null); // base64 de la photo capturée, en attente d'enregistrement
   const[filter,setFilter]=useState("all");
   const[detail,setDetail]=useState(null); // fiche sélectionnée pour voir sa photo en grand
@@ -1794,8 +1809,8 @@ function Traceability({data,setData,db,reload,go}){
   async function save(){
     if(!form.product)return;
     const res=await db.addTraceability({product:form.product,emoji:"📦",supplier:form.supplier,lot:form.lot,dlc:form.dlc,qty:form.qty,allergenes:form.allergenes?form.allergenes.split(",").map(a=>a.trim()).filter(Boolean):[],status:"ok",photo});
-    if(res?.error){alert("Le produit n'a pas été enregistré. Vérifie la connexion Supabase.");await reload();return;}
-    if(res?.data){const t=res.data;setData(d=>({...d,traceability:[{id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status,photo:t.photo||null},...d.traceability]}));}
+    if(res?.error){alert("Le produit n'a pas été enregistré. Vérifie la connexion Supabase.");await reload({force:true});return;}
+    if(res?.data){const t=res.data;markLocalWrite?.();setData(d=>({...d,traceability:[{id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status,photo:t.photo||null},...d.traceability]}));}
     setShow(false);setPhoto(null);setForm({product:"",supplier:"",lot:"",dlc:"",qty:"",allergenes:""});
   }
   const filtered=filter==="all"?data.traceability:filter==="alerts"?data.traceability.filter(t=>t.status!=="ok"):data.traceability.filter(t=>t.status==="ok");
@@ -1843,7 +1858,7 @@ const CLEAN_FREQS = [
   {key:"Après usage",label:"Après usage",icon:"🔁"},
 ];
 
-function Cleaning({data,setData,db,reload,go}){
+function Cleaning({data,setData,db,reload,go,markLocalWrite}){
   const[busy,setBusy]=useState(null);
   const[tab,setTab]=useState("Quotidien");
 
@@ -1854,12 +1869,13 @@ function Cleaning({data,setData,db,reload,go}){
     const next=!c.done;
     const stamp=next?new Date().toISOString():null;
     setBusy(id);
+    markLocalWrite?.();
     setData(d=>({...d,cleaning:d.cleaning.map(x=>x.id===id?{...x,done:next,doneAt:stamp}:x)}));
     const res=await db.toggleCleaning(id,next);
     setBusy(null);
     if(res?.error){
       alert("Le nettoyage n'a pas été enregistré. Vérifie la connexion Supabase.");
-      await reload?.();
+      await reload?.({force:true});
     }
   }
 
@@ -1890,12 +1906,13 @@ function Cleaning({data,setData,db,reload,go}){
     setBusy("all");
     const stamp = new Date().toISOString();
     const ids = pending.map(c=>c.id);
+    markLocalWrite?.();
     setData(d=>({...d,cleaning:d.cleaning.map(x=>ids.includes(x.id)?{...x,done:true,doneAt:stamp}:x)}));
     const results = await Promise.all(ids.map(id=>db.toggleCleaning(id,true)));
     setBusy(null);
     if(results.some(r=>r?.error)){
       alert("Certaines zones n'ont pas été enregistrées. Vérifie la connexion Supabase.");
-      await reload?.();
+      await reload?.({force:true});
       return;
     }
     haptic.success();
@@ -2236,7 +2253,7 @@ async function printBrotherLabel(labelData){
   return {ok:true};
 }
 
-function Labels({data,setData,user,db,reload,go}){
+function Labels({data,setData,user,db,reload,go,markLocalWrite}){
   const[show,setShow]=useState(false);
   const[form,setForm]=useState({product:"",allergens:"",qty:""});
   const[dateType,setDateType]=useState("fabrique");           // clé DATE_TYPES
@@ -2256,7 +2273,8 @@ function Labels({data,setData,user,db,reload,go}){
     const ok = window.confirm(`Purger ${oldOnes.length} étiquette${oldOnes.length>1?"s":""} des jours précédents ?\n\nLes étiquettes d'aujourd'hui sont conservées. Cette action est définitive.`);
     if(!ok) return;
     const res = await db.purgeOldLabels?.();
-    if(res?.error){ alert("La purge a échoué. Vérifie la connexion Supabase."); await reload?.(); return; }
+    if(res?.error){ alert("La purge a échoué. Vérifie la connexion Supabase."); await reload?.({force:true}); return; }
+    markLocalWrite?.();
     setData(d=>({...d,labels:d.labels.filter(l=>l.dateProd===todayShort)}));
     haptic.success();
   }
@@ -2281,7 +2299,7 @@ function Labels({data,setData,user,db,reload,go}){
     const n=Math.max(1,parseInt(copies)||1);
     for(let i=0;i<n;i++){ printBrotherLabel(label); }
     await db.addLabel({product:label.product,dateProd:label.startDateStr,dlc:label.dlc,lot:label.lot,allergens:label.allergens,operator:user.name,dateType});
-    await reload();
+    await reload({force:true});
     setShow(false); setForm({product:"",allergens:"",qty:""}); setDateType("fabrique"); setStartDate(""); setCustomDlc(null); setCopies(1);
   }
 
@@ -2399,14 +2417,14 @@ function Labels({data,setData,user,db,reload,go}){
   </div>);
 }
 
-function TestMeals({data,setData,user,db,reload,go}){
+function TestMeals({data,setData,user,db,reload,go,markLocalWrite}){
   const[show,setShow]=useState(false);const[form,setForm]=useState({product:"",service:"Midi",qty:"100 g"});
   const days=data.haccpSettings.testMealDays;
   async function save(){
     const destroy=new Date(Date.now()+days*86400000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
     const res=await db.addTestMeal({date:todayStr(),product:form.product,service:form.service,qty:form.qty,destroyAt:destroy,operator:user.name});
-    if(res?.error){alert("Le plat témoin n'a pas été enregistré. Vérifie la connexion Supabase.");await reload();return;}
-    if(res?.data){const m=res.data;setData(d=>({...d,testMeals:[{id:m.id,date:m.date,service:m.service,product:m.product,qty:m.qty,destroyAt:m.destroy_at,operator:m.operator},...d.testMeals]}));}
+    if(res?.error){alert("Le plat témoin n'a pas été enregistré. Vérifie la connexion Supabase.");await reload({force:true});return;}
+    if(res?.data){const m=res.data;markLocalWrite?.();setData(d=>({...d,testMeals:[{id:m.id,date:m.date,service:m.service,product:m.product,qty:m.qty,destroyAt:m.destroy_at,operator:m.operator},...d.testMeals]}));}
     setShow(false);setForm({product:"",service:"Midi",qty:"100 g"});
   }
   return(<div className="page">
@@ -2424,12 +2442,12 @@ function TestMeals({data,setData,user,db,reload,go}){
   </div>);
 }
 
-function Pests({data,setData,db,reload,go}){
+function Pests({data,setData,db,reload,go,markLocalWrite}){
   const[show,setShow]=useState(false);const[form,setForm]=useState({type:"Visite contrat",company:"",result:"RAS",nextVisit:""});
   async function save(){
     const res=await db.addPest({date:todayStr(),type:form.type,company:form.company,result:form.result,nextVisit:form.nextVisit});
-    if(res?.error){alert("L'intervention n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload();return;}
-    if(res?.data){const p=res.data;setData(d=>({...d,pests:[{id:p.id,date:p.date,type:p.type,company:p.company,result:p.result,nextVisit:p.next_visit},...d.pests]}));}
+    if(res?.error){alert("L'intervention n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload({force:true});return;}
+    if(res?.data){const p=res.data;markLocalWrite?.();setData(d=>({...d,pests:[{id:p.id,date:p.date,type:p.type,company:p.company,result:p.result,nextVisit:p.next_visit},...d.pests]}));}
     setShow(false);setForm({type:"Visite contrat",company:"",result:"RAS",nextVisit:""});
   }
   return(<div className="page">
@@ -2587,13 +2605,13 @@ function RecipeEditor({recipe,allRecipes,products=[],defaultType="plat",onSave,o
   </div>);
 }
 
-function Recipes({data,setData,db,reload,user}){
+function Recipes({data,setData,db,reload,user,markLocalWrite}){
   const[view,setView]=useState("list");const[sel,setSel]=useState(null);const[typeFilter,setTypeFilter]=useState("plat");
   const allRecipes=data.recipes;
   const filtered=allRecipes.filter(r=>r.type===typeFilter);
   const nbPlats=allRecipes.filter(r=>r.type==="plat").length;
   const nbPreps=allRecipes.filter(r=>r.type==="mere").length;
-  if(view==="edit")return<RecipeEditor recipe={sel?allRecipes.find(r=>r.id===sel):null} defaultType={typeFilter} allRecipes={allRecipes} products={data.products||[]} onSave={async(rec)=>{await db.saveRecipe(rec);await reload();setView("list");setSel(null);}} onCancel={()=>{setView("list");setSel(null);}}/>;
+  if(view==="edit")return<RecipeEditor recipe={sel?allRecipes.find(r=>r.id===sel):null} defaultType={typeFilter} allRecipes={allRecipes} products={data.products||[]} onSave={async(rec)=>{await db.saveRecipe(rec);await reload({force:true});setView("list");setSel(null);}} onCancel={()=>{setView("list");setSel(null);}}/>;
   if(view==="detail"&&sel)return<RecipeDetail recipe={allRecipes.find(r=>r.id===sel)} allRecipes={allRecipes} onBack={()=>{setView("list");setSel(null);}} onEdit={()=>setView("edit")}/>;
   return(<div className="page"><div className="section-title">Fiches techniques</div><div className="section-sub">{nbPlats} plat{nbPlats>1?"s":""} · {nbPreps} préparation{nbPreps>1?"s":""}</div>
     <SegmentedControl value={typeFilter} onChange={setTypeFilter} options={[{value:"plat",label:`🍽️ Plats${nbPlats?` (${nbPlats})`:""}`},{value:"mere",label:`🧪 Préparations${nbPreps?` (${nbPreps})`:""}`}]}/>
@@ -2604,7 +2622,8 @@ function Recipes({data,setData,db,reload,user}){
       const row=<div className="item" style={{marginBottom:0}} onClick={()=>{setSel(rec.id);setView("detail");}}><div className="item-icon" style={{background:rec.type==="mere"?T.warnBg:T.infoBg}}>{rec.emoji}</div><div className="item-body"><div className="item-title">{rec.name}</div><div className="item-sub">{rec.type==="mere"?<>{rec.yield?.qty||0} {rec.yield?.unit||"u"} · {cost.toFixed(2)} €/{rec.yield?.unit||"u"}</>:<>{rec.category} · {rec.price} €</>}</div></div>{rec.type==="plat"?<span className={`badge ${m>=70?"b-good":m>=50?"b-info":"b-bad"}`}>{m}%</span>:<span className="badge b-warn tabular">{cost.toFixed(2)} €</span>}</div>;
       return(<SwipeToDelete key={rec.id} enabled={!!user?.isAdmin} confirmLabel={`Supprimer "${rec.name}" ?`} onDelete={async()=>{
         const res=await db.deleteRecipe(rec.id);
-        if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload();return;}
+        if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload({force:true});return;}
+        markLocalWrite?.();
         setData(d=>({...d,recipes:d.recipes.filter(r=>r.id!==rec.id)}));
       }}>{row}</SwipeToDelete>);
     })}
@@ -2634,7 +2653,7 @@ function Tasks({data,setData,db,reload}){
     const next=!t.done;
     setData(d=>({...d,tasks:d.tasks.map(x=>x.id===id?{...x,done:next}:x)}));
     const res=await db.toggleTask(id,next);
-    if(res?.error){alert("La tâche n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload?.();}
+    if(res?.error){alert("La tâche n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload?.({force:true});}
   }
   async function add(){
     const cleanTask=form.task.trim();
@@ -2645,7 +2664,7 @@ function Tasks({data,setData,db,reload}){
     const res=await db.addTask(payload);
     setBusy(false);
     if(res?.error){alert("Impossible d'ajouter la tâche. Vérifie la connexion Supabase.");return;}
-    await reload();setShow(false);setForm({task:"",resp:"",qty:"",prio:"med",categoryId:null});
+    await reload({force:true});setShow(false);setForm({task:"",resp:"",qty:"",prio:"med",categoryId:null});
   }
   async function endService(){
     if(!crenauTasks.length||busy)return;
@@ -2655,8 +2674,8 @@ function Tasks({data,setData,db,reload}){
     setBusy(true);
     const res=await db.clearTasks?.(crenauDateStr,service);
     setBusy(false);
-    if(res?.error){alert("Impossible de clôturer le créneau. Rien n'a été supprimé.");await reload?.();return;}
-    await reload();
+    if(res?.error){alert("Impossible de clôturer le créneau. Rien n'a été supprimé.");await reload?.({force:true});return;}
+    await reload({force:true});
     setFilter("all");
     haptic.success();
   }
@@ -2715,7 +2734,7 @@ function Margins({data}){
 // ─── PLANNING ÉQUIPE — semaine réelle, créneaux stockés en base ───────────────
 const isoDate=(d)=>d.toISOString().slice(0,10);
 function mondayOf(d){const x=new Date(d);const wd=(x.getDay()+6)%7;x.setDate(x.getDate()-wd);x.setHours(0,0,0,0);return x;}
-function Planning({data,user,db,reload}){
+function Planning({data,setData,user,db,reload,markLocalWrite}){
   const[weekStart,setWeekStart]=useState(()=>mondayOf(new Date()));
   const[dayIdx,setDayIdx]=useState(()=>((new Date().getDay()+6)%7));
   const[sheet,setSheet]=useState(null); // null | {shift?} pour ajout/édition
@@ -2733,13 +2752,13 @@ function Planning({data,user,db,reload}){
   async function save(){
     if(!sheet.userId||!sheet.start||!sheet.end)return;
     const res = sheet.id ? await db.updateShift(sheet.id,sheet) : await db.addShift(sheet);
-    if(res?.error){ alert("Le créneau n'a pas été enregistré. Vérifie la connexion Supabase."); await reload(); return; }
-    await reload();setSheet(null);
+    if(res?.error){ alert("Le créneau n'a pas été enregistré. Vérifie la connexion Supabase."); await reload({force:true}); return; }
+    await reload({force:true});setSheet(null);
   }
   async function remove(){
     if(!sheet?.id)return;
     if(!window.confirm("Supprimer ce créneau ?"))return;
-    await db.deleteShift(sheet.id);await reload();setSheet(null);
+    await db.deleteShift(sheet.id);await reload({force:true});setSheet(null);
   }
   const totalWeekH=(uid)=>{
     const mins=shifts.filter(s=>s.userId===uid&&days.some(d=>isoDate(d)===s.date)).reduce((a,s)=>{
@@ -2823,7 +2842,8 @@ function Planning({data,user,db,reload}){
           </div>);
           return(<SwipeToDelete key={s.id} enabled={isAdmin} confirmLabel={`Supprimer le créneau de ${u?.name||"ce membre"} (${s.start}–${s.end}) ?`} onDelete={async()=>{
             const res=await db.deleteShift(s.id);
-            if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload();return;}
+            if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload({force:true});return;}
+            markLocalWrite?.();
             setData(d=>({...d,shifts:d.shifts.filter(x=>x.id!==s.id)}));
           }}>{row}</SwipeToDelete>);
         })}
@@ -2856,35 +2876,88 @@ function Planning({data,user,db,reload}){
   </div>);
 }
 
-function ProductsEditor({data,setData,db,reload}){
+// Catégories proposées par défaut. Ce ne sont que des suggestions : la colonne
+// en base est du texte libre, l'utilisateur peut créer les siennes depuis le
+// formulaire produit ("+ Autre").
+const PRODUCT_CATEGORIES = ["Poissons","Viandes","Légumes","Fruits","Crémerie","Épicerie","Boissons","Surgelés"];
+const CATEGORY_ICONS = {
+  "Poissons":"🐟","Viandes":"🥩","Légumes":"🥕","Fruits":"🍋",
+  "Crémerie":"🧀","Épicerie":"🧂","Boissons":"🍷","Surgelés":"🧊",
+};
+
+function ProductsEditor({data,setData,db,reload,markLocalWrite}){
   const[showAdd,setShowAdd]=useState(false);const[editing,setEditing]=useState(null);
-  const[form,setForm]=useState({name:"",price:"",unit:"kg"});
-  function openAdd(){setEditing(null);setForm({name:"",price:"",unit:"kg"});setShowAdd(true);}
-  function openEdit(p){setEditing(p);setForm({name:p.name,price:p.price.toString(),unit:p.unit});setShowAdd(true);}
+  const[form,setForm]=useState({name:"",price:"",unit:"kg",category:"Épicerie"});
+  const[customCat,setCustomCat]=useState(""); // saisie d'une catégorie hors liste
+
+  function openAdd(){setEditing(null);setForm({name:"",price:"",unit:"kg",category:"Épicerie"});setCustomCat("");setShowAdd(true);}
+  function openEdit(p){setEditing(p);setForm({name:p.name,price:p.price.toString(),unit:p.unit,category:p.category||"Épicerie"});setCustomCat("");setShowAdd(true);}
+
   async function save(){
     if(!form.name.trim())return;
-    const payload={name:form.name.trim(),price:parseFloat(String(form.price).replace(",","."))||0,unit:form.unit};
-    if(editing)await db.updateProduct(editing.id,payload); else await db.addProduct(payload);
-    await reload(); setShowAdd(false); setEditing(null);
+    const category = (customCat.trim() || form.category || "Épicerie");
+    const payload={name:form.name.trim(),price:parseFloat(String(form.price).replace(",","."))||0,unit:form.unit,category};
+    const res = editing ? await db.updateProduct(editing.id,payload) : await db.addProduct(payload);
+    if(res?.error){alert("Le produit n'a pas été enregistré. Vérifie la connexion Supabase.");await reload({force:true});return;}
+    await reload({force:true}); setShowAdd(false); setEditing(null); setCustomCat("");
   }
+
   async function remove(p){
     if(!window.confirm(`Supprimer "${p.name}" du catalogue ?`))return;
     const res=await db.deleteProduct(p.id);
-    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload();return;}
+    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload({force:true});return;}
+    markLocalWrite?.();
     setData(d=>({...d,products:d.products.filter(x=>x.id!==p.id)}));
   }
-  const sorted=[...(data.products||[])].sort((a,b)=>a.name.localeCompare(b.name));
+
+  const all=[...(data.products||[])];
+  // Regroupe par catégorie. Les catégories créées par l'utilisateur (hors liste
+  // par défaut) apparaissent aussi, après les catégories standard.
+  const usedCats=[...new Set(all.map(p=>p.category||"Épicerie"))];
+  const orderedCats=[
+    ...PRODUCT_CATEGORIES.filter(cat=>usedCats.includes(cat)),
+    ...usedCats.filter(cat=>!PRODUCT_CATEGORIES.includes(cat)).sort(),
+  ];
+
   return(<><div className="text-xs text-dim mb12" style={{lineHeight:1.5}}>Prix d'achat de vos matières premières. Utilisés pour calculer automatiquement le coût de vos fiches techniques.</div>
-    {sorted.length===0&&<div className="empty"><div className="empty-icon">🧾</div><div className="empty-title">Aucun produit</div><div className="empty-sub">Ajoutez vos matières premières et leurs prix</div></div>}
-    {sorted.map(p=><div key={p.id} className="item">
-      <div className="item-icon" style={{background:T.infoBg}}>🧾</div>
-      <div className="item-body"><div className="item-title">{p.name}</div><div className="item-sub">{p.price.toFixed(2)} € / {p.unit}</div></div>
-      <div className="row gap6"><button onClick={()=>openEdit(p)} style={{background:"transparent",border:"none",color:T.textDim,fontSize:16,padding:"6px 8px"}}>✏️</button><button onClick={()=>remove(p)} style={{background:"transparent",border:"none",color:T.bad,fontSize:16,padding:"6px 8px"}}>🗑</button></div>
-    </div>)}
-    <button className="btn btn-primary mt8" onClick={openAdd}>+ Nouveau produit</button>
+    {all.length===0&&<div className="empty"><div className="empty-icon">🧾</div><div className="empty-title">Aucun produit</div><div className="empty-sub">Ajoutez vos matières premières et leurs prix</div></div>}
+
+    {orderedCats.map(cat=>{
+      const items=all.filter(p=>(p.category||"Épicerie")===cat).sort((a,b)=>a.name.localeCompare(b.name));
+      return(
+        <CollapsibleSection key={cat} title={cat} icon={CATEGORY_ICONS[cat]||"📦"} count={items.length}>
+          {items.map(p=><div key={p.id} className="item">
+            <div className="item-icon" style={{background:T.infoBg}}>{CATEGORY_ICONS[cat]||"🧾"}</div>
+            <div className="item-body"><div className="item-title">{p.name}</div><div className="item-sub">{p.price.toFixed(2)} € / {p.unit}</div></div>
+            <div className="row gap6"><button onClick={()=>openEdit(p)} style={{background:"transparent",border:"none",color:T.textDim,fontSize:16,padding:"6px 8px"}}>✏️</button><button onClick={()=>remove(p)} style={{background:"transparent",border:"none",color:T.bad,fontSize:16,padding:"6px 8px"}}>🗑</button></div>
+          </div>)}
+        </CollapsibleSection>
+      );
+    })}
+
+    <button className="btn btn-primary mt14" onClick={openAdd}>+ Nouveau produit</button>
+
     {showAdd&&<div className="overlay" onClick={()=>setShowAdd(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">{editing?"Modifier le produit":"Nouveau produit"}</div>
       <div className="field"><label className="label">Nom</label><input className="input" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="ex : Filet de bar"/></div>
+
+      <div className="field"><label className="label">Catégorie</label>
+        <div className="chips">
+          {PRODUCT_CATEGORIES.map(cat=>(
+            <button key={cat} className={`chip ${!customCat && form.category===cat?"sel":""}`} onClick={()=>{setForm({...form,category:cat});setCustomCat("");}}>
+              {CATEGORY_ICONS[cat]} {cat}
+            </button>
+          ))}
+          {/* Catégories déjà créées par l'utilisateur, pour les réutiliser d'un tap */}
+          {usedCats.filter(cat=>!PRODUCT_CATEGORIES.includes(cat)).map(cat=>(
+            <button key={cat} className={`chip ${!customCat && form.category===cat?"sel":""}`} onClick={()=>{setForm({...form,category:cat});setCustomCat("");}}>
+              📦 {cat}
+            </button>
+          ))}
+        </div>
+        <input className="input input-sm mt6" value={customCat} onChange={e=>setCustomCat(e.target.value)} placeholder="+ Autre catégorie (ex : Épices)"/>
+      </div>
+
       <div className="row gap8"><div style={{flex:1}}><label className="label">Prix d'achat</label><input className="input input-sm" type="text" inputMode="decimal" value={form.price} onChange={e=>{const v=e.target.value;if(/^\d*[.,]?\d*$/.test(v))setForm({...form,price:v});}} placeholder="ex : 18.50"/></div>
         <div style={{flex:0,width:90}}><label className="label">Pour</label><select className="input input-sm" value={form.unit} onChange={e=>setForm({...form,unit:e.target.value})}><option value="kg">1 kg</option><option value="L">1 L</option><option value="pce">1 pièce</option></select></div></div>
       <div className="text-xs text-dim mb14">Le coût sera calculé automatiquement selon la quantité utilisée dans chaque recette (g, kg, ml, L ou pièces).</div>
@@ -2900,8 +2973,8 @@ function TaskCategoriesEditor({data,setData,db,reload}){
   const PRESET_ICONS=["❄️","🔥","🍰","🥖","🥩","🐟","🥗","🍷","🧀","☕","🧂","📋"];
   function openAdd(){setEditing(null);setForm({name:"",icon:"📋",color:PRESET_COLORS[0]});setShowAdd(true);}
   function openEdit(cat){setEditing(cat);setForm({name:cat.name,icon:cat.icon,color:cat.color});setShowAdd(true);}
-  async function save(){if(!form.name.trim())return;await db.saveTaskCategory(editing?{...form,id:editing.id}:{...form});await reload();setShowAdd(false);setEditing(null);}
-  async function remove(catId){const tasksInCat=data.tasks.filter(t=>t.categoryId===catId).length;const msg=tasksInCat>0?`${tasksInCat} tâche(s) seront déplacées. Supprimer ?`:"Supprimer cette catégorie ?";if(!window.confirm(msg))return;const remaining=data.taskCategories.filter(c=>c.id!==catId);const fallbackId=remaining[0]?.id;await db.deleteTaskCategory(catId,fallbackId);await reload();}
+  async function save(){if(!form.name.trim())return;await db.saveTaskCategory(editing?{...form,id:editing.id}:{...form});await reload({force:true});setShowAdd(false);setEditing(null);}
+  async function remove(catId){const tasksInCat=data.tasks.filter(t=>t.categoryId===catId).length;const msg=tasksInCat>0?`${tasksInCat} tâche(s) seront déplacées. Supprimer ?`:"Supprimer cette catégorie ?";if(!window.confirm(msg))return;const remaining=data.taskCategories.filter(c=>c.id!==catId);const fallbackId=remaining[0]?.id;await db.deleteTaskCategory(catId,fallbackId);await reload({force:true});}
   return(<><div className="text-xs text-dim mb12" style={{lineHeight:1.5}}>Organisez votre mise en place par zones de production.</div>
     {data.taskCategories.map(cat=>{const count=data.tasks.filter(t=>t.categoryId===cat.id).length;return(<div key={cat.id} className="item" style={{borderLeft:`3px solid ${cat.color}`}}><div className="item-icon" style={{background:`${cat.color}22`}}>{cat.icon}</div><div className="item-body"><div className="item-title">{cat.name}</div><div className="item-sub">{count} tâche{count>1?"s":""}</div></div><div className="row gap6"><button onClick={()=>openEdit(cat)} style={{background:"transparent",border:"none",color:T.textDim,fontSize:16,padding:"6px 8px"}}>✏️</button><button onClick={()=>remove(cat.id)} style={{background:"transparent",border:"none",color:T.bad,fontSize:16,padding:"6px 8px"}}>🗑</button></div></div>);})}
     <button className="btn btn-primary mt8" onClick={openAdd}>+ Nouvelle catégorie</button>
@@ -2950,6 +3023,26 @@ function SettingsRestaurant({data,setData,db}){
 }
 
 // Ligne éditable générique : tap = focus champ, appui long = supprimer
+// Section de réglages repliable : évite les listes interminables quand le
+// nombre d'enceintes ou de zones grandit. Fermée par défaut, elle affiche le
+// nombre d'éléments qu'elle contient pour rester informative sans être ouverte.
+function CollapsibleSection({title, icon, count, defaultOpen=false, children}){
+  const[open,setOpen]=useState(defaultOpen);
+  return(
+    <div style={{marginTop:16}}>
+      <button className="collapse-head" onClick={()=>{haptic.light();setOpen(o=>!o);}}>
+        <span className="collapse-head-left">
+          {icon&&<span style={{fontSize:17}}>{icon}</span>}
+          <span className="collapse-title">{title}</span>
+          {count>0&&<span className="collapse-count">{count}</span>}
+        </span>
+        <span className={`collapse-chevron ${open?"open":""}`}>›</span>
+      </button>
+      {open&&<div className="collapse-body" style={{paddingTop:10}}>{children}</div>}
+    </div>
+  );
+}
+
 function EditableRow({icon,iconBg,onDelete,children,onOpen}){
   const lp=useLongPress(()=>{ if(navigator.vibrate)navigator.vibrate(20); onDelete(); });
   return(
@@ -2986,7 +3079,7 @@ function SettingsHaccp({data,setData,db,reload}){
     const s={coolingMax:parseInt(seuils.coolingMax)||0,reheatMin:parseInt(seuils.reheatMin)||0,reheatMaxTime:parseInt(seuils.reheatMaxTime)||0,oilPolarMax:parseInt(seuils.oilPolarMax)||0,testMealDays:parseInt(seuils.testMealDays)||0,labelDlcDefault:parseInt(seuils.labelDlcDefault)||0};
     setData(d=>({...d,haccpSettings:{...d.haccpSettings,...s}}));
     const res=await db.saveHaccpSettings(s);
-    if(res?.error){alert("Les seuils n'ont pas été enregistrés. Vérifie la connexion Supabase.");await reload?.();return;}
+    if(res?.error){alert("Les seuils n'ont pas été enregistrés. Vérifie la connexion Supabase.");await reload?.({force:true});return;}
     toast.ping();
   }
 
@@ -3005,13 +3098,13 @@ function SettingsHaccp({data,setData,db,reload}){
       setData(d=>({...d,haccpSettings:{...d.haccpSettings,fridgeTargets:[...fridges,nf]}}));
       res=await db.addFridgeTarget?.(fForm);
     }
-    if(res?.error){alert("L'équipement n'a pas été enregistré. Vérifie la connexion Supabase.");await reload?.();return;}
+    if(res?.error){alert("L'équipement n'a pas été enregistré. Vérifie la connexion Supabase.");await reload?.({force:true});return;}
     setSheet(null); toast.ping(); reload?.();
   }
   async function delFridge(f){
     setData(d=>({...d,haccpSettings:{...d.haccpSettings,fridgeTargets:fridges.filter(x=>x.id!==f.id)}}));
     const res=await db.deleteFridgeTarget?.(f.id);
-    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload?.();return;}
+    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload?.({force:true});return;}
     toast.ping();
   }
   async function saveClean(){
@@ -3026,18 +3119,18 @@ function SettingsHaccp({data,setData,db,reload}){
       setData(d=>({...d,cleaning:[...cleaningItems,nc]}));
       res=await db.addCleaningItem?.(cForm);
     }
-    if(res?.error){alert("La zone n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload?.();return;}
+    if(res?.error){alert("La zone n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload?.({force:true});return;}
     setSheet(null); toast.ping(); reload?.();
   }
   async function delClean(c){
     setData(d=>({...d,cleaning:cleaningItems.filter(x=>x.id!==c.id)}));
     const res=await db.deleteCleaningItem?.(c.id);
-    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload?.();return;}
+    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload?.({force:true});return;}
     toast.ping();
   }
 
   return(<>
-    <div className="group-label">Seuils critiques</div>
+    <CollapsibleSection title="Seuils critiques" icon="⚖️" count={6} defaultOpen={true}>
     {[
       ["Refroidissement max","coolingMax","min","Légal : 120"],
       ["Remise en T° minimum","reheatMin","°C","Légal : 63"],
@@ -3057,29 +3150,32 @@ function SettingsHaccp({data,setData,db,reload}){
         </div>
       </div>
     ))}
+    </CollapsibleSection>
 
-    <div className="group-label" style={{marginTop:20}}>Enceintes froides</div>
-    <div className="text-xs text-dim mb8" style={{marginLeft:2}}>Touchez pour modifier · appui long pour supprimer</div>
-    {fridges.map(f=>{
-      const lastR=data.fridgeReleves.filter(r=>r.fridgeId===f.id).sort((a,b)=>b.id-a.id)[0];
-      return(
-        <EditableRow key={f.id} icon={f.icon} iconBg={T.infoBg} onOpen={()=>openFridge(f)} onDelete={()=>{if(window.confirm(`Supprimer ${f.name} ?`))delFridge(f);}}>
-          <div className="item-title">{f.name}</div>
-          <div className="item-sub">Cible {f.target}°C · {f.type==="negatif"?"Négatif":"Positif"}{lastR?` · ${lastR.temp}°`:""}</div>
+    <CollapsibleSection title="Enceintes froides" icon="🌡️" count={fridges.length}>
+      <div className="text-xs text-dim mb8" style={{marginLeft:2}}>Touchez pour modifier · appui long pour supprimer</div>
+      {fridges.map(f=>{
+        const lastR=data.fridgeReleves.filter(r=>r.fridgeId===f.id).sort((a,b)=>b.id-a.id)[0];
+        return(
+          <EditableRow key={f.id} icon={f.icon} iconBg={T.infoBg} onOpen={()=>openFridge(f)} onDelete={()=>{if(window.confirm(`Supprimer ${f.name} ?`))delFridge(f);}}>
+            <div className="item-title">{f.name}</div>
+            <div className="item-sub">Cible {f.target}°C · {f.type==="negatif"?"Négatif":"Positif"}{lastR?` · ${lastR.temp}°`:""}</div>
+          </EditableRow>
+        );
+      })}
+      <button className="inline-add mt6" onClick={()=>openFridge(null)}>+ Ajouter une enceinte</button>
+    </CollapsibleSection>
+
+    <CollapsibleSection title="Plan de nettoyage" icon="🧹" count={cleaningItems.length}>
+      <div className="text-xs text-dim mb8" style={{marginLeft:2}}>Touchez pour modifier · appui long pour supprimer</div>
+      {cleaningItems.map(c=>(
+        <EditableRow key={c.id} icon={c.icon} iconBg={T.goodBg} onOpen={()=>openClean(c)} onDelete={()=>{if(window.confirm(`Supprimer ${c.zone} ?`))delClean(c);}}>
+          <div className="item-title">{c.zone}</div>
+          <div className="item-sub">{c.freq} · {c.produit}{c.dilution?` · ${c.dilution}`:""}</div>
         </EditableRow>
-      );
-    })}
-    <button className="inline-add mt6" onClick={()=>openFridge(null)}>+ Ajouter une enceinte</button>
-
-    <div className="group-label" style={{marginTop:20}}>Plan de nettoyage</div>
-    <div className="text-xs text-dim mb8" style={{marginLeft:2}}>Touchez pour modifier · appui long pour supprimer</div>
-    {cleaningItems.map(c=>(
-      <EditableRow key={c.id} icon={c.icon} iconBg={T.goodBg} onOpen={()=>openClean(c)} onDelete={()=>{if(window.confirm(`Supprimer ${c.zone} ?`))delClean(c);}}>
-        <div className="item-title">{c.zone}</div>
-        <div className="item-sub">{c.freq} · {c.produit}{c.dilution?` · ${c.dilution}`:""}</div>
-      </EditableRow>
-    ))}
-    <button className="inline-add mt6" onClick={()=>openClean(null)}>+ Ajouter une zone</button>
+      ))}
+      <button className="inline-add mt6" onClick={()=>openClean(null)}>+ Ajouter une zone</button>
+    </CollapsibleSection>
 
     {sheet?.kind==="fridge"&&(
       <div className="overlay" onClick={()=>setSheet(null)}>
@@ -3157,12 +3253,13 @@ function SettingsUsers({data,setData,user,db,reload,onLogout}){
   }
 
   return(<>
-    <div className="group-label">Équipe</div>
-    <div className="text-xs text-dim mb8" style={{marginLeft:2}}>Touchez pour modifier · appui long pour supprimer</div>
-    {data.users.map(u=>(
-      <UserRow key={u.id} u={u} isSelf={u.id===user.id} onOpen={()=>open(u)} onDelete={()=>{if(window.confirm(`Supprimer ${u.name} ?`))del(u);}}/>
-    ))}
-    <button className="inline-add mt6" onClick={()=>open(null)}>+ Ajouter un membre</button>
+    <CollapsibleSection title="Équipe" icon="👥" count={data.users.length}>
+      <div className="text-xs text-dim mb8" style={{marginLeft:2}}>Touchez pour modifier · appui long pour supprimer</div>
+      {data.users.map(u=>(
+        <UserRow key={u.id} u={u} isSelf={u.id===user.id} onOpen={()=>open(u)} onDelete={()=>{if(window.confirm(`Supprimer ${u.name} ?`))del(u);}}/>
+      ))}
+      <button className="inline-add mt6" onClick={()=>open(null)}>+ Ajouter un membre</button>
+    </CollapsibleSection>
 
     {sheet&&(
       <div className="overlay" onClick={()=>setSheet(null)}>
@@ -3243,7 +3340,7 @@ function SettingsPrinter({user}){
       )}
     </div>
 
-    <div className="group-label">Installation du relais (une seule fois)</div>
+    <CollapsibleSection title="Installation du relais" icon="📖" count={4}>
     {[
       ["1","Installer Termux","Sur l'Android dédié, depuis F-Droid (pas le Play Store, qui a une version obsolète)."],
       ["2","Lancer le serveur","Dans Termux : installer Node.js, copier server.js, taper « node server.js »."],
@@ -3255,6 +3352,7 @@ function SettingsPrinter({user}){
         <div className="item-body"><div className="item-title">{t}</div><div className="item-sub" style={{whiteSpace:"normal"}}>{d}</div></div>
       </div>
     ))}
+    </CollapsibleSection>
 
     <button className="btn btn-primary mt12" onClick={testPrint}>🖨️ Imprimer une étiquette test</button>
     {printDone&&<div className="banner banner-good mt8"><span>✓</span><div>{relayActive?"Étiquette envoyée au relais.":"Fenêtre d'impression ouverte (mode secours Safari)."}</div></div>}
@@ -3265,7 +3363,7 @@ function SettingsPrinter({user}){
   </>);
 }
 
-function Settings({data,setData,user,onLogout,db,reload}){
+function Settings({data,setData,user,onLogout,db,reload,markLocalWrite}){
   const[tab,setTab]=useState("haccp");
   return(
     <div className="page">
@@ -3275,7 +3373,7 @@ function Settings({data,setData,user,onLogout,db,reload}){
         {[{k:"haccp",l:"🛡️ HACCP"},{k:"products",l:"🧾 Produits"},{k:"printer",l:"🖨️ Imprimante"},{k:"tasks",l:"📋 Tâches"},{k:"users",l:"👥 Équipe"},{k:"restaurant",l:"🏠 Resto"}].map(t=><button key={t.k} className={`tab ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k)}>{t.l}</button>)}
       </div>
       {tab==="haccp"&&<SettingsHaccp data={data} setData={setData} db={db} reload={reload}/>}
-      {tab==="products"&&<ProductsEditor data={data} setData={setData} db={db} reload={reload}/>}
+      {tab==="products"&&<ProductsEditor data={data} setData={setData} db={db} reload={reload} markLocalWrite={markLocalWrite}/>}
       {tab==="printer"&&<SettingsPrinter user={user}/>}
       {tab==="tasks"&&<TaskCategoriesEditor data={data} setData={setData} db={db} reload={reload}/>}
       {tab==="users"&&<SettingsUsers data={data} setData={setData} user={user} db={db} reload={reload} onLogout={onLogout}/>}
@@ -3428,13 +3526,13 @@ function VoiceOverlay({ data, db, reload, user, onClose, go }){
       printVoiceLabel(cmd.product, dateProd, dlcDate, lot, user.name);
       // Enregistre
       await db.addLabel?.({product:cmd.product,dateProd,dlc:dlcDate,lot,allergens:"À vérifier",operator:user.name});
-      await reload?.();
+      await reload?.({force:true});
       setResult({ ok:true, msg:`Étiquette imprimée : ${cmd.product} · DLC ${dlcDate}` });
       setPhase("done");
     }
     else if (cmd.type === "task"){
       await db.addTask?.({task:cmd.task, resp:user.name, qty:"", prio:"med", categoryId:cmd.categoryId});
-      await reload?.();
+      await reload?.({force:true});
       const catName = data.taskCategories?.find(c=>c.id===cmd.categoryId)?.name || "Mise en place";
       setResult({ ok:true, msg:`Tâche ajoutée à « ${catName} » : ${cmd.task}` });
       setPhase("done");
@@ -3512,7 +3610,21 @@ export default function App(){
   const[showSplash,setShowSplash]=useState(true);
   useEffect(()=>{const t=setTimeout(()=>setShowSplash(false),1500);return()=>clearTimeout(t);},[]);
 
-  const reload=useCallback(async()=>{
+  // Verrou d'écriture : après une action de l'utilisateur (relevé, réception…),
+  // on met à jour l'état local immédiatement pour que l'écran réagisse sans
+  // délai. Mais la synchro automatique (toutes les 25 s) recharge tout depuis
+  // Supabase et écraserait cette mise à jour si l'écriture n'a pas encore fini
+  // de se propager côté serveur — d'où des données qui "disparaissent" juste
+  // après avoir été saisies. Ce verrou bloque la synchro pendant quelques
+  // secondes après chaque écriture, le temps que le serveur soit à jour.
+  const lastWriteRef = useRef(0);
+  const markLocalWrite = useCallback(()=>{ lastWriteRef.current = Date.now(); },[]);
+  const WRITE_LOCK_MS = 6000;
+
+  const reload=useCallback(async({force=false}={})=>{
+    // Ne pas écraser une saisie toute fraîche avec des données serveur
+    // potentiellement en retard (sauf rechargement explicite après une erreur).
+    if(!force && Date.now()-lastWriteRef.current < WRITE_LOCK_MS) return;
     // Si Supabase pas configuré → mode démo avec données INIT
     const notConfigured = !SUPABASE_URL || SUPABASE_URL.includes("REMPLACE");
     if(notConfigured){ setData(INIT); setDbError(null); return; }
@@ -3524,7 +3636,7 @@ export default function App(){
     }
     catch(e){ console.error("Supabase:",e); setDbError(e.message||"Erreur connexion"); if(!data)setData(INIT); }
   },[]);
-  useEffect(()=>{reload();},[]);
+  useEffect(()=>{reload({force:true});},[]);
 
   // ── Temps réel : re-synchronise les données toutes les 25 s + au retour sur l'app.
   //    (Le client REST n'a pas de websocket ; le polling suffit pour une équipe de cuisine.)
@@ -3623,7 +3735,7 @@ export default function App(){
   const isRoot=ROOT_PAGES.includes(page);
   const backTo=HACCP_PAGES.includes(page)?"haccp":MORE_PAGES.includes(page)?"more":"home";
   const activeTab=ROOT_PAGES.includes(page)?page:HACCP_PAGES.includes(page)?"haccp":MORE_PAGES.includes(page)?"more":page;
-  const props={data,setData,user,go,db:DB,reload,onVoiceOpen:()=>setVoiceOpen(true)};
+  const props={data,setData,user,go,db:DB,reload,markLocalWrite,onVoiceOpen:()=>setVoiceOpen(true)};
   const pages={
     home:<Aujourdhui {...props}/>,haccp:<HaccpHub {...props}/>,
     temps:<Temperatures {...props}/>,reception:<Reception {...props}/>,
@@ -3632,11 +3744,11 @@ export default function App(){
     labels:<Labels {...props}/>,testmeals:<TestMeals {...props}/>,
     clean:<Cleaning {...props}/>,pests:<Pests {...props}/>,
     training:<Training data={data} go={go}/>,registre:<Registre data={data}/>,gbph:<GbphGuide initialSection={gbphSection}/>,
-    recipes:<Recipes data={data} setData={setData} db={DB} reload={reload} user={user}/>,
+    recipes:<Recipes data={data} setData={setData} db={DB} reload={reload} user={user} markLocalWrite={markLocalWrite}/>,
     margins:<Margins data={data}/>,planning:<Planning {...props}/>,
     tasks:<Tasks data={data} setData={setData} db={DB} reload={reload}/>,
     more:<More go={go} user={user}/>,
-    settings:user.isAdmin?<Settings data={data} setData={setData} user={user} onLogout={logout} db={DB} reload={reload}/>:<div style={{textAlign:"center",padding:40,color:T.textDim}}><div style={{fontSize:42}}>🔒</div><div>Réservé aux administrateurs</div></div>,
+    settings:user.isAdmin?<Settings data={data} setData={setData} user={user} onLogout={logout} db={DB} reload={reload} markLocalWrite={markLocalWrite}/>:<div style={{textAlign:"center",padding:40,color:T.textDim}}><div style={{fontSize:42}}>🔒</div><div>Réservé aux administrateurs</div></div>,
   };
   return(<><style>{S}</style><GlobalSheetSwipe/><div className="shell">
     <div className="topbar">
