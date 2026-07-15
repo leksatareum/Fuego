@@ -58,7 +58,7 @@ const DB = {
       sbGet("oils",            qs(q.order("id"),q.select())),
       sbGet("cleaning",        qs(q.order("sort_order"),q.select())),
       sbGet("traceability",    qs(q.order("created_at",false),q.limit(200),q.select())),
-      sbGet("labels",          qs(q.order("created_at",false),q.limit(200),q.select())),
+      sbGet("labels",          qs(`created_at=gte.${new Date(Date.now()-7*86400000).toISOString()}`,q.order("created_at",false),q.limit(300),q.select())),
       sbGet("test_meals",      qs(q.order("created_at",false),q.limit(100),q.select())),
       sbGet("training",        qs(q.order("id"),q.select())),
       sbGet("pests",           qs(q.order("created_at",false),q.limit(50),q.select())),
@@ -141,6 +141,13 @@ const DB = {
   async toggleCleaning(id,done){return sbPatch("cleaning",{done,done_at:done?new Date().toISOString():null},qs(`id=eq.${id}`));},
   async addTraceability(t){return sbPost("traceability",{product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes,status:t.status,photo:t.photo||null});},
   async addLabel(l){return sbPost("labels",{product:l.product,date_prod:l.dateProd,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator});},
+  // Purge l'historique des étiquettes antérieures à aujourd'hui. On garde
+  // volontairement celles du jour : ce sont celles du service en cours, et
+  // elles servent au calcul du numéro de lot.
+  async purgeOldLabels(){
+    const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
+    return sbDelete("labels", qs(`created_at=lt.${startOfToday.toISOString()}`));
+  },
   async addTestMeal(m){return sbPost("test_meals",{date:m.date,service:m.service,product:m.product,qty:m.qty,destroy_at:m.destroyAt,operator:m.operator});},
   async addPest(p){return sbPost("pests",{date:p.date,type:p.type,company:p.company,result:p.result,next_visit:p.nextVisit});},
   async saveRecipe(r){
@@ -2242,8 +2249,24 @@ function Labels({data,setData,user,db,reload,go}){
   const dlcD = computeDlc(startD, dt.rule, customDlc);
   const isMonthsRule = !!dt.rule.months && customDlc==null;
 
+  async function purgeHistory(){
+    const todayShort = fmtDM(new Date());
+    const oldOnes = data.labels.filter(l=>l.dateProd!==todayShort);
+    if(!oldOnes.length){ alert("Rien à purger : l'historique ne contient que les étiquettes du jour."); return; }
+    const ok = window.confirm(`Purger ${oldOnes.length} étiquette${oldOnes.length>1?"s":""} des jours précédents ?\n\nLes étiquettes d'aujourd'hui sont conservées. Cette action est définitive.`);
+    if(!ok) return;
+    const res = await db.purgeOldLabels?.();
+    if(res?.error){ alert("La purge a échoué. Vérifie la connexion Supabase."); await reload?.(); return; }
+    setData(d=>({...d,labels:d.labels.filter(l=>l.dateProd===todayShort)}));
+    haptic.success();
+  }
+
   function buildLabel(){
-    const lot=`L${new Date().toLocaleDateString("fr-FR").replace(/\//g,"")}-${data.labels.length+1}`;
+    // Compte uniquement les étiquettes du jour : le total chargé est plafonné
+    // (7 jours d'historique), s'y fier créerait des numéros de lot en double.
+    const todayShort = fmtDM(new Date());
+    const todayCount = data.labels.filter(l=>l.dateProd===todayShort).length;
+    const lot=`L${new Date().toLocaleDateString("fr-FR").replace(/\//g,"")}-${todayCount+1}`;
     return {
       product:form.product, qty:form.qty,
       dateType,
@@ -2273,7 +2296,12 @@ function Labels({data,setData,user,db,reload,go}){
 
     <button className="btn btn-primary mb14" onClick={()=>setShow(true)}>🏷️ Nouvelle étiquette</button>
 
-    <div className="bucket-label">Historique</div>
+    <div className="between" style={{marginBottom:8}}>
+      <div className="bucket-label" style={{margin:0}}>Historique · 7 derniers jours</div>
+      {user?.isAdmin && data.labels.length>0 && (
+        <button onClick={purgeHistory} style={{background:"none",border:"none",color:T.textDim,fontSize:12,fontWeight:600,padding:"4px 8px"}}>🗑 Purger</button>
+      )}
+    </div>
     {data.labels.length===0
       ? <div className="empty"><div className="empty-icon">🏷️</div><div className="empty-title">Aucune étiquette</div><div className="empty-sub">Créez votre première étiquette</div></div>
       : data.labels.map(l=>{const lt=dateTypeByKey(l.dateType||"fabrique");return(
@@ -3393,7 +3421,9 @@ function VoiceOverlay({ data, db, reload, user, onClose, go }){
       const dlcDays = data.haccpSettings.labelDlcDefault;
       const dateProd = todayStr();
       const dlcDate = new Date(Date.now()+dlcDays*86400000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
-      const lot = `L${new Date().toLocaleDateString("fr-FR").replace(/\//g,"")}-${(data.labels?.length||0)+1}`;
+      const todayShort = fmtDM(new Date());
+      const todayCount = (data.labels||[]).filter(l=>l.dateProd===todayShort).length;
+      const lot = `L${new Date().toLocaleDateString("fr-FR").replace(/\//g,"")}-${todayCount+1}`;
       // Imprime
       printVoiceLabel(cmd.product, dateProd, dlcDate, lot, user.name);
       // Enregistre
