@@ -89,17 +89,25 @@ const DB = {
       sbGet("reheating",       qs(q.order("created_at",false),q.limit(100),q.select())),
       sbGet("oils",            qs(q.order("id"),q.select())),
       sbGet("cleaning",        qs(q.order("sort_order"),q.select())),
-      sbGet("traceability",    qs(q.order("created_at",false),q.limit(200),q.select())),
+      // Colonnes explicites : on exclut volontairement "photo" (base64 lourd),
+      // récupérée à la demande via DB.getTraceabilityPhoto(). "photo IS NOT NULL"
+      // suffit à savoir s'il y en a une, pour afficher la vignette.
+      sbGet("traceability",    qs(q.order("created_at",false),q.limit(100),q.select("id,product,emoji,supplier,lot,dlc,qty,allergenes,status,created_at,photo_present"))),
       sbGet("labels",          qs(`created_at=gte.${new Date(Date.now()-7*86400000).toISOString()}`,q.order("created_at",false),q.limit(300),q.select())),
       sbGet("test_meals",      qs(q.order("created_at",false),q.limit(100),q.select())),
       sbGet("training",        qs(q.order("id"),q.select())),
       sbGet("pests",           qs(q.order("created_at",false),q.limit(50),q.select())),
       sbGet("recipes",         qs(q.order("id"),q.select())),
       sbGet("task_categories", qs(q.order("sort_order"),q.select())),
-      sbGet("tasks",           qs(q.order("created_at",false),q.limit(500),q.select())),
+      // La mise en place se consulte par créneau (jour + service) sur quelques
+      // jours : inutile de charger des mois d'historique.
+      sbGet("tasks",           qs(`date=gte.${new Date(Date.now()-14*86400000).toISOString().slice(0,10)}`,q.order("created_at",false),q.limit(300),q.select())),
       sbGet("restaurant",      qs(q.limit(1),q.select())),
       sbGet("products",        qs(q.order("name"),q.select())),
-      sbGet("shifts",          qs(q.order("date"),q.select())),
+      // Sans limite, le planning chargeait tous les créneaux depuis la création
+      // du restaurant. On ne garde que la fenêtre utile : 30 jours en arrière,
+      // le reste n'est jamais consulté depuis l'app.
+      sbGet("shifts",          qs(`date=gte.${new Date(Date.now()-30*86400000).toISOString().slice(0,10)}`,q.order("date"),q.limit(400),q.select())),
     ]);
     const users   = ru.data   || [];
     const hs      = rhs.data?.[0] || {};
@@ -132,6 +140,10 @@ const DB = {
         coolingMax:hs.cooling_max||120, reheatMin:hs.reheat_min||63,
         reheatMaxTime:hs.reheat_max_time||60, oilPolarMax:hs.oil_polar_max||25,
         testMealDays:hs.test_meal_days||3, labelDlcDefault:hs.label_dlc_default||3,
+        // Horaires de bascule de service, en minutes depuis minuit.
+        // Défauts : 16h30 (990) et 03h00 (180). Le ?? est volontaire : une
+        // valeur de 0 (= minuit) est légitime et ne doit pas être écrasée.
+        resetMidi:hs.reset_midi ?? 990, resetSoir:hs.reset_soir ?? 180,
       },
       fridgeReleves: fr.map(r=>({id:r.id,fridgeId:r.fridge_id,date:r.date,period:r.period,temp:r.temp,time:r.time,operatorId:r.operator_id})),
       reception: rec.map(r=>({id:r.id,date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,tempOk:r.temp_ok,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed})),
@@ -139,7 +151,14 @@ const DB = {
       reheating: reheat.map(r=>({id:r.id,product:r.product,endTemp:r.end_temp,duration:r.duration,operator:r.operator,status:r.status,date:r.date})),
       oils: oils.map(o=>({id:o.id,name:o.name,type:o.type,dateInstall:o.date_install,lastTest:o.last_test,polaires:o.polaires,operator:o.operator})),
       cleaning: clean.map(c=>({id:c.id,zone:c.zone,icon:c.icon,freq:c.freq,produit:c.produit,dilution:c.dilution,done:c.done,doneAt:c.done_at})),
-      traceability: trace.map(t=>({id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status,photo:t.photo||null})),
+      // hasPhoto : la photo elle-même n'est pas chargée ici (trop lourde), on
+      // sait juste si la fiche en a une. photo reste null jusqu'à ce qu'on
+      // ouvre la fiche, qui déclenche alors le chargement de l'image.
+      // photo n'est pas chargée ici (base64 lourd) : elle est récupérée à la
+      // demande quand on ouvre une fiche. photo_present est un booléen léger
+      // calculé côté base (cf. migration), qui permet d'afficher l'indicateur
+      // sans télécharger l'image.
+      traceability: trace.map(t=>({id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status,photo:null,hasPhoto:!!t.photo_present})),
       labels: labels.map(l=>({id:l.id,product:l.product,dateProd:l.date_prod,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator})),
       testMeals: tm.map(m=>({id:m.id,date:m.date,service:m.service,product:m.product,qty:m.qty,destroyAt:m.destroy_at,operator:m.operator})),
       training: train.map(t=>({id:t.id,name:t.name,role:t.role,haccpExp:t.haccp_exp,visaExp:t.visa_exp})),
@@ -176,6 +195,13 @@ const DB = {
     return sbPatch("oils",body,qs(`id=eq.${id}`));
   },
   async toggleCleaning(id,done){return sbPatch("cleaning",{done,done_at:done?new Date().toISOString():null},qs(`id=eq.${id}`));},
+  // Charge la photo d'une fiche à la demande — elle n'est pas incluse dans
+  // loadAll() pour ne pas alourdir le démarrage de l'app.
+  async getTraceabilityPhoto(id){
+    const {data,error}=await sbGet("traceability", qs(q.eq("id",id),q.limit(1),q.select("photo")));
+    if(error) return {photo:null,error};
+    return {photo: data?.[0]?.photo || null, error:null};
+  },
   async addTraceability(t){return sbPost("traceability",{product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes,status:t.status,photo:t.photo||null});},
   async addLabel(l){return sbPost("labels",{product:l.product,date_prod:l.dateProd,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator});},
   // Purge l'historique des étiquettes antérieures à aujourd'hui. On garde
@@ -224,11 +250,39 @@ const DB = {
   async getAppState(key){const r=await sbGet("app_state",qs(`key=eq.${key}`,q.select()));return (r.data&&r.data[0])?r.data[0].value:null;},
   async setAppState(key,value){const r=await sbGet("app_state",qs(`key=eq.${key}`,q.select()));if(r.data&&r.data.length)return sbPatch("app_state",{value},qs(`key=eq.${key}`));return sbPost("app_state",{key,value});},
   // Remet à zéro les listes de travail (mise en place + nettoyage) — idempotent
-  async resetServiceLists(){await sbPatch("tasks",{done:false},qs("done=eq.true"));await sbPatch("cleaning",{done:false,done_at:null},qs("done=eq.true"));},
+  // Durée de validité d'un nettoyage, par fréquence. Chaque zone repart de SA
+  // propre date de réalisation (done_at) : une hotte nettoyée le 20 reste
+  // valide jusqu'au 20 du mois suivant, pas jusqu'au 1er.
+  // "Quotidien" est géré à part (remise à zéro à chaque changement de service).
+  // "Après usage" n'expire jamais tout seul : c'est ponctuel, décoché à la main.
+  async resetServiceLists(){
+    // Mise en place : repart à chaque service, comme avant.
+    await sbPatch("tasks",{done:false},qs("done=eq.true"));
+    // Nettoyage quotidien : idem, remis à zéro à chaque changement de service.
+    await sbPatch("cleaning",{done:false,done_at:null},qs("done=eq.true",`freq=eq.Quotidien`));
+  },
+  // Décoche les zones dont le délai de validité est écoulé, fréquence par
+  // fréquence. Appelé en même temps que la synchro : une zone hebdo cochée
+  // il y a 8 jours redevient à faire, une cochée il y a 3 jours reste verte.
+  async expireCleaningByFrequency(){
+    const DAYS = { "Hebdomadaire":7, "Mensuel":30, "Trimestriel":90 };
+    for(const [freq,days] of Object.entries(DAYS)){
+      const limit = new Date(Date.now() - days*86400000).toISOString();
+      await sbPatch("cleaning",{done:false,done_at:null},
+        qs("done=eq.true",`freq=eq.${encodeURIComponent(freq)}`,`done_at=lt.${limit}`));
+    }
+  },
   async addProduct(p){return sbPost("products",{name:p.name,price:p.price,unit:p.unit,category:p.category||"Épicerie"});},
   async updateProduct(id,p){return sbPatch("products",{name:p.name,price:p.price,unit:p.unit,category:p.category||"Épicerie"},qs(`id=eq.${id}`));},
   async deleteProduct(id){return sbDelete("products",qs(`id=eq.${id}`));},
-  async saveHaccpSettings(s){return sbPatch("haccp_settings",{cooling_max:s.coolingMax,reheat_min:s.reheatMin,reheat_max_time:s.reheatMaxTime,oil_polar_max:s.oilPolarMax,test_meal_days:s.testMealDays,label_dlc_default:s.labelDlcDefault},qs("id=eq.1"));},
+  async saveHaccpSettings(s){
+    const body={cooling_max:s.coolingMax,reheat_min:s.reheatMin,reheat_max_time:s.reheatMaxTime,oil_polar_max:s.oilPolarMax,test_meal_days:s.testMealDays,label_dlc_default:s.labelDlcDefault};
+    // N'envoie les horaires que s'ils sont fournis, pour ne pas les écraser
+    // quand on ne modifie qu'un seuil critique.
+    if(s.resetMidi!=null) body.reset_midi=s.resetMidi;
+    if(s.resetSoir!=null) body.reset_soir=s.resetSoir;
+    return sbPatch("haccp_settings",body,qs("id=eq.1"));
+  },
   async saveRestaurant(r){const id=r.id;const body={name:r.name,address:r.address,phone:r.phone,siret:r.siret};if(id)return sbPatch("restaurant",body,qs(`id=eq.${id}`));return sbPost("restaurant",body);},
   async addFridgeTarget(f){return sbPost("fridge_targets",{name:f.name,icon:f.icon,target:f.target,type:f.type,sort_order:99});},
   async updateFridgeTarget(id,f){return sbPatch("fridge_targets",{name:f.name,icon:f.icon,target:f.target,type:f.type},qs(`id=eq.${id}`));},
@@ -757,6 +811,7 @@ const INIT={
       {id:5,name:"Vitrine Desserts",icon:"🍰",target:"0–4",type:"positif"},
     ],
     coolingMax:120,freezingMax:240,reheatMin:63,reheatMaxTime:60,oilPolarMax:25,testMealDays:3,labelDlcDefault:3,
+    resetMidi:990, resetSoir:180, // 16h30 et 03h00
   },
   fridgeReleves:[
     {id:1,fridgeId:1,date:"10/05",period:"matin",temp:3,time:"08:15",operatorId:1},
@@ -1663,7 +1718,7 @@ const CELL_MODES = {
   refroid: { key:"refroid", label:"Refroidissement", icon:"❄️", sub:"63°C → 10°C à cœur", targetEnd:10, startCenter:65, endCenter:8, dlcMonths:0 },
   surgel:  { key:"surgel",  label:"Surgélation",     icon:"🧊", sub:"jusqu'à −18°C à cœur", targetEnd:-18, startCenter:65, endCenter:-18, dlcMonths:6 },
 };
-function Cooling({data,setData,user,db,reload,go}){
+function Cooling({data,setData,user,db,reload,go,markLocalWrite}){
   const[show,setShow]=useState(false);const[step,setStep]=useState(0);
   const[mode,setMode]=useState("refroid");
   const[form,setForm]=useState({product:"",qty:""});const[startTemp,setStartTemp]=useState(65);const[endTemp,setEndTemp]=useState(8);
@@ -1674,12 +1729,30 @@ function Cooling({data,setData,user,db,reload,go}){
   useEffect(()=>{if(step!==2)return;const i=setInterval(()=>setElapsed(Math.floor((Date.now()-startMs)/1000)),1000);return()=>clearInterval(i);},[step,startMs]);
   const fmt=s=>`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
   const limitSec=Math.max(1,safeNum(maxMin,120))*60;const overtime=elapsed>limitSec;const progress=startMs?safePct(elapsed,limitSec):0;
-  async function start(){const r=await db.startCooling({product:form.product,qty:form.qty,startTemp,startedMs:Date.now(),operator:user.name,date:todayStr()});if(r.data)setActiveCoolingId(r.data.id);setStartMs(Date.now());setElapsed(0);setStep(2);await reload({force:true});}
+  async function start(){
+    const r=await db.startCooling({product:form.product,qty:form.qty,startTemp,startedMs:Date.now(),operator:user.name,date:todayStr()});
+    if(r?.error){alert("Le passage en cellule n'a pas pu démarrer. Vérifie la connexion Supabase.");return;}
+    // La ligne créée est déjà renvoyée par Supabase : on l'ajoute localement
+    // plutôt que de recharger les 20 tables.
+    if(r?.data){
+      const x=r.data;
+      setActiveCoolingId(x.id);
+      markLocalWrite?.();
+      setData(d=>({...d,cooling:[{id:x.id,product:x.product,qty:x.qty,startTemp:x.start_temp,endTemp:x.end_temp,duration:x.duration,startedMs:x.started_ms,operator:x.operator,status:x.status,date:x.date,dlc:x.dlc},...d.cooling]}));
+    }
+    setStartMs(Date.now());setElapsed(0);setStep(2);
+  }
   async function finish(){const dur=Math.floor(elapsed/60);const conform=mode==="surgel"?(endTemp<=-18):(dur<=maxMin&&endTemp<=10);const status=conform?"ok":"alert";
     const dlc=M.dlcMonths
       ? (()=>{const d=new Date();d.setMonth(d.getMonth()+M.dlcMonths);return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"2-digit"});})()
       : new Date(Date.now()+data.haccpSettings.labelDlcDefault*86400000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
-    if(activeCoolingId)await db.finishCooling(activeCoolingId,{endTemp,duration:dur,status,dlc,mode});await reload({force:true});setShow(false);setStep(0);setMode("refroid");setStartMs(null);setElapsed(0);setStartTemp(65);setEndTemp(8);setForm({product:"",qty:""});setActiveCoolingId(null);}
+    if(activeCoolingId){
+      const res=await db.finishCooling(activeCoolingId,{endTemp,duration:dur,status,dlc,mode});
+      if(res?.error){alert("Le passage en cellule n'a pas été clôturé. Vérifie la connexion Supabase.");await reload({force:true});return;}
+      markLocalWrite?.();
+      setData(d=>({...d,cooling:d.cooling.map(x=>x.id===activeCoolingId?{...x,endTemp,duration:dur,status,dlc,mode}:x)}));
+    }
+    setShow(false);setStep(0);setMode("refroid");setStartMs(null);setElapsed(0);setStartTemp(65);setEndTemp(8);setForm({product:"",qty:""});setActiveCoolingId(null);}
   const coolingDone=data.cooling.filter(c=>c.status!=="active");
   return(<div className="page">
     <GbphHelpButton section="temp" go={go}/>
@@ -1861,8 +1934,23 @@ function Traceability({data,setData,db,reload,go,markLocalWrite}){
     if(!form.product)return;
     const res=await db.addTraceability({product:form.product,emoji:"📦",supplier:form.supplier,lot:form.lot,dlc:form.dlc,qty:form.qty,allergenes:form.allergenes?form.allergenes.split(",").map(a=>a.trim()).filter(Boolean):[],status:"ok",photo});
     if(res?.error){alert("Le produit n'a pas été enregistré. Vérifie la connexion Supabase.");await reload({force:true});return;}
-    if(res?.data){const t=res.data;markLocalWrite?.();setData(d=>({...d,traceability:[{id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status,photo:t.photo||null},...d.traceability]}));}
+    if(res?.data){const t=res.data;markLocalWrite?.();setData(d=>({...d,traceability:[{id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status,photo:t.photo||null,hasPhoto:!!t.photo},...d.traceability]}));}
     setShow(false);setPhoto(null);setForm({product:"",supplier:"",lot:"",dlc:"",qty:"",allergenes:""});
+  }
+  // Ouvre une fiche : la photo n'est pas en mémoire (exclue du chargement
+  // initial pour ne pas ralentir l'app), on la récupère seulement maintenant.
+  const[loadingPhoto,setLoadingPhoto]=useState(false);
+  async function openDetail(t){
+    setDetail(t);
+    if(!t.hasPhoto || t.photo) return; // rien à charger
+    setLoadingPhoto(true);
+    const res=await db.getTraceabilityPhoto?.(t.id);
+    setLoadingPhoto(false);
+    if(res?.photo){
+      setDetail(d=>d&&d.id===t.id?{...d,photo:res.photo}:d);
+      // Garde la photo en mémoire pour ne pas la retélécharger si on rouvre.
+      setData(d=>({...d,traceability:d.traceability.map(x=>x.id===t.id?{...x,photo:res.photo}:x)}));
+    }
   }
   const filtered=filter==="all"?data.traceability:filter==="alerts"?data.traceability.filter(t=>t.status!=="ok"):data.traceability.filter(t=>t.status==="ok");
   return(<div className="page">
@@ -1870,13 +1958,19 @@ function Traceability({data,setData,db,reload,go,markLocalWrite}){
     <div className="section-title">Traçabilité</div><div className="section-sub">{data.traceability.length} produits</div>
     <SegmentedControl value={filter} onChange={setFilter} options={[{value:"all",label:"Tous"},{value:"alerts",label:"⚠ Alertes"},{value:"ok",label:"✓ OK"}]}/>
     <div style={{height:14}}></div>
-    {filtered.length===0?<div className="empty"><div className="empty-icon">✓</div><div className="empty-title">Tout est en ordre</div></div>:filtered.map(t=><div key={t.id} className="item" onClick={()=>t.photo&&setDetail(t)} style={{cursor:t.photo?"pointer":"default"}}>
-      {t.photo?<img src={t.photo} alt="" style={{width:40,height:40,borderRadius:10,objectFit:"cover",flexShrink:0}}/>:<div className="item-icon" style={{background:t.status==="expired"?T.badBg:t.status==="warn"?T.warnBg:T.infoBg}}>{t.emoji}</div>}
+    {filtered.length===0?<div className="empty"><div className="empty-icon">✓</div><div className="empty-title">Tout est en ordre</div></div>:filtered.map(t=><div key={t.id} className="item" onClick={()=>t.hasPhoto&&openDetail(t)} style={{cursor:t.hasPhoto?"pointer":"default"}}>
+      <div className="item-icon" style={{background:t.status==="expired"?T.badBg:t.status==="warn"?T.warnBg:T.infoBg,position:"relative"}}>
+        {t.emoji}
+        {/* Pastille photo : indique qu'une image existe, sans avoir à la
+            télécharger (les vignettes de 200 photos plombaient le démarrage). */}
+        {t.hasPhoto&&<span style={{position:"absolute",bottom:-2,right:-2,fontSize:10,background:T.bg2,borderRadius:"50%",width:15,height:15,display:"flex",alignItems:"center",justifyContent:"center"}}>📷</span>}
+      </div>
       <div className="item-body"><div className="item-title">{t.product}</div><div className="item-sub">{t.supplier} · DLC {t.dlc}</div></div>
       <span className={`badge ${t.status==="ok"?"b-good":t.status==="warn"?"b-warn":"b-bad"}`}>{t.status==="ok"?"OK":t.status==="warn"?"Proche":"Expiré"}</span>
     </div>)}
     {detail&&<div className="overlay" onClick={()=>setDetail(null)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">{detail.product}</div>
+      {loadingPhoto&&!detail.photo&&<div style={{width:"100%",height:180,borderRadius:14,marginBottom:12,background:T.bg3,display:"flex",alignItems:"center",justifyContent:"center",color:T.textDim,fontSize:12}}>Chargement de la photo…</div>}
       {detail.photo&&<img src={detail.photo} alt="" style={{width:"100%",borderRadius:14,marginBottom:12}}/>}
       <div className="text-sm text-dim">{detail.supplier} · DLC {detail.dlc} · Lot {detail.lot}</div>
       <button className="btn btn-ghost mt14" onClick={()=>setDetail(null)}>Fermer</button>
@@ -2349,8 +2443,15 @@ function Labels({data,setData,user,db,reload,go,markLocalWrite}){
     const label=buildLabel();
     const n=Math.max(1,parseInt(copies)||1);
     for(let i=0;i<n;i++){ printBrotherLabel(label); }
-    await db.addLabel({product:label.product,dateProd:label.startDateStr,dlc:label.dlc,lot:label.lot,allergens:label.allergens,operator:user.name,dateType});
-    await reload({force:true});
+    const res=await db.addLabel({product:label.product,dateProd:label.startDateStr,dlc:label.dlc,lot:label.lot,allergens:label.allergens,operator:user.name,dateType});
+    if(res?.error){alert("L'étiquette a été imprimée mais pas enregistrée dans l'historique.");await reload({force:true});return;}
+    // Ajout local depuis la ligne renvoyée — recharger 20 tables après chaque
+    // impression rendait l'étiquetage lent en plein service.
+    if(res?.data){
+      const l=res.data;
+      markLocalWrite?.();
+      setData(d=>({...d,labels:[{id:l.id,product:l.product,dateProd:l.date_prod,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator},...d.labels]}));
+    }
     setShow(false); setForm({product:"",allergens:"",qty:""}); setDateType("fabrique"); setStartDate(""); setCustomDlc(null); setCopies(1);
   }
 
@@ -2724,7 +2825,19 @@ function Recipes({data,setData,db,reload,user,markLocalWrite}){
   const filtered=allRecipes.filter(r=>r.type===typeFilter);
   const nbPlats=allRecipes.filter(r=>r.type==="plat").length;
   const nbPreps=allRecipes.filter(r=>r.type==="mere").length;
-  if(view==="edit")return<RecipeEditor recipe={sel?allRecipes.find(r=>r.id===sel):null} defaultType={typeFilter} allRecipes={allRecipes} products={data.products||[]} onSave={async(rec)=>{await db.saveRecipe(rec);await reload({force:true});setView("list");setSel(null);}} onCancel={()=>{setView("list");setSel(null);}}/>;
+  if(view==="edit")return<RecipeEditor recipe={sel?allRecipes.find(r=>r.id===sel):null} defaultType={typeFilter} allRecipes={allRecipes} products={data.products||[]} onSave={async(rec)=>{
+    const res=await db.saveRecipe(rec);
+    if(res?.error){alert("La fiche n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload({force:true});return;}
+    // Une fiche technique est un objet riche (composants, étapes…) : on
+    // recharge uniquement si Supabase ne renvoie pas la ligne complète.
+    if(res?.data){
+      const r=res.data;
+      const entry={id:r.id,name:r.name,emoji:r.emoji,type:r.type,category:r.category,price:r.price,portions:r.portions,yield:r.yield_qty?{qty:r.yield_qty,unit:r.yield_unit}:undefined,components:r.components||[],steps:r.steps||[],allergens:r.allergens||[]};
+      markLocalWrite?.();
+      setData(d=>({...d,recipes: d.recipes.some(x=>x.id===entry.id) ? d.recipes.map(x=>x.id===entry.id?entry:x) : [...d.recipes,entry]}));
+    } else { await reload({force:true}); }
+    setView("list");setSel(null);
+  }} onCancel={()=>{setView("list");setSel(null);}}/>;
   if(view==="detail"&&sel)return<RecipeDetail recipe={allRecipes.find(r=>r.id===sel)} allRecipes={allRecipes} onBack={()=>{setView("list");setSel(null);}} onEdit={()=>setView("edit")}/>;
   return(<div className="page"><div className="section-title">Fiches techniques</div><div className="section-sub">{nbPlats} plat{nbPlats>1?"s":""} · {nbPreps} préparation{nbPreps>1?"s":""}</div>
     <SegmentedControl value={typeFilter} onChange={setTypeFilter} options={[{value:"plat",label:`🍽️ Plats${nbPlats?` (${nbPlats})`:""}`},{value:"mere",label:`🧪 Préparations${nbPreps?` (${nbPreps})`:""}`}]}/>
@@ -2871,7 +2984,12 @@ function Planning({data,setData,user,db,reload,markLocalWrite}){
   async function remove(){
     if(!sheet?.id)return;
     if(!window.confirm("Supprimer ce créneau ?"))return;
-    await db.deleteShift(sheet.id);await reload({force:true});setSheet(null);
+    const shiftId=sheet.id;
+    const res=await db.deleteShift(shiftId);
+    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload({force:true});return;}
+    markLocalWrite?.();
+    setData(d=>({...d,shifts:d.shifts.filter(x=>x.id!==shiftId)}));
+    setSheet(null);
   }
   const totalWeekH=(uid)=>{
     const mins=shifts.filter(s=>s.userId===uid&&days.some(d=>isoDate(d)===s.date)).reduce((a,s)=>{
@@ -3089,14 +3207,25 @@ function ProductsEditor({data,setData,db,reload,markLocalWrite}){
   </>);
 }
 
-function TaskCategoriesEditor({data,setData,db,reload}){
+function TaskCategoriesEditor({data,setData,db,reload,markLocalWrite}){
   const[showAdd,setShowAdd]=useState(false);const[editing,setEditing]=useState(null);
   const[form,setForm]=useState({name:"",icon:"📋",color:"#5A8FB5"});
   const PRESET_COLORS=["#5A8FB5","#D49340","#C97FA8","#C9A862","#5FB075","#A78BFA","#D55C5C","#5EEAD4"];
   const PRESET_ICONS=["❄️","🔥","🍰","🥖","🥩","🐟","🥗","🍷","🧀","☕","🧂","📋"];
   function openAdd(){setEditing(null);setForm({name:"",icon:"📋",color:PRESET_COLORS[0]});setShowAdd(true);}
   function openEdit(cat){setEditing(cat);setForm({name:cat.name,icon:cat.icon,color:cat.color});setShowAdd(true);}
-  async function save(){if(!form.name.trim())return;await db.saveTaskCategory(editing?{...form,id:editing.id}:{...form});await reload({force:true});setShowAdd(false);setEditing(null);}
+  async function save(){
+    if(!form.name.trim())return;
+    const res=await db.saveTaskCategory(editing?{...form,id:editing.id}:{...form});
+    if(res?.error){alert("La catégorie n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload({force:true});return;}
+    if(res?.data){
+      const x=res.data;
+      const entry={id:x.id,name:x.name,icon:x.icon,color:x.color};
+      markLocalWrite?.();
+      setData(d=>({...d,taskCategories: d.taskCategories.some(c2=>c2.id===entry.id) ? d.taskCategories.map(c2=>c2.id===entry.id?entry:c2) : [...d.taskCategories,entry]}));
+    } else { await reload({force:true}); }
+    setShowAdd(false);setEditing(null);
+  }
   async function remove(catId){const tasksInCat=data.tasks.filter(t=>t.categoryId===catId).length;const msg=tasksInCat>0?`${tasksInCat} tâche(s) seront déplacées. Supprimer ?`:"Supprimer cette catégorie ?";if(!window.confirm(msg))return;const remaining=data.taskCategories.filter(c=>c.id!==catId);const fallbackId=remaining[0]?.id;await db.deleteTaskCategory(catId,fallbackId);await reload({force:true});}
   return(<><div className="text-xs text-dim mb12" style={{lineHeight:1.5}}>Organisez votre mise en place par zones de production.</div>
     {data.taskCategories.map(cat=>{const count=data.tasks.filter(t=>t.categoryId===cat.id).length;return(<div key={cat.id} className="item" style={{borderLeft:`3px solid ${cat.color}`}}><div className="item-icon" style={{background:`${cat.color}22`}}>{cat.icon}</div><div className="item-body"><div className="item-title">{cat.name}</div><div className="item-sub">{count} tâche{count>1?"s":""}</div></div><div className="row gap6"><button onClick={()=>openEdit(cat)} style={{background:"transparent",border:"none",color:T.textDim,fontSize:16,padding:"6px 8px"}}>✏️</button><button onClick={()=>remove(cat.id)} style={{background:"transparent",border:"none",color:T.bad,fontSize:16,padding:"6px 8px"}}>🗑</button></div></div>);})}
@@ -3207,6 +3336,38 @@ function SettingsHaccp({data,setData,db,reload}){
     toast.ping();
   }
 
+  // Horaires de bascule : convertis en minutes depuis minuit pour le stockage,
+  // affichés en HH:MM dans l'interface.
+  const minsToHHMM = m => `${String(Math.floor(m/60)).padStart(2,"0")}:${String(m%60).padStart(2,"0")}`;
+  const hhmmToMins = s => { const [h,m]=(s||"").split(":").map(Number); return (h||0)*60+(m||0); };
+
+  // Saisie en cours, séparée de la valeur enregistrée : un champ "time"
+  // déclenche onChange à chaque chiffre tapé — on n'enregistre donc qu'à la
+  // sortie du champ, pas à chaque frappe.
+  const[horaires,setHoraires]=useState({
+    resetMidi: minsToHHMM(data.haccpSettings.resetMidi ?? 990),
+    resetSoir: minsToHHMM(data.haccpSettings.resetSoir ?? 180),
+  });
+
+  async function commitHoraire(field){
+    const hhmm = horaires[field];
+    if(!hhmm) return;
+    const mins = hhmmToMins(hhmm);
+    if(mins === data.haccpSettings[field]) return; // rien n'a changé
+    const s = {...data.haccpSettings, [field]: mins};
+    setData(d=>({...d,haccpSettings:{...d.haccpSettings,[field]:mins}}));
+    const res=await db.saveHaccpSettings(s);
+    if(res?.error){
+      alert("L'horaire n'a pas été enregistré. Vérifie la connexion Supabase.");
+      // Remet le champ sur la dernière valeur connue, pour ne pas laisser
+      // croire que le changement est pris en compte.
+      setHoraires(h=>({...h,[field]:minsToHHMM(data.haccpSettings[field] ?? (field==="resetMidi"?990:180))}));
+      await reload?.({force:true});
+      return;
+    }
+    toast.ping();
+  }
+
   function openFridge(f){ setFForm(f?{name:f.name,icon:f.icon,target:f.target,type:f.type}:{name:"",icon:"🧊",target:"0–4",type:"positif"}); setSheet({kind:"fridge",item:f||null}); }
   function openClean(c){ setCForm(c?{zone:c.zone,icon:c.icon,freq:c.freq,produit:c.produit,dilution:c.dilution}:{zone:"",icon:"🧹",freq:"Quotidien",produit:"",dilution:""}); setSheet({kind:"clean",item:c||null}); }
 
@@ -3274,6 +3435,37 @@ function SettingsHaccp({data,setData,db,reload}){
         </div>
       </div>
     ))}
+    </CollapsibleSection>
+
+    <CollapsibleSection title="Horaires de service" icon="🕐" count={2}>
+      <div className="text-xs text-dim mb12" style={{lineHeight:1.5,marginLeft:2}}>
+        Moments où la mise en place et le nettoyage quotidien repartent à zéro pour toute l'équipe.
+      </div>
+      <div className="item" style={{marginBottom:8}}>
+        <div className="item-icon" style={{background:T.warnBg}}>☀️</div>
+        <div className="item-body">
+          <div className="item-title">Fin du service du midi</div>
+          <div className="item-sub">Purge la liste du midi, pendant la coupure</div>
+        </div>
+        <input className="input input-sm" type="time" style={{width:104,flexShrink:0}}
+          value={horaires.resetMidi}
+          onChange={e=>setHoraires(h=>({...h,resetMidi:e.target.value}))}
+          onBlur={()=>commitHoraire("resetMidi")}/>
+      </div>
+      <div className="item">
+        <div className="item-icon" style={{background:T.infoBg}}>🌙</div>
+        <div className="item-body">
+          <div className="item-title">Fin du service du soir</div>
+          <div className="item-sub">Purge la liste du soir · la nuit, pour un matin propre</div>
+        </div>
+        <input className="input input-sm" type="time" style={{width:104,flexShrink:0}}
+          value={horaires.resetSoir}
+          onChange={e=>setHoraires(h=>({...h,resetSoir:e.target.value}))}
+          onBlur={()=>commitHoraire("resetSoir")}/>
+      </div>
+      <div className="banner banner-info mt10"><span>ℹ️</span><div style={{fontSize:11,lineHeight:1.5}}>
+        Le service du soir traverse minuit : entre minuit et l'heure ci-dessus, l'app considère qu'on est toujours sur le service de la veille — les listes ne s'effacent pas en plein travail.
+      </div></div>
     </CollapsibleSection>
 
     <CollapsibleSection title="Enceintes froides" icon="🌡️" count={fridges.length}>
@@ -3507,7 +3699,7 @@ function Settings({data,setData,user,onLogout,db,reload,markLocalWrite}){
       {tab==="haccp"&&user.isAdmin&&<SettingsHaccp data={data} setData={setData} db={db} reload={reload}/>}
       {tab==="products"&&user.isAdmin&&<ProductsEditor data={data} setData={setData} db={db} reload={reload} markLocalWrite={markLocalWrite}/>}
       {tab==="printer"&&<SettingsPrinter user={user}/>}
-      {tab==="tasks"&&user.isAdmin&&<TaskCategoriesEditor data={data} setData={setData} db={db} reload={reload}/>}
+      {tab==="tasks"&&user.isAdmin&&<TaskCategoriesEditor data={data} setData={setData} db={db} reload={reload} markLocalWrite={markLocalWrite}/>}
       {tab==="users"&&user.isAdmin&&<SettingsUsers data={data} setData={setData} user={user} db={db} reload={reload} onLogout={onLogout}/>}
       {tab==="restaurant"&&user.isAdmin&&<SettingsRestaurant data={data} setData={setData} db={db}/>}
     </div>
@@ -3776,11 +3968,32 @@ export default function App(){
   //    les listes Mise en place + Nettoyage repassent à zéro pour toute l'équipe.
   //    Les relevés de température sont déjà remis à zéro chaque jour (matin/soir par date).
   useEffect(()=>{
-    const SERVICE_BOUNDS=[15*60, 23*60+30]; // fins de service en minutes (15h00 / 23h30) — adapter si besoin
+    // Deux bascules par jour, dont les horaires sont paramétrables
+    // (Paramètres → HACCP → Horaires de service) :
+    //  · resetMidi → fin du service du midi (défaut 16h30, pendant la coupure)
+    //  · resetSoir → fin du service du soir (défaut 03h00, liste neuve au matin)
+    // Le créneau du soir traverse minuit : avant resetSoir, on est encore
+    // rattaché au service de la VEILLE. Sans ça, le changement de date à minuit
+    // provoquerait une remise à zéro parasite en plein service.
+    const RESET_MIDI = data?.haccpSettings?.resetMidi ?? (16*60+30);
+    const RESET_SOIR = data?.haccpSettings?.resetSoir ?? (3*60);
     const serviceKey=()=>{
-      const n=new Date();const mins=n.getHours()*60+n.getMinutes();
-      const period=mins<SERVICE_BOUNDS[0]?"midi":mins<SERVICE_BOUNDS[1]?"soir":"nuit";
-      return `${n.toISOString().slice(0,10)}-${period}`;
+      const n=new Date();
+      const mins=n.getHours()*60+n.getMinutes();
+      const day=new Date(n);
+      let period;
+      if(mins < RESET_SOIR){
+        // Entre minuit et 3h : encore le service du soir de la veille.
+        period="soir";
+        day.setDate(day.getDate()-1);
+      } else if(mins < RESET_MIDI){
+        period="midi";
+      } else {
+        period="soir";
+      }
+      // Date locale (pas ISO/UTC, qui décalerait le jour selon le fuseau).
+      const ymd=`${day.getFullYear()}-${String(day.getMonth()+1).padStart(2,"0")}-${String(day.getDate()).padStart(2,"0")}`;
+      return `${ymd}-${period}`;
     };
     let busy=false;
     const tick=async()=>{
@@ -3790,6 +4003,10 @@ export default function App(){
         const last=await DB.getAppState("last_service");
         if(last!==null&&last!==key){ await DB.resetServiceLists(); }
         if(last!==key){ await DB.setAppState("last_service",key); }
+        // Les nettoyages hebdo/mensuel/trimestriel expirent selon leur propre
+        // date de réalisation, indépendamment des services : on vérifie donc à
+        // chaque synchro, pas seulement quand le service change.
+        await DB.expireCleaningByFrequency();
         await reload();
       }catch(e){/* silencieux : prochaine tentative au tick suivant */}
       busy=false;
@@ -3799,7 +4016,7 @@ export default function App(){
     document.addEventListener("visibilitychange",onVisible);
     window.addEventListener("focus",onVisible);
     return()=>{clearInterval(iv);document.removeEventListener("visibilitychange",onVisible);window.removeEventListener("focus",onVisible);};
-  },[reload]);
+  },[reload, data?.haccpSettings?.resetMidi, data?.haccpSettings?.resetSoir]);
 
   // ── Mot-clé "Fuego" (écoute passive en arrière-plan) ──
   useEffect(()=>{
