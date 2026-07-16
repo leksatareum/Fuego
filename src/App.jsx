@@ -28,6 +28,38 @@ const sbPost   = (table, body)         => sbFetch(table, { method:"POST", body, 
 const sbPatch  = (table, body, params) => sbFetch(table, { method:"PATCH", body, params });
 const sbDelete = (table, params)       => sbFetch(table, { method:"DELETE", params });
 
+// ── Supabase Storage : envoi/suppression de vrais fichiers (PDF de rapports).
+// Contrairement aux photos de traçabilité stockées en base, les PDF peuvent
+// peser plusieurs Mo : on ne garde que leur chemin en base, le fichier vit
+// dans le Storage et n'est téléchargé que si on l'ouvre.
+async function sbUpload(bucket, path, file){
+  // Même garde-fou que sbFetch : en mode démo (Supabase non configuré), on
+  // n'essaie pas d'appeler une URL invalide.
+  if (!SUPABASE_URL || SUPABASE_URL.includes("REMPLACE")) return { data:null, error:"not_configured" };
+  try{
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`, {
+      method: "POST",
+      headers: { apikey: SUPABASE_ANON, Authorization: `Bearer ${SUPABASE_ANON}`, "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+    });
+    if(!res.ok){ return { data:null, error: await res.text() }; }
+    return { data:{ path }, error:null };
+  }catch(e){ return { data:null, error:e.message }; }
+}
+async function sbRemoveFile(bucket, path){
+  if (!SUPABASE_URL || SUPABASE_URL.includes("REMPLACE")) return { data:null, error:"not_configured" };
+  try{
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`, {
+      method: "DELETE",
+      headers: { apikey: SUPABASE_ANON, Authorization: `Bearer ${SUPABASE_ANON}` },
+    });
+    if(!res.ok){ return { data:null, error: await res.text() }; }
+    return { data:true, error:null };
+  }catch(e){ return { data:null, error:e.message }; }
+}
+// URL publique d'un fichier stocké (le bucket est public, cf. migration SQL).
+const sbPublicUrl = (bucket, path) => `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`;
+
 // Helpers pour construire les query strings Supabase
 const q = {
   eq: (col, val) => `${col}=eq.${encodeURIComponent(val)}`,
@@ -111,7 +143,7 @@ const DB = {
       labels: labels.map(l=>({id:l.id,product:l.product,dateProd:l.date_prod,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator})),
       testMeals: tm.map(m=>({id:m.id,date:m.date,service:m.service,product:m.product,qty:m.qty,destroyAt:m.destroy_at,operator:m.operator})),
       training: train.map(t=>({id:t.id,name:t.name,role:t.role,haccpExp:t.haccp_exp,visaExp:t.visa_exp})),
-      pests: pests.map(p=>({id:p.id,date:p.date,type:p.type,company:p.company,result:p.result,nextVisit:p.next_visit})),
+      pests: pests.map(p=>({id:p.id,date:p.date,type:p.type,company:p.company,result:p.result,nextVisit:p.next_visit,reportPath:p.report_path||null,reportName:p.report_name||null})),
       recipes: recipes.map(r=>({id:r.id,name:r.name,emoji:r.emoji,type:r.type,category:r.category,price:r.price,portions:r.portions,yield:r.yield_qty?{qty:r.yield_qty,unit:r.yield_unit}:undefined,components:r.components||[],steps:r.steps||[],allergens:r.allergens||[]})),
       taskCategories: cats.map(c=>({id:c.id,name:c.name,icon:c.icon,color:c.color})),
       tasks: tasks.map(t=>({id:t.id,categoryId:t.category_id,task:t.task,resp:t.resp,qty:t.qty,done:t.done,prio:t.prio,date:t.date,service:t.service||"midi"})),
@@ -120,8 +152,13 @@ const DB = {
     };
   },
 
-  async saveReleve({fridgeId,date,period,temp,time,operatorId}){
-    // Cherche un releve existant pour ce frigo/date/period
+  async saveReleve({fridgeId,date,period,temp,time,operatorId,existingId}){
+    // Si l'appelant connaît déjà l'id du relevé existant (il l'a dans son état
+    // local), on écrit directement — ça évite une requête réseau de lecture
+    // avant chaque enregistrement, qui doublait le temps de validation.
+    if(existingId)
+      return sbPatch("fridge_releves",{temp,time,operator_id:operatorId},qs(`id=eq.${existingId}`));
+    // Sinon seulement, on vérifie côté serveur (cas rare : état local pas à jour).
     const {data:ex}=await sbGet("fridge_releves", qs(`fridge_id=eq.${fridgeId}`,`date=eq.${date}`,`period=eq.${period}`,q.limit(1),q.select("id")));
     if(ex&&ex[0])
       return sbPatch("fridge_releves",{temp,time,operator_id:operatorId},qs(`id=eq.${ex[0].id}`));
@@ -149,7 +186,18 @@ const DB = {
     return sbDelete("labels", qs(`created_at=lt.${startOfToday.toISOString()}`));
   },
   async addTestMeal(m){return sbPost("test_meals",{date:m.date,service:m.service,product:m.product,qty:m.qty,destroy_at:m.destroyAt,operator:m.operator});},
-  async addPest(p){return sbPost("pests",{date:p.date,type:p.type,company:p.company,result:p.result,next_visit:p.nextVisit});},
+  async addPest(p){return sbPost("pests",{date:p.date,type:p.type,company:p.company,result:p.result,next_visit:p.nextVisit,report_path:p.reportPath||null,report_name:p.reportName||null});},
+  // Envoie le PDF dans le Storage. Le nom est rendu unique pour éviter
+  // d'écraser un rapport existant portant le même nom de fichier.
+  async uploadPestReport(file){
+    const safe = file.name.replace(/[^a-zA-Z0-9._-]/g,"_");
+    const path = `${Date.now()}_${safe}`;
+    const res = await sbUpload("pest-reports", path, file);
+    if(res.error) return { error: res.error };
+    return { path, name: file.name };
+  },
+  async deletePestReport(path){ return sbRemoveFile("pest-reports", path); },
+  pestReportUrl(path){ return sbPublicUrl("pest-reports", path); },
   async saveRecipe(r){
     const row={name:r.name,emoji:r.emoji,type:r.type,category:r.category,price:r.price,portions:r.portions,yield_qty:r.yield?.qty,yield_unit:r.yield?.unit,components:r.components,steps:r.steps,allergens:r.allergens};
     if(r.id)return sbPatch("recipes",row,qs(`id=eq.${r.id}`));
@@ -1506,7 +1554,10 @@ function Temperatures({data,setData,user,db,reload,go,markLocalWrite}){
     if(!editing||pickedTemp===null)return;
     const date=todayStr();
     const fridgeId=editing.fridge.id, period=editing.period, time=nowTime();
-    const res=await db.saveReleve({fridgeId,date,period,temp:pickedTemp,time,operatorId:user.id});
+    // On connaît déjà le relevé existant côté local : on passe son id pour
+    // éviter une requête de lecture supplémentaire avant l'écriture.
+    const existing=data.fridgeReleves.find(r=>r.fridgeId===fridgeId&&r.date===date&&r.period===period);
+    const res=await db.saveReleve({fridgeId,date,period,temp:pickedTemp,time,operatorId:user.id,existingId:existing?.id});
     if(res?.error){alert("Le relevé n'a pas été enregistré. Vérifie la connexion Supabase.");await reload({force:true});return;}
     // Mise à jour locale immédiate (pas de reload complet des 20 tables juste
     // pour un relevé) : on remplace ou ajoute l'entrée directement dans l'état.
@@ -2443,26 +2494,88 @@ function TestMeals({data,setData,user,db,reload,go,markLocalWrite}){
 }
 
 function Pests({data,setData,db,reload,go,markLocalWrite}){
-  const[show,setShow]=useState(false);const[form,setForm]=useState({type:"Visite contrat",company:"",result:"RAS",nextVisit:""});
-  async function save(){
-    const res=await db.addPest({date:todayStr(),type:form.type,company:form.company,result:form.result,nextVisit:form.nextVisit});
-    if(res?.error){alert("L'intervention n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload({force:true});return;}
-    if(res?.data){const p=res.data;markLocalWrite?.();setData(d=>({...d,pests:[{id:p.id,date:p.date,type:p.type,company:p.company,result:p.result,nextVisit:p.next_visit},...d.pests]}));}
-    setShow(false);setForm({type:"Visite contrat",company:"",result:"RAS",nextVisit:""});
+  const[show,setShow]=useState(false);
+  const[form,setForm]=useState({type:"Visite contrat",company:"",result:"RAS",nextVisit:""});
+  const[reportFile,setReportFile]=useState(null); // PDF sélectionné, pas encore envoyé
+  const[busy,setBusy]=useState(false);
+
+  function pickReport(e){
+    const f=e.target.files?.[0];
+    if(!f)return;
+    // Garde-fou : au-delà de 10 Mo, c'est probablement un scan mal compressé.
+    if(f.size > 10*1024*1024){ alert("Ce fichier dépasse 10 Mo. Demande à l'entreprise un PDF plus léger."); return; }
+    setReportFile(f);
   }
+
+  async function save(){
+    if(busy)return;
+    setBusy(true);
+    let reportPath=null, reportName=null;
+    // 1) On envoie d'abord le PDF dans le Storage (s'il y en a un)…
+    if(reportFile){
+      const up=await db.uploadPestReport(reportFile);
+      if(up?.error){ setBusy(false); alert("Le rapport n'a pas pu être envoyé. Vérifie la connexion."); return; }
+      reportPath=up.path; reportName=up.name;
+    }
+    // 2) …puis on enregistre l'intervention avec le chemin du fichier.
+    const res=await db.addPest({date:todayStr(),type:form.type,company:form.company,result:form.result,nextVisit:form.nextVisit,reportPath,reportName});
+    setBusy(false);
+    if(res?.error){
+      // L'intervention a échoué : on nettoie le PDF déjà envoyé pour ne pas
+      // laisser de fichier orphelin dans le Storage.
+      if(reportPath) await db.deletePestReport(reportPath);
+      alert("L'intervention n'a pas été enregistrée. Vérifie la connexion Supabase.");
+      await reload({force:true});
+      return;
+    }
+    if(res?.data){
+      const p=res.data;
+      markLocalWrite?.();
+      setData(d=>({...d,pests:[{id:p.id,date:p.date,type:p.type,company:p.company,result:p.result,nextVisit:p.next_visit,reportPath:p.report_path||null,reportName:p.report_name||null},...d.pests]}));
+    }
+    setShow(false);setForm({type:"Visite contrat",company:"",result:"RAS",nextVisit:""});setReportFile(null);
+  }
+
   return(<div className="page">
     <GbphHelpButton section="pest" go={go}/>
     <div className="section-title">Nuisibles</div><div className="section-sub">Plan de lutte 3D</div>
     {data.pests.length===0 && <div className="empty"><div className="empty-icon">🐀</div><div className="empty-title">Aucune intervention</div><div className="empty-sub">Enregistre une visite ou une observation avec le bouton +</div></div>}
-    {data.pests.map(p=><div key={p.id} className="card"><div className="between mb6"><div><div className="item-title">{p.type}</div><div className="item-sub">{p.company}</div></div><span className={`badge ${p.result==="RAS"?"b-good":"b-warn"}`}>{p.result}</span></div><div className="text-xs text-dim">Visite : {p.date} · Prochaine : {p.nextVisit}</div></div>)}
+    {data.pests.map(p=><div key={p.id} className="card">
+      <div className="between mb6"><div><div className="item-title">{p.type}</div><div className="item-sub">{p.company}</div></div><span className={`badge ${p.result==="RAS"?"b-good":"b-warn"}`}>{p.result}</span></div>
+      <div className="text-xs text-dim">Visite : {p.date} · Prochaine : {p.nextVisit}</div>
+      {p.reportPath && (
+        <a href={db.pestReportUrl(p.reportPath)} target="_blank" rel="noopener noreferrer"
+           style={{display:"flex",alignItems:"center",gap:8,marginTop:10,padding:"9px 12px",background:T.bg3,border:`1px solid ${T.border}`,borderRadius:10,textDecoration:"none"}}>
+          <span style={{fontSize:16}}>📄</span>
+          <span style={{flex:1,fontSize:12,fontWeight:600,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.reportName||"Rapport de passage"}</span>
+          <span style={{color:T.textDim,fontSize:12}}>Ouvrir ›</span>
+        </a>
+      )}
+    </div>)}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
-    {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
+    {show&&<div className="overlay" onClick={()=>!busy&&setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">Nouvelle intervention</div>
       <div className="field"><label className="label">Type</label><select className="input" value={form.type} onChange={e=>setForm({...form,type:e.target.value})}><option>Visite contrat</option><option>Intervention urgente</option><option>Observation interne</option></select></div>
       <div className="field"><label className="label">Société</label><input className="input" value={form.company} onChange={e=>setForm({...form,company:e.target.value})}/></div>
       <div className="field"><label className="label">Résultat</label><BinaryChoice value={form.result} onChange={v=>setForm({...form,result:v})} options={[{value:"RAS",label:"RAS",icon:"✓",style:"good"},{value:"Présence détectée",label:"Alerte",icon:"⚠",style:"bad"}]}/></div>
       <div className="field"><label className="label">Prochaine visite</label><input className="input" type="date" value={form.nextVisit} onChange={e=>setForm({...form,nextVisit:e.target.value})}/></div>
-      <button className="btn btn-primary mt8" onClick={save}>Enregistrer</button>
+
+      <div className="field"><label className="label">Rapport de passage (PDF)</label>
+        {reportFile
+          ? <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",background:T.goodBg,border:`1px solid ${T.good}44`,borderRadius:10}}>
+              <span style={{fontSize:16}}>📄</span>
+              <span style={{flex:1,fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{reportFile.name}</span>
+              <button onClick={()=>setReportFile(null)} style={{background:"none",border:"none",color:T.textDim,fontSize:15,padding:"0 4px"}}>✕</button>
+            </div>
+          : <label style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"12px",background:T.bg3,border:`1px dashed ${T.border}`,borderRadius:10,cursor:"pointer",color:T.textDim,fontSize:13,fontWeight:600}}>
+              📎 Joindre le PDF de l'entreprise
+              <input type="file" accept="application/pdf,.pdf" style={{display:"none"}} onChange={pickReport}/>
+            </label>
+        }
+        <div className="text-xs text-mute mt6">Facultatif · 10 Mo maximum</div>
+      </div>
+
+      <button className="btn btn-primary mt8" onClick={save} disabled={busy}>{busy?"Enregistrement…":"Enregistrer"}</button>
     </div></div>}
   </div>);
 }
@@ -2899,7 +3012,17 @@ function ProductsEditor({data,setData,db,reload,markLocalWrite}){
     const payload={name:form.name.trim(),price:parseFloat(String(form.price).replace(",","."))||0,unit:form.unit,category};
     const res = editing ? await db.updateProduct(editing.id,payload) : await db.addProduct(payload);
     if(res?.error){alert("Le produit n'a pas été enregistré. Vérifie la connexion Supabase.");await reload({force:true});return;}
-    await reload({force:true}); setShowAdd(false); setEditing(null); setCustomCat("");
+    // Mise à jour locale immédiate à partir de la ligne réellement renvoyée par
+    // Supabase — recharger les 20 tables ici rendait l'ajout très lent.
+    if(res?.data){
+      const p=res.data;
+      const entry={id:p.id,name:p.name,price:p.price,unit:p.unit,category:p.category||"Épicerie"};
+      markLocalWrite?.();
+      setData(d=>({...d,products: editing
+        ? d.products.map(x=>x.id===entry.id?entry:x)
+        : [...d.products, entry]}));
+    }
+    setShowAdd(false); setEditing(null); setCustomCat("");
   }
 
   async function remove(p){
@@ -2993,7 +3116,8 @@ function More({go,user}){
   const items=[{key:"margins",icon:"📊",bg:T.goodBg,title:"Marges",sub:"Rentabilité"},{key:"planning",icon:"📅",bg:T.warnBg,title:"Planning équipe",sub:"Horaires"}];
   return(<div className="page"><div className="section-title">Outils</div><div className="section-sub">Toutes les fonctions</div>
     {items.map(it=><div key={it.key} className="item" onClick={()=>go(it.key)}><div className="item-icon" style={{background:it.bg}}>{it.icon}</div><div className="item-body"><div className="item-title">{it.title}</div><div className="item-sub">{it.sub}</div></div><div className="item-arrow">›</div></div>)}
-    {user.isAdmin&&<><div className="bucket-label mt14">Administration</div><div className="item" onClick={()=>go("settings")}><div className="item-icon" style={{background:T.accentLt}}>⚙️</div><div className="item-body"><div className="item-title">Paramètres</div><div className="item-sub">Restaurant, équipe, HACCP</div></div><div className="item-arrow">›</div></div></>}
+    <div className="bucket-label mt14">{user.isAdmin?"Administration":"Réglages"}</div>
+    <div className="item" onClick={()=>go("settings")}><div className="item-icon" style={{background:T.accentLt}}>⚙️</div><div className="item-body"><div className="item-title">Paramètres</div><div className="item-sub">{user.isAdmin?"Restaurant, équipe, HACCP":"Imprimante d'étiquettes"}</div></div><div className="item-arrow">›</div></div>
   </div>);
 }
 
@@ -3364,20 +3488,28 @@ function SettingsPrinter({user}){
 }
 
 function Settings({data,setData,user,onLogout,db,reload,markLocalWrite}){
-  const[tab,setTab]=useState("haccp");
+  // L'adresse du relais d'impression peut changer à tout moment (redémarrage
+  // de l'Android, changement de réseau) — bloquer sa mise à jour derrière un
+  // compte admin paralyse toute l'équipe. Les non-admins accèdent donc à
+  // l'onglet Imprimante uniquement ; le reste (HACCP, équipe, produits…)
+  // reste réservé aux administrateurs.
+  const ALL_TABS=[{k:"haccp",l:"🛡️ HACCP"},{k:"products",l:"🧾 Produits"},{k:"printer",l:"🖨️ Imprimante"},{k:"tasks",l:"📋 Tâches"},{k:"users",l:"👥 Équipe"},{k:"restaurant",l:"🏠 Resto"}];
+  const tabs = user.isAdmin ? ALL_TABS : ALL_TABS.filter(t=>t.k==="printer");
+  const[tab,setTab]=useState(user.isAdmin?"haccp":"printer");
   return(
     <div className="page">
       <div className="section-title">Paramètres</div>
-      <div className="section-sub">Administration Fuego</div>
-      <div className="tabs" style={{marginBottom:20}}>
-        {[{k:"haccp",l:"🛡️ HACCP"},{k:"products",l:"🧾 Produits"},{k:"printer",l:"🖨️ Imprimante"},{k:"tasks",l:"📋 Tâches"},{k:"users",l:"👥 Équipe"},{k:"restaurant",l:"🏠 Resto"}].map(t=><button key={t.k} className={`tab ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k)}>{t.l}</button>)}
-      </div>
-      {tab==="haccp"&&<SettingsHaccp data={data} setData={setData} db={db} reload={reload}/>}
-      {tab==="products"&&<ProductsEditor data={data} setData={setData} db={db} reload={reload} markLocalWrite={markLocalWrite}/>}
+      <div className="section-sub">{user.isAdmin?"Administration Fuego":"Configuration imprimante"}</div>
+      {tabs.length>1&&<div className="tabs" style={{marginBottom:20}}>
+        {tabs.map(t=><button key={t.k} className={`tab ${tab===t.k?"active":""}`} onClick={()=>setTab(t.k)}>{t.l}</button>)}
+      </div>}
+      {/* Double garde : même si l'onglet était forcé, le contenu admin reste protégé. */}
+      {tab==="haccp"&&user.isAdmin&&<SettingsHaccp data={data} setData={setData} db={db} reload={reload}/>}
+      {tab==="products"&&user.isAdmin&&<ProductsEditor data={data} setData={setData} db={db} reload={reload} markLocalWrite={markLocalWrite}/>}
       {tab==="printer"&&<SettingsPrinter user={user}/>}
-      {tab==="tasks"&&<TaskCategoriesEditor data={data} setData={setData} db={db} reload={reload}/>}
-      {tab==="users"&&<SettingsUsers data={data} setData={setData} user={user} db={db} reload={reload} onLogout={onLogout}/>}
-      {tab==="restaurant"&&<SettingsRestaurant data={data} setData={setData} db={db}/>}
+      {tab==="tasks"&&user.isAdmin&&<TaskCategoriesEditor data={data} setData={setData} db={db} reload={reload}/>}
+      {tab==="users"&&user.isAdmin&&<SettingsUsers data={data} setData={setData} user={user} db={db} reload={reload} onLogout={onLogout}/>}
+      {tab==="restaurant"&&user.isAdmin&&<SettingsRestaurant data={data} setData={setData} db={db}/>}
     </div>
   );
 }
@@ -3748,7 +3880,7 @@ export default function App(){
     margins:<Margins data={data}/>,planning:<Planning {...props}/>,
     tasks:<Tasks data={data} setData={setData} db={DB} reload={reload}/>,
     more:<More go={go} user={user}/>,
-    settings:user.isAdmin?<Settings data={data} setData={setData} user={user} onLogout={logout} db={DB} reload={reload} markLocalWrite={markLocalWrite}/>:<div style={{textAlign:"center",padding:40,color:T.textDim}}><div style={{fontSize:42}}>🔒</div><div>Réservé aux administrateurs</div></div>,
+    settings:<Settings data={data} setData={setData} user={user} onLogout={logout} db={DB} reload={reload} markLocalWrite={markLocalWrite}/>,
   };
   return(<><style>{S}</style><GlobalSheetSwipe/><div className="shell">
     <div className="topbar">
@@ -3766,7 +3898,7 @@ export default function App(){
       </button>
       <div className="text-xs text-mute mb12" style={{paddingLeft:4}}>{wakeEnabled?"Dites « Fuego » pour activer la commande vocale sans toucher l'écran":"Activez pour piloter à la voix, mains libres"}</div>
       </>}
-      {user.isAdmin&&<button className="btn btn-ghost mb8" onClick={()=>{setProfile(false);go("settings");}}>⚙️ Paramètres</button>}
+      <button className="btn btn-ghost mb8" onClick={()=>{setProfile(false);go("settings");}}>⚙️ Paramètres</button>
       <button className="btn" style={{background:T.badBg,color:T.bad}} onClick={logout}>Déconnexion</button>
     </div></div>}
     <div className={`scroll nav-${navDir}`} key={page}>{pages[page]||pages.home}</div>
