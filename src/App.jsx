@@ -1069,7 +1069,21 @@ function Aujourdhui({data,go,user,onVoiceOpen}){
   const totalFridges=data.haccpSettings.fridgeTargets.length;
   const matinDone=data.haccpSettings.fridgeTargets.filter(f=>getReleve(data,f.id,"matin")).length;
   const soirDone=data.haccpSettings.fridgeTargets.filter(f=>getReleve(data,f.id,"soir")).length;
-  const tasksTotal=data.tasks.length;const tasksDone=data.tasks.filter(t=>t.done).length;
+  // Compte les tâches du créneau EN COURS uniquement — data.tasks contient
+  // tous les créneaux (aujourd'hui midi + soir, demain…). Sans ce filtre,
+  // l'accueil affichait un total qui ne correspondait pas à l'écran Mise en
+  // place, qui lui ne montre qu'un créneau à la fois.
+  const homeSlot=(()=>{
+    const RESET_MIDI = data?.haccpSettings?.resetMidi ?? (16*60+30);
+    const RESET_SOIR = data?.haccpSettings?.resetSoir ?? (3*60);
+    const n=new Date(); const mins=n.getHours()*60+n.getMinutes();
+    const d=new Date();
+    if(mins < RESET_SOIR){ d.setDate(d.getDate()-1); return {date:isoDate(d), service:"soir"}; }
+    if(mins < RESET_MIDI) return {date:isoDate(d), service:"midi"};
+    return {date:isoDate(d), service:"soir"};
+  })();
+  const slotTasks=data.tasks.filter(t=>t.date===homeSlot.date&&(t.service||"midi")===homeSlot.service);
+  const tasksTotal=slotTasks.length;const tasksDone=slotTasks.filter(t=>t.done).length;
   const cleanTotal=data.cleaning.length;const cleanDone=data.cleaning.filter(c=>c.done).length;
 
   // Statut de chaque module pour la pastille d'accès rapide : vert = complet
@@ -2869,9 +2883,30 @@ function Recipes({data,setData,db,reload,user,markLocalWrite}){
   </div>);
 }
 
-function Tasks({data,setData,db,reload}){
+// Ligne de tâche : tap = cocher/décocher, appui long = supprimer (admin seul).
+// L'appui long remplace le swipe, qui entrait en conflit avec le bouton "+"
+// de chaque catégorie.
+function TaskRow({t,cat,onToggle,onDelete,canDelete}){
+  const lp=useLongPress(()=>{ if(!canDelete)return; haptic.medium(); onDelete(); });
+  return(
+    <div className={`item ${lp.pressing?"pressing":""}`}
+      {...(canDelete?lp.handlers:{})}
+      onClick={()=>{ if(!lp.didFire()) onToggle(); }}
+      style={{opacity:t.done?.45:1,borderLeftColor:cat.color,borderLeftWidth:3,borderLeftStyle:"solid"}}>
+      <div className={`check ${t.done?"on":""}`}>{t.done?"✓":""}</div>
+      <div className="item-body">
+        <div className="item-title" style={{textDecoration:t.done?"line-through":"none"}}>{t.task}</div>
+        <div className="item-sub">{[t.resp,t.qty].filter(Boolean).join(" · ")||"—"}</div>
+      </div>
+    </div>
+  );
+}
+
+function Tasks({data,setData,db,reload,user}){
   const[show,setShow]=useState(false);const[filter,setFilter]=useState("all");const[busy,setBusy]=useState(false);
   const[form,setForm]=useState({task:"",resp:"",qty:"",prio:"med",categoryId:null});
+  // Seuls les admins peuvent supprimer une tâche (appui long).
+  const isAdmin=!!user?.isAdmin;
   // Créneau réellement en cours, calé sur les horaires paramétrés du restaurant
   // (Paramètres → HACCP → Horaires de service) — et non sur un 15h en dur.
   // Entre minuit et resetSoir, on est encore sur le service du soir de la veille.
@@ -2935,6 +2970,8 @@ function Tasks({data,setData,db,reload}){
     haptic.success();
   }
   async function removeTask(t){
+    if(!isAdmin)return; // double garde : l'appui long est déjà désactivé côté UI
+    if(!window.confirm(`Supprimer "${t.task}" ?`))return;
     const res=await db.deleteTask?.(t.id);
     if(res?.error){alert("La tâche n'a pas été supprimée. Vérifie la connexion Supabase.");await reload?.({force:true});return;}
     setData(d=>({...d,tasks:d.tasks.filter(x=>x.id!==t.id)}));
@@ -2993,9 +3030,9 @@ function Tasks({data,setData,db,reload}){
     {grouped.map(({cat,tasks})=>{if(!cat)return null;const catDone=tasks.filter(t=>t.done).length;return(<div key={cat.id} style={{marginBottom:18}}>
       <div className="between mb8" style={{padding:"0 4px"}}><div className="row gap8"><span style={{fontSize:18}}>{cat.icon}</span><span style={{fontSize:13,fontWeight:700,color:cat.color}}>{cat.name}</span><span className="text-xs text-dim">· {catDone}/{tasks.length}</span></div><button onClick={()=>openAddFor(cat.id)} style={{background:"transparent",border:"none",color:cat.color,fontSize:18,fontWeight:700,padding:"4px 8px",cursor:"pointer"}}>+</button></div>
       {prios.map(p=>{const pt=tasks.filter(t=>t.prio===p.k);if(!pt.length)return null;return(<div key={p.k} style={{marginBottom:8}}><div style={{fontSize:10,fontWeight:700,color:p.c,marginBottom:4,marginLeft:6,letterSpacing:".06em",textTransform:"uppercase"}}>{p.l}</div>{pt.map(t=>(
-      <SwipeToDelete key={t.id} enabled confirmLabel={`Supprimer "${t.task}" ?`} onDelete={()=>removeTask(t)}>
-        <div className="item" onClick={()=>toggle(t.id)} style={{opacity:t.done?.45:1,borderLeftColor:cat.color,borderLeftWidth:3,borderLeftStyle:"solid"}}><div className={`check ${t.done?"on":""}`}>{t.done?"✓":""}</div><div className="item-body"><div className="item-title" style={{textDecoration:t.done?"line-through":"none"}}>{t.task}</div><div className="item-sub">{[t.resp,t.qty].filter(Boolean).join(" · ")||"—"}</div></div></div>
-      </SwipeToDelete>
+      <TaskRow key={t.id} t={t} cat={cat} canDelete={isAdmin}
+        onToggle={()=>toggle(t.id)}
+        onDelete={()=>removeTask(t)}/>
     ))}</div>);})}
     </div>);})}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
@@ -3031,7 +3068,11 @@ function Margins({data}){
 }
 
 // ─── PLANNING ÉQUIPE — semaine réelle, créneaux stockés en base ───────────────
-const isoDate=(d)=>d.toISOString().slice(0,10);
+// Date au format AAAA-MM-JJ en heure LOCALE. Ne pas utiliser toISOString(),
+// qui convertit en UTC : en France (UTC+1/+2), une saisie faite à 1h du matin
+// se retrouvait rangée à la date de la veille — précisément le créneau du
+// service du soir qui traverse minuit.
+const isoDate=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 function mondayOf(d){const x=new Date(d);const wd=(x.getDay()+6)%7;x.setDate(x.getDate()-wd);x.setHours(0,0,0,0);return x;}
 function Planning({data,setData,user,db,reload,markLocalWrite}){
   const[weekStart,setWeekStart]=useState(()=>mondayOf(new Date()));
@@ -4168,7 +4209,7 @@ export default function App(){
     training:<Training data={data} go={go}/>,registre:<Registre data={data}/>,gbph:<GbphGuide initialSection={gbphSection}/>,
     recipes:<Recipes data={data} setData={setData} db={DB} reload={reload} user={user} markLocalWrite={markLocalWrite}/>,
     margins:<Margins data={data}/>,planning:<Planning {...props}/>,
-    tasks:<Tasks data={data} setData={setData} db={DB} reload={reload}/>,
+    tasks:<Tasks data={data} setData={setData} db={DB} reload={reload} user={user}/>,
     more:<More go={go} user={user}/>,
     settings:<Settings data={data} setData={setData} user={user} onLogout={logout} db={DB} reload={reload} markLocalWrite={markLocalWrite}/>,
   };
