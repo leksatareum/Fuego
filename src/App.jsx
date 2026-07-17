@@ -4200,6 +4200,47 @@ export default function App(){
   // de se propager côté serveur — d'où des données qui "disparaissent" juste
   // après avoir été saisies. Ce verrou bloque la synchro pendant quelques
   // secondes après chaque écriture, le temps que le serveur soit à jour.
+  // ── Pastille sur l'icône de l'app (écran d'accueil iPhone) ──────────────
+  // Affiche le nombre d'actions en attente, comme les Messages. Nécessite
+  // iOS 16.4+ ET que l'app soit ajoutée à l'écran d'accueil : dans un onglet
+  // Safari classique, l'API n'existe pas (le code se contente alors de ne
+  // rien faire, sans erreur).
+  useEffect(()=>{
+    if(!("setAppBadge" in navigator)) return; // navigateur sans support
+    // Déconnecté : on efface la pastille, sinon elle resterait figée sur le
+    // dernier chiffre affiché.
+    if(!data || !user){ navigator.clearAppBadge?.().catch(()=>{}); return; }
+
+    const s = data.haccpSettings;
+    // Relevés de température manquants aujourd'hui (matin + soir par enceinte)
+    const fridges = s?.fridgeTargets || [];
+    const relevesManquants = fridges.reduce((n,f)=>
+      n + (getReleve(data,f.id,"matin")?0:1) + (getReleve(data,f.id,"soir")?0:1), 0);
+
+    // Tâches du créneau en cours restant à cocher
+    const RESET_MIDI = s?.resetMidi ?? (16*60+30);
+    const RESET_SOIR = s?.resetSoir ?? (3*60);
+    const now = new Date(); const mins = now.getHours()*60+now.getMinutes();
+    const slotDate = new Date();
+    let slotService;
+    if(mins < RESET_SOIR){ slotDate.setDate(slotDate.getDate()-1); slotService="soir"; }
+    else if(mins < RESET_MIDI){ slotService="midi"; }
+    else { slotService="soir"; }
+    const slotIso = isoDate(slotDate);
+    const tachesRestantes = (data.tasks||[]).filter(t=>
+      t.date===slotIso && (t.service||"midi")===slotService && !t.done).length;
+
+    // Zones de nettoyage à faire + produits en alerte DLC
+    const nettoyageRestant = (data.cleaning||[]).filter(c=>!c.done).length;
+    const alertesDlc = (data.traceability||[]).filter(t=>t.status!=="ok").length;
+
+    const total = relevesManquants + tachesRestantes + nettoyageRestant + alertesDlc;
+
+    // setAppBadge(0) afficherait une pastille vide : on l'efface plutôt.
+    if(total>0) navigator.setAppBadge(total).catch(()=>{});
+    else navigator.clearAppBadge?.().catch(()=>{});
+  },[data,user]);
+
   const lastWriteRef = useRef(0);
   const markLocalWrite = useCallback(()=>{ lastWriteRef.current = Date.now(); },[]);
   const WRITE_LOCK_MS = 6000;
@@ -4316,6 +4357,23 @@ export default function App(){
     setPage(k); setProfile(false);
   };
   const logout=()=>{setUser(null);setPage("home");};
+
+  // ── Service worker : socle des notifications (étape 1) ──────────────────
+  // Il ne fait rien de visible pour l'instant — il se contente d'exister, pour
+  // pouvoir recevoir des notifications plus tard. Volontairement isolé : si le
+  // fichier /sw.js est absent ou refusé, on ignore silencieusement. L'app
+  // fonctionne exactement comme avant, sans le moindre impact.
+  useEffect(()=>{
+    if(!("serviceWorker" in navigator)) return;
+    // Ne s'enregistre qu'en HTTPS (ou en local pour le développement) : le
+    // navigateur refuse les service workers sur une connexion non sécurisée.
+    const secure = window.isSecureContext || location.hostname==="localhost";
+    if(!secure) return;
+    navigator.serviceWorker.register("/sw.js").catch(()=>{
+      /* Pas de service worker : les notifications seront simplement
+         indisponibles. Aucune autre fonction de l'app n'en dépend. */
+    });
+  },[]);
 
   if(showSplash)return<><style>{S}</style><SplashScreen/></>;
 
