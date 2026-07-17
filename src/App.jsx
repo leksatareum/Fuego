@@ -1,3 +1,14 @@
+/**
+ * ════════════════════════════════════════════════════════════════════════════
+ *  FUEGO — Application de gestion HACCP et production pour la restauration
+ *
+ *  © 2026 Alexandre Valery. Tous droits réservés.
+ *
+ *  Ce logiciel et son code source sont la propriété exclusive d'Alexandre
+ *  Valery. Toute reproduction, distribution, modification ou utilisation,
+ *  totale ou partielle, sans autorisation écrite préalable est interdite.
+ * ════════════════════════════════════════════════════════════════════════════
+ */
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 // ─── SUPABASE REST CLIENT (sans dépendance externe) ─────────────────────────
 // Fonctionne dans l'artifact Claude, dans Vite, partout.
@@ -230,6 +241,7 @@ const DB = {
     return sbPost("recipes",row);
   },
   async deleteRecipe(id){return sbDelete("recipes",qs(`id=eq.${id}`));},
+  async deleteTask(id){return sbDelete("tasks",qs(`id=eq.${id}`));},
   async addTask(t){return sbPost("tasks",{category_id:t.categoryId,task:t.task,resp:t.resp,qty:t.qty,prio:t.prio,done:false,date:t.date||todayStr(),service:t.service||"midi"});},
   async toggleTask(id,done){return sbPatch("tasks",{done},qs(`id=eq.${id}`));},
   async clearTasks(dateStr,service){
@@ -2860,10 +2872,27 @@ function Recipes({data,setData,db,reload,user,markLocalWrite}){
 function Tasks({data,setData,db,reload}){
   const[show,setShow]=useState(false);const[filter,setFilter]=useState("all");const[busy,setBusy]=useState(false);
   const[form,setForm]=useState({task:"",resp:"",qty:"",prio:"med",categoryId:null});
+  // Créneau réellement en cours, calé sur les horaires paramétrés du restaurant
+  // (Paramètres → HACCP → Horaires de service) — et non sur un 15h en dur.
+  // Entre minuit et resetSoir, on est encore sur le service du soir de la veille.
+  const currentSlot=(()=>{
+    const RESET_MIDI = data?.haccpSettings?.resetMidi ?? (16*60+30);
+    const RESET_SOIR = data?.haccpSettings?.resetSoir ?? (3*60);
+    const n=new Date(); const mins=n.getHours()*60+n.getMinutes();
+    if(mins < RESET_SOIR)  return {offset:-1, service:"soir"}; // nuit → service de la veille
+    if(mins < RESET_MIDI)  return {offset:0,  service:"midi"};
+    return {offset:0, service:"soir"};
+  })();
+
   // Créneau sélectionné : décalage en jours (0=aujourd'hui) + service (midi/soir)
-  const[dayOffset,setDayOffset]=useState(0);
-  const[service,setService]=useState(()=>{const h=new Date().getHours();return h>=15?"soir":"midi";});
+  const[dayOffset,setDayOffset]=useState(Math.max(currentSlot.offset,0));
+  const[service,setService]=useState(currentSlot.service);
   const categories=data.taskCategories||[];
+
+  // Sommes-nous sur le créneau du service en cours ? Sert de repère visuel :
+  // toute la carte d'en-tête change de couleur si on prépare un autre créneau.
+  const isCurrentSlot = dayOffset===Math.max(currentSlot.offset,0) && service===currentSlot.service;
+  function goToCurrentSlot(){ haptic.light(); setDayOffset(Math.max(currentSlot.offset,0)); setService(currentSlot.service); }
 
   const crenauDate=new Date();crenauDate.setDate(crenauDate.getDate()+dayOffset);
   const crenauDateStr=isoDate(crenauDate);
@@ -2905,6 +2934,12 @@ function Tasks({data,setData,db,reload}){
     setFilter("all");
     haptic.success();
   }
+  async function removeTask(t){
+    const res=await db.deleteTask?.(t.id);
+    if(res?.error){alert("La tâche n'a pas été supprimée. Vérifie la connexion Supabase.");await reload?.({force:true});return;}
+    setData(d=>({...d,tasks:d.tasks.filter(x=>x.id!==t.id)}));
+    haptic.success();
+  }
   function openAddFor(catId){setForm({task:"",resp:"",qty:"",prio:"med",categoryId:catId});setShow(true);}
   const visibleTasks=filter==="all"?crenauTasks:crenauTasks.filter(t=>t.categoryId===filter);
   const done=visibleTasks.filter(t=>t.done).length;const total=visibleTasks.length;const pct=safePct(done,total);
@@ -2915,16 +2950,41 @@ function Tasks({data,setData,db,reload}){
   const suggestions=["Pain burger","Sauce du jour","Tailler tomates","Bacs de frites","Vinaigrette","Préparer garnitures"];
   return(<div className="page"><div className="section-title">Mise en place</div><div className="section-sub">{done} / {total} · {Math.round(pct)}%</div>
 
-    <div className="between mb12">
-      <button className="btn btn-ghost btn-sm" style={{width:"auto"}} onClick={()=>setDayOffset(o=>Math.max(o-1,0))} disabled={dayOffset===0}>‹</button>
-      <div style={{textAlign:"center"}}><div style={{fontWeight:800,fontSize:14,textTransform:"capitalize"}}>{dayLabel}</div></div>
-      <button className="btn btn-ghost btn-sm" style={{width:"auto"}} onClick={()=>setDayOffset(o=>o+1)}>›</button>
-    </div>
-    <SegmentedControl value={service} onChange={setService} options={[{value:"midi",label:"☀️ Midi"},{value:"soir",label:"🌙 Soir"}]}/>
-    <div style={{height:14}}></div>
+    {/* Bandeau de créneau : c'est LE repère de l'écran. Il change de couleur
+        selon qu'on est sur le service en cours ou ailleurs, pour qu'on ne
+        saisisse jamais une tâche dans le mauvais créneau sans s'en rendre compte. */}
+    <div className="card mb14" style={{
+      background: isCurrentSlot ? T.bg2 : T.warnBg,
+      border: `1px solid ${isCurrentSlot ? T.border : T.warn+"66"}`,
+    }}>
+      <div className="between">
+        <button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={()=>setDayOffset(o=>Math.max(o-1,0))} disabled={dayOffset===0}>‹</button>
+        <div style={{textAlign:"center",flex:1}}>
+          <div style={{fontWeight:800,fontSize:16,textTransform:"capitalize",lineHeight:1.2}}>
+            {service==="midi"?"☀️":"🌙"} {dayLabel} · {service==="midi"?"Midi":"Soir"}
+          </div>
+          <div style={{fontSize:11,fontWeight:700,color:isCurrentSlot?T.good:T.warn,marginTop:3}}>
+            {isCurrentSlot ? "● Service en cours" : "◆ Vous préparez un autre créneau"}
+          </div>
+        </div>
+        <button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={()=>setDayOffset(o=>o+1)}>›</button>
+      </div>
 
-    <div className="card mb14">
-      <div className="between mb10"><div className="row gap8"><span className="text-xs" style={{fontWeight:800,color:T.text}}>{dayLabel} · {service==="midi"?"Midi":"Soir"}</span></div>{urgentLeft>0&&<span className="badge b-bad">{urgentLeft} urgent{urgentLeft>1?"s":""}</span>}</div>
+      <div style={{height:12}}></div>
+      <SegmentedControl value={service} onChange={setService} options={[{value:"midi",label:"☀️ Midi"},{value:"soir",label:"🌙 Soir"}]}/>
+
+      {/* Retour rapide au service en cours, visible seulement si on s'en est éloigné */}
+      {!isCurrentSlot && (
+        <button className="btn btn-sm mt10" onClick={goToCurrentSlot} style={{borderColor:T.warn,color:T.warn,background:"transparent"}}>
+          ↩ Revenir au service en cours
+        </button>
+      )}
+
+      <div style={{height:12}}></div>
+      <div className="between mb6">
+        <span className="text-xs" style={{fontWeight:700,color:T.textDim}}>{done} / {total} fait{done>1?"s":""}</span>
+        {urgentLeft>0&&<span className="badge b-bad">{urgentLeft} urgent{urgentLeft>1?"s":""}</span>}
+      </div>
       <div className="pbar"><div className="pfill" style={{width:`${pct}%`,background:T.accent}}></div></div>
     </div>
     {crenauTasks.length>0&&<button className="btn mb14" onClick={endService} disabled={busy} style={{borderColor:T.warn,color:T.warn,background:T.warnBg}}>{busy?"Clôture…":`🏁 Clôturer ce créneau`}</button>}
@@ -2932,11 +2992,24 @@ function Tasks({data,setData,db,reload}){
     {grouped.length===0&&<div className="empty"><div className="empty-icon">📋</div><div className="empty-title">Aucune tâche</div><div className="empty-sub">{dayOffset>0?`Prépare la mise en place de ${dayLabel.toLowerCase()} ${service}`:"Ajoutez votre première tâche"}</div></div>}
     {grouped.map(({cat,tasks})=>{if(!cat)return null;const catDone=tasks.filter(t=>t.done).length;return(<div key={cat.id} style={{marginBottom:18}}>
       <div className="between mb8" style={{padding:"0 4px"}}><div className="row gap8"><span style={{fontSize:18}}>{cat.icon}</span><span style={{fontSize:13,fontWeight:700,color:cat.color}}>{cat.name}</span><span className="text-xs text-dim">· {catDone}/{tasks.length}</span></div><button onClick={()=>openAddFor(cat.id)} style={{background:"transparent",border:"none",color:cat.color,fontSize:18,fontWeight:700,padding:"4px 8px",cursor:"pointer"}}>+</button></div>
-      {prios.map(p=>{const pt=tasks.filter(t=>t.prio===p.k);if(!pt.length)return null;return(<div key={p.k} style={{marginBottom:8}}><div style={{fontSize:10,fontWeight:700,color:p.c,marginBottom:4,marginLeft:6,letterSpacing:".06em",textTransform:"uppercase"}}>{p.l}</div>{pt.map(t=><div key={t.id} className="item" onClick={()=>toggle(t.id)} style={{opacity:t.done?.45:1,borderLeftColor:cat.color,borderLeftWidth:3,borderLeftStyle:"solid"}}><div className={`check ${t.done?"on":""}`}>{t.done?"✓":""}</div><div className="item-body"><div className="item-title" style={{textDecoration:t.done?"line-through":"none"}}>{t.task}</div><div className="item-sub">{[t.resp,t.qty].filter(Boolean).join(" · ")||"—"}</div></div></div>)}</div>);})}
+      {prios.map(p=>{const pt=tasks.filter(t=>t.prio===p.k);if(!pt.length)return null;return(<div key={p.k} style={{marginBottom:8}}><div style={{fontSize:10,fontWeight:700,color:p.c,marginBottom:4,marginLeft:6,letterSpacing:".06em",textTransform:"uppercase"}}>{p.l}</div>{pt.map(t=>(
+      <SwipeToDelete key={t.id} enabled confirmLabel={`Supprimer "${t.task}" ?`} onDelete={()=>removeTask(t)}>
+        <div className="item" onClick={()=>toggle(t.id)} style={{opacity:t.done?.45:1,borderLeftColor:cat.color,borderLeftWidth:3,borderLeftStyle:"solid"}}><div className={`check ${t.done?"on":""}`}>{t.done?"✓":""}</div><div className="item-body"><div className="item-title" style={{textDecoration:t.done?"line-through":"none"}}>{t.task}</div><div className="item-sub">{[t.resp,t.qty].filter(Boolean).join(" · ")||"—"}</div></div></div>
+      </SwipeToDelete>
+    ))}</div>);})}
     </div>);})}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">Nouvelle tâche</div>
+      {/* Rappel du créneau de destination : c'est ici que les erreurs se
+          produisaient — rien n'indiquait où la tâche allait atterrir. */}
+      <div className="banner mb14" style={{background:isCurrentSlot?T.infoBg:T.warnBg,border:`1px solid ${isCurrentSlot?T.info+"44":T.warn+"66"}`}}>
+        <span>{service==="midi"?"☀️":"🌙"}</span>
+        <div style={{fontSize:12,lineHeight:1.45}}>
+          Cette tâche sera ajoutée à <b style={{textTransform:"capitalize"}}>{dayLabel} · {service==="midi"?"Midi":"Soir"}</b>
+          {!isCurrentSlot && <span style={{display:"block",color:T.warn,fontWeight:700,marginTop:2}}>Ce n'est pas le service en cours</span>}
+        </div>
+      </div>
       <div className="field"><label className="label">Catégorie</label><div className="chips">{categories.map(c=><button key={c.id} className={`chip ${form.categoryId===c.id?"sel":""}`} onClick={()=>setForm({...form,categoryId:c.id})}>{c.icon} {c.name.replace("Mise en place ","")}</button>)}</div></div>
       <div className="field"><label className="label">Description</label><input className="input" value={form.task} onChange={e=>setForm({...form,task:e.target.value})} placeholder="ex : Tailler tomates"/></div>
       {!form.task&&<div className="chips mb14">{suggestions.map(s=><button key={s} className="chip" onClick={()=>setForm(f=>({...f,task:s}))}>{s}</button>)}</div>}
@@ -4117,6 +4190,13 @@ export default function App(){
       </>}
       <button className="btn btn-ghost mb8" onClick={()=>{setProfile(false);go("settings");}}>⚙️ Paramètres</button>
       <button className="btn" style={{background:T.badBg,color:T.bad}} onClick={logout}>Déconnexion</button>
+      {/* Mention de propriété — année calculée automatiquement pour ne jamais
+          devenir obsolète. */}
+      <div style={{textAlign:"center",marginTop:18,fontSize:10,color:T.textMute,letterSpacing:".03em",lineHeight:1.6}}>
+        <div style={{fontWeight:700,color:T.textDim}}>Fuego</div>
+        <div>© {new Date().getFullYear()} Alexandre Valery</div>
+        <div>Tous droits réservés</div>
+      </div>
     </div></div>}
     <div className={`scroll nav-${navDir}`} key={page}>{pages[page]||pages.home}</div>
 
