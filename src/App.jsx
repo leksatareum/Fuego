@@ -1426,6 +1426,73 @@ function exportRegistrePDF(events,{period,moduleFilter}){
 // selon son enjeu PRINCIPAL (température vs conservation vs sécurité sanitaire),
 // même quand une technique touche plusieurs sujets à la fois (ex: la surgélation
 // est un enjeu de température, la mise sous vide un enjeu de sécurité sanitaire).
+// ═══════════════════════════════════════════════════════════════════════════
+//  NOTICE D'UTILISATION — mode d'emploi de l'app (à ne pas confondre avec le
+//  guide GBPH, qui porte sur la réglementation hygiène, pas sur l'outil).
+//  Deux publics séparés : l'équipe en cuisine / les administrateurs.
+// ═══════════════════════════════════════════════════════════════════════════
+const MANUAL_SECTIONS = [
+  {
+    key:"start", icon:"🚀", title:"Démarrer", audience:"equipe", color:"#5A8FB5",
+    cards:[
+      {q:"Se connecter", a:"Touchez votre pastille avec vos initiales, puis tapez votre code à 4 chiffres. La connexion se fait toute seule dès le dernier chiffre — pas de bouton à valider."},
+      {q:"Changer d'utilisateur", a:"Touchez votre avatar en haut à droite, puis « Déconnexion ». Chacun doit utiliser son propre compte : c'est votre nom qui est enregistré sur chaque relevé et chaque étiquette."},
+      {q:"L'écran d'accueil", a:"Il montre ce qu'il reste à faire maintenant. Les pastilles de couleur sur les raccourcis : rouge = il reste des choses à faire, vert = tout est fait."},
+      {q:"Se repérer dans l'app", a:"En bas : Aujourd'hui (vue du jour), HACCP (tous les contrôles), Recettes (fiches techniques), Mise en place (les tâches), Plus (le reste)."},
+    ],
+  },
+  {
+    key:"daily", icon:"📋", title:"Au quotidien", audience:"equipe", color:"#7A9E5C",
+    cards:[
+      {q:"Relever une température", a:"HACCP → Températures. Choisissez l'onglet Frigos ou Congélateurs, puis touchez « + Relever » sur l'équipement, matin ou soir. Faites glisser pour choisir la température, puis Enregistrer. Un relevé matin et un relevé soir par équipement, chaque jour."},
+      {q:"Une température est hors norme", a:"Elle s'affiche en rouge. Enregistrez-la quand même — c'est la preuve que le contrôle a été fait — puis prévenez immédiatement un responsable. Ne jamais saisir une fausse valeur."},
+      {q:"Cocher une tâche de mise en place", a:"Mise en place → touchez la ligne. Elle se barre et passe en gris. Retouchez pour décocher si vous vous êtes trompé."},
+      {q:"Cocher une zone de nettoyage", a:"HACCP → Nettoyage. Choisissez la fréquence en haut (Quotidien, Hebdo, Mensuel...), puis touchez la zone. Le bouton « ✓ Tout marquer fait » coche d'un coup tout ce qui reste dans l'onglet affiché."},
+      {q:"Imprimer une étiquette", a:"HACCP → Étiquetage → bouton +. Renseignez le produit, choisissez le type de date, vérifiez la DLC calculée automatiquement, puis imprimez. L'étiquette sort sur la Brother."},
+      {q:"Enregistrer une livraison", a:"HACCP → Réception → bouton +. Contrôlez la température du produit à l'arrivée, l'aspect et l'emballage. Tout est enregistré à votre nom."},
+    ],
+  },
+  {
+    key:"slots", icon:"🕐", title:"Les créneaux", audience:"equipe", color:"#C87941",
+    cards:[
+      {q:"Comprendre midi et soir", a:"La mise en place est séparée en deux services par jour. Le bandeau en haut de l'écran indique toujours où vous êtes : « ● Service en cours » (fond neutre) ou « ◆ Vous préparez un autre créneau » (fond orange)."},
+      {q:"Je suis sur le mauvais créneau", a:"Si le bandeau est orange, touchez « ↩ Revenir au service en cours ». Quand vous ajoutez une tâche, le formulaire rappelle toujours où elle va atterrir."},
+      {q:"Préparer le service de demain", a:"Utilisez les flèches ‹ › pour changer de jour, et l'onglet Midi/Soir pour le service. Les tâches saisies resteront sur ce créneau."},
+      {q:"Quand les listes se vident", a:"La mise en place et le nettoyage quotidien repartent à zéro deux fois par jour : à la fin du service du midi, et pendant la nuit. Le service du soir n'est jamais coupé à minuit — vous pouvez travailler tard sans rien perdre."},
+      {q:"Nettoyage hebdo, mensuel, trimestriel", a:"Chaque zone repart de sa propre date : une zone mensuelle cochée le 20 reste verte jusqu'au 20 du mois suivant. Rien ne s'efface entre-temps."},
+    ],
+  },
+  {
+    key:"admin-setup", icon:"⚙️", title:"Configurer", audience:"admin", color:"#B8503F",
+    cards:[
+      {q:"Ajouter un équipement froid", a:"Paramètres → HACCP → Enceintes froides → « + Ajouter une enceinte ». Indiquez le nom, la cible de température et le type (positif/négatif). Il apparaîtra aussitôt dans l'écran Températures."},
+      {q:"Créer une zone de nettoyage", a:"Paramètres → HACCP → Plan de nettoyage → « + Ajouter une zone ». Choisissez la fréquence : c'est elle qui détermine quand la zone se redécoche."},
+      {q:"Régler les horaires de service", a:"Paramètres → HACCP → Horaires de service. Deux réglages : la fin du service du midi (par défaut 16h30) et celle du soir (par défaut 3h du matin). C'est à ces moments que les listes repartent à zéro."},
+      {q:"Modifier les seuils critiques", a:"Paramètres → HACCP → Seuils critiques. Les valeurs légales sont indiquées sous chaque champ. Ne les assouplissez pas sans raison : ce sont elles qui déclenchent les alertes."},
+      {q:"Gérer l'équipe", a:"Paramètres → Équipe. Chaque membre a un code à 4 chiffres. Le statut administrateur donne accès aux réglages et à la suppression."},
+      {q:"Le catalogue produits", a:"Paramètres → Produits. Renseignez le prix d'achat de vos matières premières, rangées par catégorie. Ces prix alimentent le calcul de coût de vos fiches techniques."},
+    ],
+  },
+  {
+    key:"admin-printer", icon:"🖨️", title:"L'imprimante", audience:"admin", color:"#6B6862",
+    cards:[
+      {q:"Comment ça marche", a:"Safari sur iPhone ne peut pas parler directement à la Brother. On passe par un petit relais installé sur un téléphone Android laissé au restaurant, qui transmet les étiquettes à l'imprimante."},
+      {q:"L'adresse du relais a changé", a:"Paramètres → Imprimante. Collez la nouvelle adresse affichée par le relais, puis « Enregistrer et tester ». Accessible à toute l'équipe, pas seulement aux admins — l'adresse peut changer à tout moment."},
+      {q:"Rien ne s'imprime", a:"Dans l'ordre : l'imprimante est-elle allumée avec du papier ? Le téléphone relais est-il allumé, avec l'app Termux ouverte ? Le test dans Paramètres → Imprimante répond-il « Relais joignable » ? Si l'adresse IP de l'imprimante a changé, il faut la mettre à jour dans le relais."},
+    ],
+  },
+  {
+    key:"admin-data", icon:"🗂️", title:"Données & registre", audience:"admin", color:"#5A8FB5",
+    cards:[
+      {q:"Sortir le registre HACCP", a:"HACCP → Registre HACCP. Choisissez la période, puis imprimez ou enregistrez en PDF. C'est ce document qui est présenté en cas de contrôle."},
+      {q:"Supprimer une tâche saisie par erreur", a:"Mise en place → appui long sur la tâche → confirmez. Réservé aux administrateurs."},
+      {q:"Purger l'historique des étiquettes", a:"HACCP → Étiquetage → « 🗑 Purger » à côté de Historique. Supprime les étiquettes des jours précédents ; celles du jour sont conservées. Action définitive."},
+      {q:"Joindre un rapport de nuisibles", a:"HACCP → Nuisibles → bouton + → « 📎 Joindre le PDF ». Le rapport de l'entreprise reste attaché à l'intervention et consultable à tout moment."},
+      {q:"Où sont stockées les données", a:"Tout est enregistré en ligne, en continu. L'app se synchronise automatiquement : plusieurs personnes peuvent travailler en même temps sur des appareils différents."},
+    ],
+  },
+];
+
 const GBPH_SECTIONS = [
   {
     key: "temp", icon: "🌡️", title: "Températures", color: "#5A8FB5",
@@ -1519,6 +1586,81 @@ function GbphCard({card}){
       {open&&<div className="text-sm text-dim mt8" style={{lineHeight:1.5}}>{card.a}</div>}
     </div>
   );
+}
+
+// Écran notice : mode d'emploi de l'app. Filtré par public — l'équipe ne voit
+// que ce qui la concerne, les admins ont accès à tout.
+function ManualGuide({user}){
+  const isAdmin=!!user?.isAdmin;
+  const[audience,setAudience]=useState("equipe");
+  const[search,setSearch]=useState("");
+
+  // Un non-admin n'a pas accès aux sections d'administration.
+  const available=MANUAL_SECTIONS.filter(s=>isAdmin?s.audience===audience:s.audience==="equipe");
+  const[section,setSection]=useState(available[0]?.key);
+  const current=available.find(s=>s.key===section)||available[0];
+
+  const filtered = search.trim()
+    ? MANUAL_SECTIONS
+        .filter(s=>isAdmin||s.audience==="equipe")
+        .flatMap(s=>s.cards.map(cd=>({...cd,section:s})))
+        .filter(cd=>cd.q.toLowerCase().includes(search.toLowerCase())||cd.a.toLowerCase().includes(search.toLowerCase()))
+    : null;
+
+  function switchAudience(a){
+    haptic.light(); setAudience(a);
+    const first=MANUAL_SECTIONS.find(s=>s.audience===a);
+    if(first)setSection(first.key);
+  }
+
+  return(<div className="page">
+    <div className="section-title">Notice d'utilisation</div>
+    <div className="section-sub">Comment se servir de Fuego</div>
+
+    <div className="field" style={{marginBottom:14}}>
+      <input className="input" placeholder="Rechercher (ex : température, étiquette, créneau…)" value={search} onChange={e=>setSearch(e.target.value)}/>
+    </div>
+
+    {filtered ? (
+      <>
+        <div className="text-xs text-dim mb8">{filtered.length} résultat{filtered.length>1?"s":""}</div>
+        {filtered.length===0
+          ? <div className="empty"><div className="empty-icon">🔍</div><div className="empty-title">Aucun résultat</div><div className="empty-sub">Essayez un autre mot</div></div>
+          : filtered.map((cd,i)=>(
+            <div key={i}>
+              <div className="text-xs" style={{color:cd.section.color,fontWeight:700,marginBottom:4}}>{cd.section.icon} {cd.section.title}</div>
+              <GbphCard card={{...cd,tag:cd.section.audience==="admin"?"Admin":"Équipe"}}/>
+            </div>
+          ))}
+      </>
+    ) : (
+      <>
+        {/* Le sélecteur de public n'a de sens que pour un admin : l'équipe ne
+            voit que sa propre notice, sans distraction. */}
+        {isAdmin && (
+          <>
+            <SegmentedControl value={audience} onChange={switchAudience}
+              options={[{value:"equipe",label:"👨‍🍳 Équipe"},{value:"admin",label:"⚙️ Admin"}]}/>
+            <div style={{height:14}}></div>
+          </>
+        )}
+
+        <div className="chips" style={{marginBottom:16}}>
+          {available.map(s=>(
+            <button key={s.key} className={`chip ${section===s.key?"sel":""}`} onClick={()=>{haptic.light();setSection(s.key);}}>{s.icon} {s.title}</button>
+          ))}
+        </div>
+        {current && <>
+          <div className="bucket-label">{current.icon} {current.title}</div>
+          {current.cards.map((cd,i)=><GbphCard key={i} card={{...cd,tag:current.audience==="admin"?"Admin":"Équipe"}}/>)}
+        </>}
+      </>
+    )}
+
+    <div className="banner banner-info mt14"><span>💡</span><div style={{fontSize:11,lineHeight:1.5}}>
+      Cette notice explique l'application. Pour les règles d'hygiène (températures légales, DLC, conservation…), voyez le <b>Guide des bonnes pratiques</b> dans le menu HACCP.
+    </div></div>
+  </div>);
 }
 
 function GbphGuide({initialSection}){
@@ -3359,6 +3501,9 @@ function More({go,user}){
   const items=[{key:"margins",icon:"📊",bg:T.goodBg,title:"Marges",sub:"Rentabilité"},{key:"planning",icon:"📅",bg:T.warnBg,title:"Planning équipe",sub:"Horaires"}];
   return(<div className="page"><div className="section-title">Outils</div><div className="section-sub">Toutes les fonctions</div>
     {items.map(it=><div key={it.key} className="item" onClick={()=>go(it.key)}><div className="item-icon" style={{background:it.bg}}>{it.icon}</div><div className="item-body"><div className="item-title">{it.title}</div><div className="item-sub">{it.sub}</div></div><div className="item-arrow">›</div></div>)}
+    <div className="bucket-label mt14">Aide</div>
+    <div className="item" onClick={()=>go("manual")}><div className="item-icon" style={{background:T.infoBg}}>📖</div><div className="item-body"><div className="item-title">Notice d'utilisation</div><div className="item-sub">Comment se servir de Fuego</div></div><div className="item-arrow">›</div></div>
+    <div className="item" onClick={()=>go("gbph")}><div className="item-icon" style={{background:T.goodBg}}>🛡️</div><div className="item-body"><div className="item-title">Guide des bonnes pratiques</div><div className="item-sub">Règles d'hygiène HACCP</div></div><div className="item-arrow">›</div></div>
     <div className="bucket-label mt14">{user.isAdmin?"Administration":"Réglages"}</div>
     <div className="item" onClick={()=>go("settings")}><div className="item-icon" style={{background:T.accentLt}}>⚙️</div><div className="item-body"><div className="item-title">Paramètres</div><div className="item-sub">{user.isAdmin?"Restaurant, équipe, HACCP":"Imprimante d'étiquettes"}</div></div><div className="item-arrow">›</div></div>
   </div>);
@@ -3821,7 +3966,7 @@ function Settings({data,setData,user,onLogout,db,reload,markLocalWrite}){
 }
 
 const NAV=[{k:"home",i:"🏠",l:"Aujourd'hui"},{k:"haccp",i:"🛡️",l:"HACCP"},{k:"recipes",i:"📖",l:"Recettes"},{k:"tasks",i:"✅",l:"Mise en place"},{k:"more",i:"⋯",l:"Plus"}];
-const TITLES={home:"Aujourd'hui",haccp:"HACCP",temps:"Températures",reception:"Réception",cooling:"Cellule",reheating:"Remise en T°",oils:"Huiles friture",trace:"Traçabilité",labels:"Étiquetage",testmeals:"Plats témoins",clean:"Nettoyage",pests:"Nuisibles",training:"Formation",registre:"Registre HACCP",gbph:"Guide des bonnes pratiques",recipes:"Recettes",margins:"Marges",planning:"Planning",tasks:"Mise en place",more:"Plus",settings:"Paramètres"};
+const TITLES={home:"Aujourd'hui",haccp:"HACCP",temps:"Températures",reception:"Réception",cooling:"Cellule",reheating:"Remise en T°",oils:"Huiles friture",trace:"Traçabilité",labels:"Étiquetage",testmeals:"Plats témoins",clean:"Nettoyage",pests:"Nuisibles",training:"Formation",registre:"Registre HACCP",gbph:"Guide des bonnes pratiques",manual:"Notice d'utilisation",recipes:"Recettes",margins:"Marges",planning:"Planning",tasks:"Mise en place",more:"Plus",settings:"Paramètres"};
 const ROOT_PAGES=["home","haccp","recipes","tasks","more"];
 const HACCP_PAGES=["temps","reception","cooling","reheating","oils","trace","labels","testmeals","clean","pests","training","registre","gbph"];
 const MORE_PAGES=["margins","planning","settings"];
@@ -4206,7 +4351,7 @@ export default function App(){
     oils:<Oils {...props}/>,trace:<Traceability {...props}/>,
     labels:<Labels {...props}/>,testmeals:<TestMeals {...props}/>,
     clean:<Cleaning {...props}/>,pests:<Pests {...props}/>,
-    training:<Training data={data} go={go}/>,registre:<Registre data={data}/>,gbph:<GbphGuide initialSection={gbphSection}/>,
+    training:<Training data={data} go={go}/>,registre:<Registre data={data}/>,gbph:<GbphGuide initialSection={gbphSection}/>,manual:<ManualGuide user={user}/>,
     recipes:<Recipes data={data} setData={setData} db={DB} reload={reload} user={user} markLocalWrite={markLocalWrite}/>,
     margins:<Margins data={data}/>,planning:<Planning {...props}/>,
     tasks:<Tasks data={data} setData={setData} db={DB} reload={reload} user={user}/>,
