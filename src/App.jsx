@@ -306,11 +306,27 @@ const DB = {
   // valide jusqu'au 20 du mois suivant, pas jusqu'au 1er.
   // "Quotidien" est géré à part (remise à zéro à chaque changement de service).
   // "Après usage" n'expire jamais tout seul : c'est ponctuel, décoché à la main.
+  // Nettoyage quotidien : remis à zéro à chaque changement de service.
+  // (Les tâches de Mise en place ne sont plus "réinitialisées" ici — elles
+  // sont désormais supprimées automatiquement par closeSlot() quand leur
+  // créneau se termine, ce qui est plus juste : avant, cette fonction
+  // décochait TOUTES les tâches faites de TOUS les jours, pas seulement
+  // celles du créneau qui vient de finir.)
   async resetServiceLists(){
-    // Mise en place : repart à chaque service, comme avant.
-    await sbPatch("tasks",{done:false},qs("done=eq.true"));
-    // Nettoyage quotidien : idem, remis à zéro à chaque changement de service.
     await sbPatch("cleaning",{done:false,done_at:null},qs("done=eq.true",`freq=eq.Quotidien`));
+  },
+  // Fait passer les tâches NON terminées d'un créneau qui vient de se
+  // terminer directement dans le créneau qui devient le nouveau "en cours" —
+  // ex : le riz à sushi pas cuit le soir atterrit automatiquement dans la
+  // liste du lendemain matin, sans action de personne.
+  // Les tâches déjà cochées, elles, ne servent plus : on les retire.
+  async rolloverSlot(prevDate,prevService,nextDate,nextService){
+    if(!prevDate||!prevService)return;
+    // Nettoie les tâches déjà faites du créneau qui se termine.
+    await sbDelete("tasks",qs(`date=eq.${prevDate}`,`service=eq.${prevService}`,"done=eq.true"));
+    // Fait glisser les tâches pas faites vers le créneau qui devient courant.
+    return sbPatch("tasks",{date:nextDate,service:nextService},
+      qs(`date=eq.${prevDate}`,`service=eq.${prevService}`,"done=eq.false"));
   },
   // Décoche les zones dont le délai de validité est écoulé, fréquence par
   // fréquence. Appelé en même temps que la synchro : une zone hebdo cochée
@@ -3137,19 +3153,10 @@ function Tasks({data,setData,db,reload,user}){
     if(res?.error){alert("Impossible d'ajouter la tâche. Vérifie la connexion Supabase.");return;}
     await reload({force:true});setShow(false);setForm({task:"",resp:"",qty:"",prio:"med",categoryId:null});
   }
-  async function endService(){
-    if(!crenauTasks.length||busy)return;
-    haptic.medium();
-    const ok=window.confirm(`Clôturer ${dayLabel} ${service} ?\n\nLes ${crenauTasks.length} tâche${crenauTasks.length>1?"s":""} de ce créneau vont disparaître. Les autres créneaux ne sont pas touchés.`);
-    if(!ok)return;
-    setBusy(true);
-    const res=await db.clearTasks?.(crenauDateStr,service);
-    setBusy(false);
-    if(res?.error){alert("Impossible de clôturer le créneau. Rien n'a été supprimé.");await reload?.({force:true});return;}
-    await reload({force:true});
-    setFilter("all");
-    haptic.success();
-  }
+  // endService() supprimé : la clôture des créneaux est désormais entièrement
+  // automatique (voir closeSlot() dans App, déclenché au changement de
+  // service). Plus de bouton manuel — personne ne peut clôturer par erreur
+  // ou oublier de le faire.
   async function removeTask(t){
     if(!isAdmin)return; // double garde : l'appui long est déjà désactivé côté UI
     if(!window.confirm(`Supprimer "${t.task}" ?`))return;
@@ -3205,7 +3212,8 @@ function Tasks({data,setData,db,reload,user}){
       </div>
       <div className="pbar"><div className="pfill" style={{width:`${pct}%`,background:T.accent}}></div></div>
     </div>
-    {crenauTasks.length>0&&<button className="btn mb14" onClick={endService} disabled={busy} style={{borderColor:T.warn,color:T.warn,background:T.warnBg}}>{busy?"Clôture…":`🏁 Clôturer ce créneau`}</button>}
+    {/* Le bouton manuel de clôture a été retiré : la fermeture des créneaux
+        est désormais automatique, calée sur les horaires de service. */}
     <div className="chips mb14">{filterOptions.map(opt=><button key={opt.value} className={`chip ${filter===opt.value?"sel":""}`} onClick={()=>setFilter(opt.value)}>{opt.label}</button>)}</div>
     {grouped.length===0&&<div className="empty"><div className="empty-icon">📋</div><div className="empty-title">Aucune tâche</div><div className="empty-sub">{dayOffset>0?`Prépare la mise en place de ${dayLabel.toLowerCase()} ${service}`:"Ajoutez votre première tâche"}</div></div>}
     {grouped.map(({cat,tasks})=>{if(!cat)return null;const catDone=tasks.filter(t=>t.done).length;return(<div key={cat.id} style={{marginBottom:18}}>
@@ -4421,7 +4429,16 @@ export default function App(){
       try{
         const key=serviceKey();
         const last=await DB.getAppState("last_service");
-        if(last!==null&&last!==key){ await DB.resetServiceLists(); }
+        if(last!==null&&last!==key){
+          // "last" = créneau qui vient de se terminer, "key" = celui qui
+          // devient courant. On y fait glisser les tâches non faites.
+          const prevDate = last.slice(0,10);
+          const prevService = last.slice(11);
+          const nextDate = key.slice(0,10);
+          const nextService = key.slice(11);
+          await DB.rolloverSlot(prevDate, prevService, nextDate, nextService);
+          await DB.resetServiceLists();
+        }
         if(last!==key){ await DB.setAppState("last_service",key); }
         // Les nettoyages hebdo/mensuel/trimestriel expirent selon leur propre
         // date de réalisation, indépendamment des services : on vérifie donc à
