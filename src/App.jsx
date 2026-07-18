@@ -15,6 +15,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 // Utilise directement l'API REST Supabase via fetch.
 
 import { SUPABASE_URL, SUPABASE_ANON } from "./config.js";
+import { t, LANGS, dirFor } from "./locales/index.js";
 // Client REST Supabase léger — pas besoin du SDK
 const sbFetch = async (table, opts={}) => {
   if (!SUPABASE_URL || SUPABASE_URL.includes("REMPLACE")) return { data: null, error: "not_configured" };
@@ -115,7 +116,7 @@ const DB = {
     const today = todayStr();
     const [
       ru, rhs, rft, rfr, rrec, rcool, rreh, roil,
-      rcl, rtr, rlb, rtm, rtr2, rpe, rrc, rcat, rtk, rre, rpr, rsh
+      rcl, rtr, rlb, rtm, rtr2, rpe, rrc, rcat, rtk, rre, rpr, rsh, rcc
     ] = await Promise.all([
       sbGet("users",           qs(q.order("id"),q.select())),
       sbGet("haccp_settings",  qs(q.limit(1),q.select())),
@@ -145,6 +146,11 @@ const DB = {
       // du restaurant. On ne garde que la fenêtre utile : 30 jours en arrière,
       // le reste n'est jamais consulté depuis l'app.
       sbGet("shifts",          qs(`date=gte.${new Date(Date.now()-30*86400000).toISOString().slice(0,10)}`,q.order("date"),q.limit(400),q.select())),
+      // Historique de nettoyage : 100 jours en arrière, assez large pour
+      // couvrir même les zones trimestrielles (90 jours) sans jamais perdre
+      // la preuve d'un passage, contrairement à l'ancien système qui
+      // écrasait l'état à chaque changement de service.
+      sbGet("cleaning_checks", qs(`date=gte.${isoDate(new Date(Date.now()-100*86400000))}`,q.order("date",false),q.limit(2000),q.select())),
     ]);
     const users   = ru.data   || [];
     const hs      = rhs.data?.[0] || {};
@@ -155,6 +161,7 @@ const DB = {
     const reheat  = rreh.data || [];
     const oils    = roil.data || [];
     const clean   = rcl.data  || [];
+    const cleanChecks = rcc.data || [];
     const trace   = rtr.data  || [];
     const labels  = rlb.data  || [];
     const tm      = rtm.data  || [];
@@ -182,12 +189,14 @@ const DB = {
         // valeur de 0 (= minuit) est légitime et ne doit pas être écrasée.
         resetMidi:hs.reset_midi ?? 990, resetSoir:hs.reset_soir ?? 180,
       },
-      fridgeReleves: fr.map(r=>({id:r.id,fridgeId:r.fridge_id,date:r.date,period:r.period,temp:r.temp,time:r.time,operatorId:r.operator_id})),
-      reception: rec.map(r=>({id:r.id,date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,tempOk:r.temp_ok,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed})),
-      cooling: cool.map(c=>({id:c.id,product:c.product,qty:c.qty,startTemp:c.start_temp,endTemp:c.end_temp,duration:c.duration,startedMs:c.started_ms,operator:c.operator,status:c.status,date:c.date,dlc:c.dlc})),
-      reheating: reheat.map(r=>({id:r.id,product:r.product,endTemp:r.end_temp,duration:r.duration,operator:r.operator,status:r.status,date:r.date})),
-      oils: oils.map(o=>({id:o.id,name:o.name,type:o.type,dateInstall:o.date_install,lastTest:o.last_test,polaires:o.polaires,operator:o.operator})),
-      cleaning: clean.map(c=>({id:c.id,zone:c.zone,icon:c.icon,freq:c.freq,produit:c.produit,dilution:c.dilution,done:c.done,doneAt:c.done_at})),
+      fridgeReleves: fr.map(r=>({id:r.id,fridgeId:r.fridge_id,date:r.date,period:r.period,temp:r.temp,time:r.time,operatorId:r.operator_id,createdAt:r.created_at})),
+      reception: rec.map(r=>({id:r.id,date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,tempOk:r.temp_ok,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed,createdAt:r.created_at})),
+      cooling: cool.map(c=>({id:c.id,product:c.product,qty:c.qty,startTemp:c.start_temp,endTemp:c.end_temp,duration:c.duration,startedMs:c.started_ms,operator:c.operator,status:c.status,date:c.date,dlc:c.dlc,createdAt:c.created_at})),
+      reheating: reheat.map(r=>({id:r.id,product:r.product,endTemp:r.end_temp,duration:r.duration,operator:r.operator,status:r.status,date:r.date,createdAt:r.created_at})),
+      oils: oils.map(o=>({id:o.id,name:o.name,type:o.type,dateInstall:o.date_install,lastTest:o.last_test,polaires:o.polaires,operator:o.operator,createdAt:o.created_at})),
+      cleaning: clean.map(c=>({id:c.id,zone:c.zone,icon:c.icon,freq:c.freq,produit:c.produit,dilution:c.dilution,done:c.done,doneAt:c.done_at,operator:c.operator||null})),
+      // Historique permanent — jamais réinitialisé, source du Registre HACCP.
+      cleaningChecks: cleanChecks.map(c=>({id:c.id,cleaningId:c.cleaning_id,zone:c.zone,freq:c.freq,date:c.date,period:c.period,operator:c.operator,createdAt:c.created_at})),
       // hasPhoto : la photo elle-même n'est pas chargée ici (trop lourde), on
       // sait juste si la fiche en a une. photo reste null jusqu'à ce qu'on
       // ouvre la fiche, qui déclenche alors le chargement de l'image.
@@ -195,11 +204,11 @@ const DB = {
       // demande quand on ouvre une fiche. photo_present est un booléen léger
       // calculé côté base (cf. migration), qui permet d'afficher l'indicateur
       // sans télécharger l'image.
-      traceability: trace.map(t=>({id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status,photo:null,hasPhoto:!!t.photo_present})),
-      labels: labels.map(l=>({id:l.id,product:l.product,dateProd:l.date_prod,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator})),
-      testMeals: tm.map(m=>({id:m.id,date:m.date,service:m.service,product:m.product,qty:m.qty,destroyAt:m.destroy_at,operator:m.operator})),
+      traceability: trace.map(t=>({id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status,photo:null,hasPhoto:!!t.photo_present,createdAt:t.created_at})),
+      labels: labels.map(l=>({id:l.id,product:l.product,dateProd:l.date_prod,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator,createdAt:l.created_at})),
+      testMeals: tm.map(m=>({id:m.id,date:m.date,service:m.service,product:m.product,qty:m.qty,destroyAt:m.destroy_at,operator:m.operator,createdAt:m.created_at})),
       training: train.map(t=>({id:t.id,name:t.name,role:t.role,haccpExp:t.haccp_exp,visaExp:t.visa_exp})),
-      pests: pests.map(p=>({id:p.id,date:p.date,type:p.type,company:p.company,result:p.result,nextVisit:p.next_visit,reportPath:p.report_path||null,reportName:p.report_name||null})),
+      pests: pests.map(p=>({id:p.id,date:p.date,type:p.type,company:p.company,result:p.result,nextVisit:p.next_visit,reportPath:p.report_path||null,reportName:p.report_name||null,createdAt:p.created_at})),
       recipes: recipes.map(r=>({id:r.id,name:r.name,emoji:r.emoji,type:r.type,category:r.category,price:r.price,portions:r.portions,yield:r.yield_qty?{qty:r.yield_qty,unit:r.yield_unit}:undefined,components:r.components||[],steps:r.steps||[],allergens:r.allergens||[]})),
       taskCategories: cats.map(c=>({id:c.id,name:c.name,icon:c.icon,color:c.color})),
       tasks: tasks.map(t=>({id:t.id,categoryId:t.category_id,task:t.task,resp:t.resp,qty:t.qty,done:t.done,prio:t.prio,date:t.date,service:t.service||"midi"})),
@@ -231,9 +240,62 @@ const DB = {
     if(changed)body.date_install=dateInstall;
     return sbPatch("oils",body,qs(`id=eq.${id}`));
   },
-  async toggleCleaning(id,done){return sbPatch("cleaning",{done,done_at:done?new Date().toISOString():null},qs(`id=eq.${id}`));},
+  async toggleCleaning(id,done,operator){return sbPatch("cleaning",{done,done_at:done?new Date().toISOString():null,operator:done?(operator||null):null},qs(`id=eq.${id}`));},
+  // Historique permanent d'un nettoyage — jamais réinitialisé, contrairement
+  // à la case à cocher (cleaning.done) qui, elle, repart à zéro. C'est cette
+  // table que lit le Registre HACCP : chaque passage matin ET soir y laisse
+  // sa propre trace, définitivement.
+  async saveCleaningCheck({cleaningId,zone,freq,date,period,operator}){
+    return sbPost("cleaning_checks",{cleaning_id:cleaningId,zone,freq,date,period:period||null,operator:operator||null});
+  },
+  async deleteCleaningCheck(id){return sbDelete("cleaning_checks",qs(`id=eq.${id}`));},
   // Charge la photo d'une fiche à la demande — elle n'est pas incluse dans
   // loadAll() pour ne pas alourdir le démarrage de l'app.
+  // Charge un mois d'archives à la demande — jamais tout au démarrage de
+  // l'app, sinon on retombe exactement dans le problème de lenteur déjà
+  // corrigé ailleurs. Seuls les mois que l'admin consulte vraiment sont
+  // interrogés, et seulement ceux-là. Filtré sur created_at (vrai
+  // horodatage), pas sur la date affichée qui n'a pas d'année.
+  async fetchRegistrePeriod(fromISO,toISO){
+    const range=`created_at=gte.${fromISO}&created_at=lt.${toISO}`;
+    const [rec,cool,reheat,oils,labels,tm,pests,fr,trace,cleanChecks]=await Promise.all([
+      sbGet("reception",   `?${range}&${q.select()}`),
+      sbGet("cooling",     `?${range}&${q.select()}`),
+      sbGet("reheating",   `?${range}&${q.select()}`),
+      sbGet("oils",        `?${range}&${q.select()}`),
+      sbGet("labels",      `?${range}&${q.select()}`),
+      sbGet("test_meals",  `?${range}&${q.select()}`),
+      sbGet("pests",       `?${range}&${q.select()}`),
+      sbGet("fridge_releves", `?${range}&${q.select()}`),
+      sbGet("traceability",`?${range}&${q.select("id,product,emoji,supplier,lot,dlc,qty,allergenes,status,created_at")}`),
+      sbGet("cleaning_checks", `?date=gte.${fromISO.slice(0,10)}&date=lt.${toISO.slice(0,10)}&${q.select()}`),
+    ]);
+    // Même mapping que loadAll(), pour que buildRegistreEvents() puisse
+    // traiter ces lignes exactement comme les données déjà en mémoire.
+    return {
+      reception: (rec.data||[]).map(r=>({id:r.id,date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,tempOk:r.temp_ok,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed,createdAt:r.created_at})),
+      cooling: (cool.data||[]).map(c=>({id:c.id,product:c.product,qty:c.qty,startTemp:c.start_temp,endTemp:c.end_temp,duration:c.duration,startedMs:c.started_ms,operator:c.operator,status:c.status,date:c.date,dlc:c.dlc,createdAt:c.created_at})),
+      reheating: (reheat.data||[]).map(r=>({id:r.id,product:r.product,endTemp:r.end_temp,duration:r.duration,operator:r.operator,status:r.status,date:r.date,createdAt:r.created_at})),
+      oils: (oils.data||[]).map(o=>({id:o.id,name:o.name,type:o.type,dateInstall:o.date_install,lastTest:o.last_test,polaires:o.polaires,operator:o.operator,createdAt:o.created_at})),
+      labels: (labels.data||[]).map(l=>({id:l.id,product:l.product,dateProd:l.date_prod,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator,createdAt:l.created_at})),
+      testMeals: (tm.data||[]).map(m=>({id:m.id,date:m.date,service:m.service,product:m.product,qty:m.qty,destroyAt:m.destroy_at,operator:m.operator,createdAt:m.created_at})),
+      pests: (pests.data||[]).map(p=>({id:p.id,date:p.date,type:p.type,company:p.company,result:p.result,nextVisit:p.next_visit,createdAt:p.created_at})),
+      fridgeReleves: (fr.data||[]).map(r=>({id:r.id,fridgeId:r.fridge_id,date:r.date,period:r.period,temp:r.temp,time:r.time,operatorId:r.operator_id,createdAt:r.created_at})),
+      traceability: (trace.data||[]).map(t=>({id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status,createdAt:t.created_at})),
+      // La source d'archivage du nettoyage est désormais le vrai historique
+      // permanent, pas la case à cocher (qui n'a jamais représenté qu'un
+      // état "maintenant", écrasé à chaque service).
+      cleaningChecks: (cleanChecks.data||[]).map(c=>({id:c.id,cleaningId:c.cleaning_id,zone:c.zone,freq:c.freq,date:c.date,period:c.period,operator:c.operator,createdAt:c.created_at})),
+    };
+  },
+  // Les étiquettes ne sont chargées que sur 7 jours au démarrage de l'app
+  // (pour ne pas alourdir l'écran Étiquetage) — mais le Registre a besoin de
+  // voir plus loin (30 jours, mois en cours). Requête ciblée, indépendante
+  // de cette limite.
+  async fetchLabelsSince(fromISO){
+    const res=await sbGet("labels", qs(`created_at=gte.${fromISO}`,q.order("created_at",false),q.select()));
+    return (res.data||[]).map(l=>({id:l.id,product:l.product,dateProd:l.date_prod,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator,createdAt:l.created_at}));
+  },
   async getTraceabilityPhoto(id){
     const {data,error}=await sbGet("traceability", qs(q.eq("id",id),q.limit(1),q.select("photo")));
     if(error) return {photo:null,error};
@@ -312,8 +374,14 @@ const DB = {
   // créneau se termine, ce qui est plus juste : avant, cette fonction
   // décochait TOUTES les tâches faites de TOUS les jours, pas seulement
   // celles du créneau qui vient de finir.)
+  // Les zones quotidiennes n'ont plus besoin d'être réinitialisées ici : leur
+  // état (fait ou pas) se déduit désormais directement de la présence d'un
+  // passage dans l'historique pour AUJOURD'HUI + le créneau (matin/soir) —
+  // dès que la date change, une zone redevient naturellement "à faire",
+  // sans la moindre écriture destructive. C'est ce qui permet de garder
+  // chaque passage, matin ET soir, sans jamais l'effacer.
   async resetServiceLists(){
-    await sbPatch("cleaning",{done:false,done_at:null},qs("done=eq.true",`freq=eq.Quotidien`));
+    return { ok:true }; // conservé pour compatibilité d'appel, ne fait plus rien
   },
   // Fait passer les tâches NON terminées d'un créneau qui vient de se
   // terminer directement dans le créneau qui devient le nouveau "en cours" —
@@ -912,6 +980,7 @@ const INIT={
     {id:7,zone:"Trancheuse",icon:"🔪",freq:"Après usage",produit:"Désinfectant alim.",dilution:"1:50",done:true},
     {id:8,zone:"Friteuse",icon:"🍟",freq:"Hebdomadaire",produit:"Dégraissant friteuse",dilution:"Pur",done:false},
   ],
+  cleaningChecks:[],
   traceability:[
     {id:1,product:"Saumon Gravlax",emoji:"🐟",supplier:"Marée Pêche Bretagne",lot:"SP2605A",dlc:"13/05",qty:"2 kg",allergenes:["Poisson"],status:"ok"},
     {id:2,product:"Bœuf Angus",emoji:"🥩",supplier:"Boucherie Dupont",lot:"BA0510",dlc:"15/05",qty:"5 kg",allergenes:[],status:"ok"},
@@ -1071,10 +1140,10 @@ function SplashScreen(){
   </div>);
 }
 
-function Login({users,onLogin}){
+function Login({users,onLogin,lang="fr",onChangeLang}){
   const[sel,setSel]=useState(null);const[pin,setPin]=useState("");const[err,setErr]=useState("");const[shake,setShake]=useState(false);
   const selUser=users.find(u=>u.id===sel);
-  function tryLogin(){const u=users.find(u=>u.id===sel);if(u&&u.pin===pin){haptic.success();onLogin(u);}else{haptic.error();setErr("PIN incorrect");setPin("");setShake(true);setTimeout(()=>setShake(false),450);}}
+  function tryLogin(){const u=users.find(u=>u.id===sel);if(u&&u.pin===pin){haptic.success();onLogin(u);}else{haptic.error();setErr(t("login_pin_error",lang));setPin("");setShake(true);setTimeout(()=>setShake(false),450);}}
   // Validation automatique dès que le PIN atteint la longueur du code attendu —
   // évite d'avoir à taper "Connexion" en plus sur mobile.
   useEffect(()=>{
@@ -1083,10 +1152,23 @@ function Login({users,onLogin}){
   return(<div className="login-screen">
     <div className="fade-up" style={{marginBottom:14,display:"flex",justifyContent:"center"}}><FuegoBrand height={104}/></div>
     <div className="login-logo fade-up fade-up-1"><FuegoLogo size="login"/></div>
-    <div className="login-tagline fade-up fade-up-2">Le système d'exploitation de votre restaurant</div>
+    <div className="login-tagline fade-up fade-up-2">{t("login_tagline",lang)}</div>
+    {/* Choix de langue — appliqué immédiatement, retenu sur cet appareil.
+        Volontairement discret : la plupart des membres de l'équipe n'en ont
+        pas besoin, seuls ceux qui préfèrent une autre langue le touchent. */}
+    {onChangeLang && LANGS.length>1 && (
+      <div className="row gap8 fade-up fade-up-2" style={{justifyContent:"center",marginBottom:10}}>
+        {LANGS.map(l=>(
+          <button key={l.code} onClick={()=>onChangeLang(l.code)}
+            style={{padding:"5px 12px",borderRadius:20,fontSize:12,fontWeight:600,border:`1px solid ${lang===l.code?T.accent:T.border}`,background:lang===l.code?T.accentLt:"transparent",color:lang===l.code?T.accent:T.textDim}}>
+            {l.flag} {l.label}
+          </button>
+        ))}
+      </div>
+    )}
     <div className="login-body fade-up fade-up-3">
     {!sel?<>
-      <p className="login-prompt">Qui êtes-vous ?</p>
+      <p className="login-prompt">{t("login_who",lang)}</p>
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
         {users.map(u=>(
           <button key={u.id} onClick={()=>{haptic.light();setSel(u.id);}} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:7,padding:"16px 8px",borderRadius:16,background:T.bg2,border:`1px solid ${T.border}`,cursor:"pointer",position:"relative"}}>
@@ -1097,7 +1179,7 @@ function Login({users,onLogin}){
         ))}
       </div>
     </>
-    :<><p className="login-prompt">Code PIN pour <b style={{color:T.text}}>{users.find(u=>u.id===sel)?.name}</b></p><div className="field"><input className={`input ${shake?"input-shake":""}`} type="password" inputMode="numeric" maxLength={6} value={pin} autoFocus onChange={e=>{setPin(e.target.value.replace(/\D/g,""));setErr("");}} onKeyDown={e=>e.key==="Enter"&&pin.length>=4&&tryLogin()} placeholder="●●●●" style={{textAlign:"center",fontSize:30,letterSpacing:10,borderColor:shake?T.bad:undefined}}/></div>{err&&<p style={{color:T.bad,fontSize:12,marginBottom:10,textAlign:"center"}}>{err}</p>}<button className="btn btn-ghost" onClick={()=>{setSel(null);setPin("");setErr("");}}>← Retour</button></>}
+    :<><p className="login-prompt">{t("login_pin_for",lang)} <b style={{color:T.text}}>{users.find(u=>u.id===sel)?.name}</b></p><div className="field"><input className={`input ${shake?"input-shake":""}`} type="password" inputMode="numeric" maxLength={6} value={pin} autoFocus onChange={e=>{setPin(e.target.value.replace(/\D/g,""));setErr("");}} onKeyDown={e=>e.key==="Enter"&&pin.length>=4&&tryLogin()} placeholder="●●●●" style={{textAlign:"center",fontSize:30,letterSpacing:10,borderColor:shake?T.bad:undefined}}/></div>{err&&<p style={{color:T.bad,fontSize:12,marginBottom:10,textAlign:"center"}}>{err}</p>}<button className="btn btn-ghost" onClick={()=>{setSel(null);setPin("");setErr("");}}>← {t("login_back",lang)}</button></>}
   </div></div>);
 }
 
@@ -1249,6 +1331,17 @@ function parseAppDate(dstr){
   return new Date(now.getFullYear(),m-1,d);
 }
 
+// Horodatage fiable d'un événement : on privilégie createdAt (vrai
+// timestamp avec année, posé automatiquement par la base) — la date
+// affichée ("18/07") n'a pas d'année et deviendrait ambiguë après un an
+// d'utilisation. Pour les enregistrements antérieurs à cette mise à jour
+// (qui n'ont pas de createdAt fiable), on retombe sur l'année en cours —
+// imprécis mais mieux que rien, et sans impact sur les nouvelles entrées.
+function eventTs(createdAt, displayDate){
+  if(createdAt){ const d=new Date(createdAt); if(!isNaN(d)) return d; }
+  return parseAppDate(displayDate) || new Date();
+}
+
 // Construit la liste unifiée de tous les événements HACCP datés, triés du plus récent au plus ancien
 function buildRegistreEvents(data){
   const ev=[];
@@ -1257,61 +1350,105 @@ function buildRegistreEvents(data){
     const f=data.haccpSettings.fridgeTargets.find(x=>x.id===r.fridgeId);
     if(!f) return;
     const status=tempStatus(r.temp,f.target);
-    ev.push({date:r.date,time:r.time,type:"temp",icon:f.icon,title:`${f.name} · ${r.period==="matin"?"Matin":"Soir"}`,detail:`${r.temp}°C (cible ${f.target}°C)`,status,module:"Températures",operator:data.users.find(u=>u.id===r.operatorId)?.name||"—"});
+    ev.push({date:r.date,time:r.time,ts:eventTs(r.createdAt,r.date),type:"temp",icon:f.icon,title:`${f.name} · ${r.period==="matin"?"Matin":"Soir"}`,detail:`${r.temp}°C (cible ${f.target}°C)`,status,module:"Températures",operator:data.users.find(u=>u.id===r.operatorId)?.name||"—"});
   });
 
   data.reception.forEach(r=>{
-    ev.push({date:r.date,time:"—",type:"reception",icon:"🚚",title:`Réception · ${r.product}`,detail:`${r.supplier||"Fournisseur"} · ${r.temp}°C · Aspect ${r.aspect}`,status:r.tempOk&&r.aspect==="OK"&&r.emballage==="OK"?"good":"bad",module:"Réception",operator:r.signed||"—"});
+    ev.push({date:r.date,time:"—",ts:eventTs(r.createdAt,r.date),type:"reception",icon:"🚚",title:`Réception · ${r.product}`,detail:`${r.supplier||"Fournisseur"} · ${r.temp}°C · Aspect ${r.aspect}`,status:r.tempOk&&r.aspect==="OK"&&r.emballage==="OK"?"good":"bad",module:"Réception",operator:r.signed||"—"});
   });
 
   data.cooling.forEach(c=>{
     if(c.status==="active") return; // pas encore terminé
-    ev.push({date:c.date,time:"—",type:"cooling",icon:"❄️",title:`Refroidissement · ${c.product}`,detail:`${c.startTemp}°C → ${c.endTemp}°C en ${c.duration} min`,status:c.status==="ok"?"good":"bad",module:"Refroidissement",operator:c.operator||"—"});
+    ev.push({date:c.date,time:"—",ts:eventTs(c.createdAt,c.date),type:"cooling",icon:"❄️",title:`Refroidissement · ${c.product}`,detail:`${c.startTemp}°C → ${c.endTemp}°C en ${c.duration} min`,status:c.status==="ok"?"good":"bad",module:"Refroidissement",operator:c.operator||"—"});
   });
 
   data.reheating.forEach(r=>{
-    ev.push({date:r.date,time:"—",type:"reheating",icon:"🔥",title:`Remise en T° · ${r.product}`,detail:`${r.endTemp}°C en ${r.duration} min`,status:r.status==="ok"?"good":"bad",module:"Remise en température",operator:r.operator||"—"});
+    ev.push({date:r.date,time:"—",ts:eventTs(r.createdAt,r.date),type:"reheating",icon:"🔥",title:`Remise en T° · ${r.product}`,detail:`${r.endTemp}°C en ${r.duration} min`,status:r.status==="ok"?"good":"bad",module:"Remise en température",operator:r.operator||"—"});
   });
 
   data.labels.forEach(l=>{
-    ev.push({date:l.dateProd,time:"—",type:"label",icon:"🏷️",title:`Étiquette · ${l.product}`,detail:`DLC ${l.dlc} · Lot ${l.lot}`,status:"good",module:"Étiquetage",operator:l.operator||"—"});
+    ev.push({date:l.dateProd,time:"—",ts:eventTs(l.createdAt,l.dateProd),type:"label",icon:"🏷️",title:`Étiquette · ${l.product}`,detail:`DLC ${l.dlc} · Lot ${l.lot}`,status:"good",module:"Étiquetage",operator:l.operator||"—"});
   });
 
   data.testMeals.forEach(m=>{
-    ev.push({date:m.date,time:"—",type:"testmeal",icon:"🧪",title:`Plat témoin · ${m.product}`,detail:`${m.service} · Conservation jusqu'au ${m.destroyAt}`,status:"good",module:"Plats témoins",operator:m.operator||"—"});
+    ev.push({date:m.date,time:"—",ts:eventTs(m.createdAt,m.date),type:"testmeal",icon:"🧪",title:`Plat témoin · ${m.product}`,detail:`${m.service} · Conservation jusqu'au ${m.destroyAt}`,status:"good",module:"Plats témoins",operator:m.operator||"—"});
   });
 
   data.pests.forEach(p=>{
-    ev.push({date:p.date,time:"—",type:"pest",icon:"🐀",title:`Contrôle nuisibles · ${p.type}`,detail:`${p.company||"—"} · Résultat : ${p.result}`,status:p.result==="RAS"?"good":"bad",module:"Nuisibles",operator:"—"});
+    ev.push({date:p.date,time:"—",ts:eventTs(p.createdAt,p.date),type:"pest",icon:"🐀",title:`Contrôle nuisibles · ${p.type}`,detail:`${p.company||"—"} · Résultat : ${p.result}`,status:p.result==="RAS"?"good":"bad",module:"Nuisibles",operator:"—"});
   });
 
+  // Traçabilité : TOUTES les fiches sont archivées, pas seulement les
+  // non-conformités — c'est la preuve que chaque produit a bien été
+  // contrôlé et photographié à réception, conforme ou pas.
   data.traceability.forEach(t=>{
-    if(t.status==="ok") return; // on ne remonte que les non-conformités dans le registre (le stock OK n'est pas un événement)
-    ev.push({date:todayStr(),time:"—",type:"trace",icon:t.emoji||"📦",title:`Non-conformité · ${t.product}`,detail:`Lot ${t.lot} · DLC ${t.dlc}`,status:"bad",module:"Traçabilité",operator:"—"});
+    ev.push({date:eventTs(t.createdAt,null).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"}),time:"—",ts:eventTs(t.createdAt,null),type:"trace",icon:t.emoji||"📦",title:`Traçabilité · ${t.product}`,detail:`Lot ${t.lot} · DLC ${t.dlc}${t.status!=="ok"?" · Non-conforme":""}`,status:t.status==="ok"?"good":"bad",module:"Traçabilité",operator:"—"});
   });
 
-  // Tri du plus récent au plus ancien (par date puis heure)
-  ev.sort((a,b)=>{
-    const da=parseAppDate(a.date), db_=parseAppDate(b.date);
-    if(da&&db_&&da.getTime()!==db_.getTime()) return db_-da;
-    return (b.time||"").localeCompare(a.time||"");
+  // Nettoyage : archivé depuis l'historique PERMANENT (cleaningChecks), pas
+  // depuis la case à cocher qui, elle, ne représente que "maintenant" et est
+  // remise à zéro à chaque service. Chaque passage — matin ET soir pour le
+  // quotidien — laisse ici sa propre trace, définitivement.
+  (data.cleaningChecks||[]).forEach(c=>{
+    const periodLabel = c.period==="matin"?" · Matin":c.period==="soir"?" · Soir":"";
+    const [y,m,d] = (c.date||"").split("-");
+    const displayDate = (d&&m) ? `${d}/${m}` : "";
+    ev.push({date:displayDate,time:"—",ts:eventTs(c.createdAt,null),type:"clean",icon:"🧹",title:`Nettoyage · ${c.zone}${periodLabel}`,detail:`${c.freq}`,status:"good",module:"Nettoyage",operator:c.operator||"—"});
   });
+
+  // Huiles de friture : chaque contrôle du taux de polaires est un événement
+  // à part entière (comme un relevé de température) — pas seulement les
+  // dépassements, pour prouver que le contrôle a bien été fait.
+  data.oils.forEach(o=>{
+    if(!o.lastTest||o.polaires==null) return;
+    const bad = o.polaires >= (data.haccpSettings?.oilPolarMax ?? 25);
+    ev.push({date:o.lastTest,time:"—",ts:eventTs(o.createdAt,o.lastTest),type:"oils",icon:"🛢️",title:`Huile · ${o.name}`,detail:`${o.polaires}% polaires${o.type?` · ${o.type}`:""}`,status:bad?"bad":"good",module:"Huiles",operator:o.operator||"—"});
+  });
+
+  // Tri du plus récent au plus ancien — sur ts (vrai timestamp), plus fiable
+  // que la date affichée qui n'a pas d'année.
+  ev.sort((a,b)=> (b.ts?.getTime()||0) - (a.ts?.getTime()||0));
   return ev;
 }
 
-function Registre({data}){
-  const[period,setPeriod]=useState("7j"); // 7j | 30j | mois | tout
+function Registre({data,db}){
+  const[period,setPeriod]=useState("7j"); // 7j | 30j | mois | archives
   const[moduleFilter,setModuleFilter]=useState("tous");
   const[statusFilter,setStatusFilter]=useState("tous");
   const[showExport,setShowExport]=useState(false);
+  // Mois consultés en archives : chargés à la demande, gardés en mémoire le
+  // temps de la session seulement (pas dans data global, pour ne jamais
+  // alourdir le reste de l'app). Clé "AAAA-MM" → objet partiel type `data`.
+  const[archiveMonths,setArchiveMonths]=useState({});
+  const[loadingMonth,setLoadingMonth]=useState(null);
+  const[openMonth,setOpenMonth]=useState(null);
+  // Complète les étiquettes au-delà des 7 jours en mémoire (limite fixée
+  // pour l'écran Étiquetage) — sans ça, "30 jours" et "Ce mois" auraient un
+  // trou silencieux sur tout ce qui dépasse 7 jours. Chargé une fois par
+  // session, pas à chaque rendu.
+  const[extraLabels,setExtraLabels]=useState(null);
+  useEffect(()=>{
+    if(period==="7j") return; // pas besoin, la fenêtre normale suffit déjà
+    if(extraLabels!==null) return; // déjà chargé cette session
+    const from=new Date(Date.now()-31*86400000).toISOString(); // couvre "30 jours" et "Ce mois"
+    db.fetchLabelsSince(from).then(setExtraLabels).catch(()=>setExtraLabels([]));
+  },[period]);
 
-  const allEvents=useMemo(()=>buildRegistreEvents(data),[data]);
+  const dataForRegistry = useMemo(()=>{
+    if(!extraLabels) return data;
+    // Fusionne sans doublons (une étiquette peut être dans les deux lots).
+    const seen=new Set(data.labels.map(l=>l.id));
+    const merged=[...data.labels, ...extraLabels.filter(l=>!seen.has(l.id))];
+    return {...data, labels:merged};
+  },[data,extraLabels]);
+
+  const allEvents=useMemo(()=>buildRegistreEvents(dataForRegistry),[dataForRegistry]);
 
   const now=new Date();
-  const cutoffs={"7j":7,"30j":30,"mois":31,"tout":99999};
-  const filtered=allEvents.filter(e=>{
-    const d=parseAppDate(e.date);
-    if(period!=="tout"&&d){
+  const cutoffs={"7j":7,"30j":30,"mois":31};
+  const filtered = period==="archives" ? [] : allEvents.filter(e=>{
+    const d=e.ts;
+    if(d){
       const diffDays=Math.floor((now-d)/86400000);
       if(period==="mois"){ if(d.getMonth()!==now.getMonth()||d.getFullYear()!==now.getFullYear()) return false; }
       else if(diffDays>cutoffs[period]||diffDays<0) return false;
@@ -1325,63 +1462,152 @@ function Registre({data}){
   const nbBad=filtered.filter(e=>e.status==="bad").length;
   const nbGood=filtered.filter(e=>e.status==="good").length;
 
-  // Groupe par date pour affichage en timeline
+  // Groupe par date pour affichage en timeline (modes 7j/30j/mois)
   const grouped={};
   filtered.forEach(e=>{ (grouped[e.date]=grouped[e.date]||[]).push(e); });
   const dateKeys=Object.keys(grouped).sort((a,b)=>{
-    const da=parseAppDate(a), db_=parseAppDate(b);
-    if(da&&db_) return db_-da;
-    return 0;
+    const evA=grouped[a][0],evB=grouped[b][0];
+    return (evB.ts?.getTime()||0)-(evA.ts?.getTime()||0);
   });
+
+  // ── Mode Archives : arborescence Année → Mois ───────────────────────────
+  // Tout reste consultable, rien n'est jamais supprimé — seuls les mois
+  // qu'on ouvre vraiment sont chargés, pour ne jamais alourdir le
+  // démarrage de l'app avec des années d'historique.
+  const MONTH_NAMES=["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+  const thisYear=now.getFullYear(), thisMonth=now.getMonth();
+  // On propose l'année en cours + les 2 précédentes : au-delà, l'admin peut
+  // encore consulter en ajustant si besoin, mais ça couvre largement la
+  // durée de conservation HACCP usuelle.
+  const years=[thisYear,thisYear-1,thisYear-2];
+
+  async function openArchiveMonth(year,monthIdx){
+    const key=`${year}-${String(monthIdx+1).padStart(2,"0")}`;
+    if(openMonth===key){ setOpenMonth(null); return; }
+    setOpenMonth(key);
+    if(archiveMonths[key]) return; // déjà chargé cette session
+    // Si le mois demandé est dans la fenêtre déjà en mémoire (les ~100
+    // dernières entrées par table), inutile de retourner sur le serveur.
+    const inMemory = year===thisYear && monthIdx===thisMonth;
+    if(inMemory) return;
+    setLoadingMonth(key);
+    const from=new Date(year,monthIdx,1).toISOString();
+    const to=new Date(year,monthIdx+1,1).toISOString();
+    const res=await db.fetchRegistrePeriod(from,to);
+    setLoadingMonth(null);
+    setArchiveMonths(m=>({...m,[key]:res}));
+  }
+
+  function eventsForMonth(year,monthIdx){
+    const key=`${year}-${String(monthIdx+1).padStart(2,"0")}`;
+    const inMemory = year===thisYear && monthIdx===thisMonth;
+    const source = inMemory ? dataForRegistry : (archiveMonths[key]
+      ? {...data, ...archiveMonths[key]} // complète avec haccpSettings/users déjà connus
+      : null);
+    if(!source) return null;
+    return buildRegistreEvents(source).filter(e=>e.ts && e.ts.getFullYear()===year && e.ts.getMonth()===monthIdx);
+  }
 
   return(<div className="page">
     <div className="section-title">Registre HACCP</div>
-    <div className="section-sub">Historique complet · {filtered.length} événement{filtered.length>1?"s":""}</div>
+    <div className="section-sub">Historique complet · {period==="archives"?"navigation par mois":`${filtered.length} événement${filtered.length>1?"s":""}`}</div>
 
-    {/* Résumé conformité */}
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
-      <div className="tile" style={{background:T.goodBg}}><div className="tile-value tabular" style={{color:T.good}}>{nbGood}</div><div className="tile-label">Conformes</div></div>
-      <div className="tile" style={{background:T.badBg}}><div className="tile-value tabular" style={{color:T.bad}}>{nbBad}</div><div className="tile-label">Non-conformités</div></div>
-    </div>
+    {/* Résumé conformité (masqué en mode archives, sans objet ici) */}
+    {period!=="archives" && (
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
+        <div className="tile" style={{background:T.goodBg}}><div className="tile-value tabular" style={{color:T.good}}>{nbGood}</div><div className="tile-label">Conformes</div></div>
+        <div className="tile" style={{background:T.badBg}}><div className="tile-value tabular" style={{color:T.bad}}>{nbBad}</div><div className="tile-label">Non-conformités</div></div>
+      </div>
+    )}
 
     {/* Filtres */}
     <div className="group-label">Période</div>
     <QuickPick value={period} onChange={setPeriod} options={[
-      {value:"7j",label:"7 jours"},{value:"30j",label:"30 jours"},{value:"mois",label:"Ce mois"},{value:"tout",label:"Tout"},
+      {value:"7j",label:"7 jours"},{value:"30j",label:"30 jours"},{value:"mois",label:"Ce mois"},{value:"archives",label:"🗂 Archives"},
     ]}/>
 
-    <div className="group-label mt14">Module</div>
-    <div className="chips">
-      <button className={`chip ${moduleFilter==="tous"?"sel":""}`} onClick={()=>{haptic.light();setModuleFilter("tous");}}>Tous</button>
-      {modules.map(m=><button key={m} className={`chip ${moduleFilter===m?"sel":""}`} onClick={()=>{haptic.light();setModuleFilter(m);}}>{m}</button>)}
-    </div>
+    {period!=="archives" && <>
+      <div className="group-label mt14">Module</div>
+      <div className="chips">
+        <button className={`chip ${moduleFilter==="tous"?"sel":""}`} onClick={()=>{haptic.light();setModuleFilter("tous");}}>Tous</button>
+        {modules.map(m=><button key={m} className={`chip ${moduleFilter===m?"sel":""}`} onClick={()=>{haptic.light();setModuleFilter(m);}}>{m}</button>)}
+      </div>
 
-    <div className="group-label mt14">Statut</div>
-    <QuickPick value={statusFilter} onChange={setStatusFilter} options={[
-      {value:"tous",label:"Tous"},{value:"good",label:"✓ Conformes"},{value:"bad",label:"⚠ Non-conformités"},
-    ]}/>
+      <div className="group-label mt14">Statut</div>
+      <QuickPick value={statusFilter} onChange={setStatusFilter} options={[
+        {value:"tous",label:"Tous"},{value:"good",label:"✓ Conformes"},{value:"bad",label:"⚠ Non-conformités"},
+      ]}/>
 
-    <button className="btn btn-ghost mt14 mb14" onClick={()=>setShowExport(true)}>📄 Exporter en PDF</button>
+      <button className="btn btn-ghost mt14 mb14" onClick={()=>setShowExport(true)}>📄 Exporter en PDF</button>
 
-    {/* Timeline groupée par jour */}
-    {dateKeys.length===0
-      ? <div className="empty"><div className="empty-icon">📋</div><div className="empty-title">Aucun événement</div><div className="empty-sub">Ajustez les filtres pour voir l'historique</div></div>
-      : dateKeys.map(dateKey=>(
-        <div key={dateKey} style={{marginBottom:18}}>
-          <div className="bucket-label">{dateKey}</div>
-          {grouped[dateKey].map((e,i)=>(
-            <div key={i} className="item" style={{marginBottom:5}}>
-              <div className="item-icon" style={{background:e.status==="bad"?T.badBg:T.infoBg,fontSize:18}}>{e.icon}</div>
-              <div className="item-body">
-                <div className="item-title">{e.title}</div>
-                <div className="item-sub">{e.detail} · {e.operator}</div>
+      {/* Timeline groupée par jour */}
+      {dateKeys.length===0
+        ? <div className="empty"><div className="empty-icon">📋</div><div className="empty-title">Aucun événement</div><div className="empty-sub">Ajustez les filtres pour voir l'historique</div></div>
+        : dateKeys.map(dateKey=>(
+          <div key={dateKey} style={{marginBottom:18}}>
+            <div className="bucket-label">{dateKey}</div>
+            {grouped[dateKey].map((e,i)=>(
+              <div key={i} className="item" style={{marginBottom:5}}>
+                <div className="item-icon" style={{background:e.status==="bad"?T.badBg:T.infoBg,fontSize:18}}>{e.icon}</div>
+                <div className="item-body">
+                  <div className="item-title">{e.title}</div>
+                  <div className="item-sub">{e.detail} · {e.operator}</div>
+                </div>
+                <span className={`badge ${e.status==="bad"?"b-bad":"b-good"}`}>{e.status==="bad"?"⚠":"✓"}</span>
               </div>
-              <span className={`badge ${e.status==="bad"?"b-bad":"b-good"}`}>{e.status==="bad"?"⚠":"✓"}</span>
-            </div>
-          ))}
+            ))}
+          </div>
+        ))
+      }
+    </>}
+
+    {period==="archives" && (
+      <div className="mt14">
+        <div className="text-xs text-dim mb12" style={{lineHeight:1.5}}>
+          Rien n'est jamais supprimé. Les mois les plus anciens ne sont chargés que si tu les ouvres, pour ne pas ralentir l'app.
         </div>
-      ))
-    }
+        {years.map(year=>(
+          <div key={year} style={{marginBottom:16}}>
+            <div className="bucket-label">{year}</div>
+            {MONTH_NAMES.map((mName,mIdx)=>{
+              // Pas de mois futurs affichés pour l'année en cours.
+              if(year===thisYear && mIdx>thisMonth) return null;
+              const key=`${year}-${String(mIdx+1).padStart(2,"0")}`;
+              const isOpen=openMonth===key;
+              const isLoading=loadingMonth===key;
+              const monthEvents = isOpen ? eventsForMonth(year,mIdx) : null;
+              return (
+                <div key={mIdx} style={{marginBottom:6}}>
+                  <button className="collapse-head" onClick={()=>openArchiveMonth(year,mIdx)} style={{width:"100%"}}>
+                    <span className="collapse-head-left"><span className="collapse-title">{mName}</span></span>
+                    <span className={`collapse-chevron ${isOpen?"open":""}`}>›</span>
+                  </button>
+                  {isOpen && (
+                    <div className="collapse-body" style={{paddingTop:8,paddingLeft:6}}>
+                      {isLoading
+                        ? <div className="text-xs text-dim center" style={{padding:"12px 0"}}>Chargement…</div>
+                        : (monthEvents && monthEvents.length>0
+                          ? monthEvents.map((e,i)=>(
+                            <div key={i} className="item" style={{marginBottom:5}}>
+                              <div className="item-icon" style={{background:e.status==="bad"?T.badBg:T.infoBg,fontSize:16}}>{e.icon}</div>
+                              <div className="item-body">
+                                <div className="item-title">{e.title}</div>
+                                <div className="item-sub">{e.date} · {e.detail} · {e.operator}</div>
+                              </div>
+                              <span className={`badge ${e.status==="bad"?"b-bad":"b-good"}`}>{e.status==="bad"?"⚠":"✓"}</span>
+                            </div>
+                          ))
+                          : <div className="text-xs text-dim center" style={{padding:"12px 0"}}>Aucun événement ce mois-ci</div>
+                        )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    )}
 
     {/* Sheet export */}
     {showExport&&(
@@ -1393,7 +1619,7 @@ function Registre({data}){
             Génère un document PDF du registre HACCP pour la période et les filtres actuellement sélectionnés — prêt à montrer lors d'un contrôle sanitaire.
           </div>
           <div className="card mb14">
-            <div className="between" style={{padding:"4px 0"}}><span className="text-sm text-dim">Période</span><span className="text-sm fw6">{{"7j":"7 jours","30j":"30 jours","mois":"Ce mois-ci","tout":"Tout l'historique"}[period]}</span></div>
+            <div className="between" style={{padding:"4px 0"}}><span className="text-sm text-dim">Période</span><span className="text-sm fw6">{{"7j":"7 jours","30j":"30 jours","mois":"Ce mois-ci"}[period]||"—"}</span></div>
             <div className="between" style={{padding:"4px 0"}}><span className="text-sm text-dim">Module</span><span className="text-sm fw6">{moduleFilter}</span></div>
             <div className="between" style={{padding:"4px 0"}}><span className="text-sm text-dim">Événements</span><span className="text-sm fw6 tabular">{filtered.length}</span></div>
           </div>
@@ -1824,7 +2050,7 @@ function HaccpHub({data,go}){
   </div>);
 }
 
-function Temperatures({data,setData,user,db,reload,go,markLocalWrite}){
+function Temperatures({data,setData,user,db,reload,go,markLocalWrite,lang}){
   const[editing,setEditing]=useState(null);const[pickedTemp,setPickedTemp]=useState(null);
   const[tempTab,setTempTab]=useState("positif"); // positif = frigos, negatif = congélateurs
   function openSlot(f,p){const e=getReleve(data,f.id,p);setEditing({fridge:f,period:p});setPickedTemp(e?e.temp:tempCenter(f.target));}
@@ -1860,32 +2086,32 @@ function Temperatures({data,setData,user,db,reload,go,markLocalWrite}){
   const shown=tempTab==="negatif"?congels:frigos;
   return(<div className="page">
     <GbphHelpButton section="temp" go={go}/>
-    <div className="section-title">Températures</div><div className="section-sub">Un relevé matin et un soir, par équipement</div>
-    {allBad.length>0&&<div className="urgent-card" style={{padding:"12px 14px",margin:"0 0 12px"}}><div className="urgent-label" style={{marginBottom:4}}>🚨 {allBad.length} équipement{allBad.length>1?"s":""} hors norme</div><div style={{fontSize:12,opacity:.9}}>Vérification immédiate requise</div></div>}
-    <SegmentedControl value={tempTab} onChange={setTempTab} options={[{value:"positif",label:`❄️ Frigos${frigos.length?` (${frigos.length})`:""}`},{value:"negatif",label:`🧊 Congélateurs${congels.length?` (${congels.length})`:""}`}]}/>
+    <div className="section-title">{t("temp_title",lang)}</div><div className="section-sub">{t("temp_subtitle",lang)}</div>
+    {allBad.length>0&&<div className="urgent-card" style={{padding:"12px 14px",margin:"0 0 12px"}}><div className="urgent-label" style={{marginBottom:4}}>🚨 {allBad.length} {t("temp_out_of_range",lang)}</div><div style={{fontSize:12,opacity:.9}}>{t("temp_check_now",lang)}</div></div>}
+    <SegmentedControl value={tempTab} onChange={setTempTab} options={[{value:"positif",label:`❄️ ${t("temp_fridges",lang)}${frigos.length?` (${frigos.length})`:""}`},{value:"negatif",label:`🧊 ${t("temp_freezers",lang)}${congels.length?` (${congels.length})`:""}`}]}/>
     <div style={{height:14}}></div>
-    {shown.length===0&&<div className="empty"><div className="empty-icon">{tempTab==="negatif"?"🧊":"❄️"}</div><div className="empty-title">Aucun {tempTab==="negatif"?"congélateur":"frigo"}</div><div className="empty-sub">Ajoute tes équipements dans Paramètres → Réglages HACCP</div></div>}
+    {shown.length===0&&<div className="empty"><div className="empty-icon">{tempTab==="negatif"?"🧊":"❄️"}</div><div className="empty-title">{tempTab==="negatif"?t("temp_empty_freezer",lang):t("temp_empty_fridge",lang)}</div><div className="empty-sub">{t("temp_empty_sub",lang)}</div></div>}
     {shown.map(f=>{
       const m=getReleve(data,f.id,"matin"),s=getReleve(data,f.id,"soir");
       const mOp=m?userById(m.operatorId):null,sOp=s?userById(s.operatorId):null;
       const mC=m?tempStatus(m.temp,f.target):"",sC=s?tempStatus(s.temp,f.target):"";
       return(<div key={f.id} className="card">
-        <div className="between mb12"><div className="row gap10"><div style={{fontSize:24}}>{f.icon}</div><div><div className="item-title">{f.name}</div><div className="text-xs text-dim">Cible : {f.target}°C</div></div></div></div>
+        <div className="between mb12"><div className="row gap10"><div style={{fontSize:24}}>{f.icon}</div><div><div className="item-title">{f.name}</div><div className="text-xs text-dim">{t("temp_target",lang)} : {f.target}°C</div></div></div></div>
         <div className="row gap8">
-          <button className={`temp-slot ${m?mC:"empty"}`} onClick={()=>openSlot(f,"matin")}><div className="temp-slot-period">☀️ Matin</div>{m?<><div className="temp-slot-val tabular">{m.temp}°</div><div className="temp-slot-meta tabular">{m.time} · {mOp?.initials}</div></>:<div className="temp-slot-cta">+ Relever</div>}</button>
-          <button className={`temp-slot ${s?sC:"empty"}`} onClick={()=>openSlot(f,"soir")}><div className="temp-slot-period">🌙 Soir</div>{s?<><div className="temp-slot-val tabular">{s.temp}°</div><div className="temp-slot-meta tabular">{s.time} · {sOp?.initials}</div></>:<div className="temp-slot-cta">+ Relever</div>}</button>
+          <button className={`temp-slot ${m?mC:"empty"}`} onClick={()=>openSlot(f,"matin")}><div className="temp-slot-period">☀️ {t("temp_morning",lang)}</div>{m?<><div className="temp-slot-val tabular">{m.temp}°</div><div className="temp-slot-meta tabular">{m.time} · {mOp?.initials}</div></>:<div className="temp-slot-cta">{t("temp_add",lang)}</div>}</button>
+          <button className={`temp-slot ${s?sC:"empty"}`} onClick={()=>openSlot(f,"soir")}><div className="temp-slot-period">🌙 {t("temp_evening",lang)}</div>{s?<><div className="temp-slot-val tabular">{s.temp}°</div><div className="temp-slot-meta tabular">{s.time} · {sOp?.initials}</div></>:<div className="temp-slot-cta">{t("temp_add",lang)}</div>}</button>
         </div>
       </div>);
     })}
     {editing&&<div className="overlay" onClick={cancel}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div>
       <div className="sheet-title">{editing.fridge.icon} {editing.fridge.name}</div>
-      <div className="text-sm text-dim mb14">Relevé {editing.period} · Cible : {editing.fridge.target}°C</div>
-      <div className="field"><label className="label">Température</label><TapDial value={pickedTemp} onChange={setPickedTemp} center={tempCenter(editing.fridge.target)} colorFn={v=>tempStatus(v,editing.fridge.target)}/></div>
-      {pickedTemp!==null&&tempStatus(pickedTemp,editing.fridge.target)==="bad"&&<div className="banner banner-bad mb12"><span>🚨</span><div><b>Hors norme.</b> Vérifier le frigo, transférer les produits si nécessaire.</div></div>}
-      <div className="text-xs text-dim mb12 center">Signé : <b style={{color:T.text}}>{user.name}</b> à {nowTime()}</div>
-      <button className="btn btn-primary mb8" onClick={save}>✓ Enregistrer</button>
-      <button className="btn btn-ghost" onClick={cancel}>Annuler</button>
+      <div className="text-sm text-dim mb14">{t("temp_reading_for",lang)} {editing.period==="matin"?t("temp_morning",lang):t("temp_evening",lang)} · {t("temp_target",lang)} : {editing.fridge.target}°C</div>
+      <div className="field"><label className="label">{t("temp_title",lang)}</label><TapDial value={pickedTemp} onChange={setPickedTemp} center={tempCenter(editing.fridge.target)} colorFn={v=>tempStatus(v,editing.fridge.target)}/></div>
+      {pickedTemp!==null&&tempStatus(pickedTemp,editing.fridge.target)==="bad"&&<div className="banner banner-bad mb12"><span>🚨</span><div><b>{t("temp_out_of_range_warn",lang)}</b></div></div>}
+      <div className="text-xs text-dim mb12 center">{t("temp_signed",lang)} : <b style={{color:T.text}}>{user.name}</b> à {nowTime()}</div>
+      <button className="btn btn-primary mb8" onClick={save}>✓ {t("temp_save",lang)}</button>
+      <button className="btn btn-ghost" onClick={cancel}>{t("temp_cancel",lang)}</button>
     </div></div>}
   </div>);
 }
@@ -2114,8 +2340,29 @@ function Oils({data,setData,user,db,reload,go,markLocalWrite}){
           <div className="pbar mb10"><div className="pfill" style={{width:`${safePct(o.polaires,max)}%`,background:danger?T.bad:warn?T.warn:T.good}}></div></div>
           <div className="row gap6 mb10"><span className={`badge ${danger?"b-bad":warn?"b-warn":"b-good"}`}>{danger?"🚨 Changer":warn?"⚠ Surveiller":"✓ OK"}</span><span className="badge b-mute">Test {o.lastTest}</span></div>
           {selOil?.id===o.id?<>
-            <div className="field"><label className="label">Composés polaires</label><TapDial value={polaires} onChange={setPolaires} center={15} step={2} colorFn={v=>v<max-5?"good":v<max?"warn":"bad"} format={v=>`${v}%`}/></div>
-            <div className="field"><label className="label">Action</label><SegmentedControl value={action} onChange={setAction} options={[{value:"none",label:"Aucune"},{value:"filtered",label:"Filtrée"},{value:"changed",label:"Changée"}]}/></div>
+            <div className="field">
+              <label className="label">Action</label>
+              <SegmentedControl value={action} onChange={v=>{
+                // Une huile qu'on vient de changer est neuve : 0% de composés
+                // polaires par définition. Le forcer ici évite l'erreur —
+                // avant, il fallait penser à redescendre le curseur à la main,
+                // et l'oubli laissait une valeur trompeuse (souvent 15%) sur
+                // une huile qui n'a pourtant jamais servi.
+                if(v==="changed") setPolaires(0);
+                // Si on revient en arrière depuis "Changée", garder 0%
+                // serait faux pour une huile qui n'a en réalité pas été
+                // remplacée — on repart de sa dernière mesure connue.
+                else if(action==="changed") setPolaires(o.polaires ?? 15);
+                setAction(v);
+              }} options={[{value:"none",label:"Aucune"},{value:"filtered",label:"Filtrée"},{value:"changed",label:"Changée"}]}/>
+            </div>
+            {action==="changed" ? (
+              <div className="banner banner-good mb10"><span>🆕</span><div style={{fontSize:12,lineHeight:1.5}}>
+                Huile neuve enregistrée à <b>0%</b> de composés polaires. Prochain contrôle réel à la prochaine utilisation.
+              </div></div>
+            ) : (
+              <div className="field"><label className="label">Composés polaires</label><TapDial value={polaires} onChange={setPolaires} center={15} step={2} colorFn={v=>v<max-5?"good":v<max?"warn":"bad"} format={v=>`${v}%`}/></div>
+            )}
             <div className="row gap6 mt8"><button className="btn btn-ghost btn-sm" style={{flex:1}} onClick={()=>setSelOil(null)}>Annuler</button><button className="btn btn-primary btn-sm" style={{flex:2}} onClick={save}>Enregistrer</button></div>
           </>:(
             <div className="row gap6">
@@ -2226,25 +2473,73 @@ const CLEAN_FREQS = [
   {key:"Après usage",label:"Après usage",icon:"🔁"},
 ];
 
-function Cleaning({data,setData,db,reload,go,markLocalWrite}){
+function Cleaning({data,setData,db,reload,go,markLocalWrite,user,lang}){
   const[busy,setBusy]=useState(null);
   const[tab,setTab]=useState("Quotidien");
+  const todayISO=isoDate(new Date());
 
+  // Retrouve un passage du jour pour une zone/période donnée, dans
+  // l'historique permanent — c'est CETTE présence (pas cleaning.done) qui
+  // détermine si une case quotidienne est cochée aujourd'hui.
+  function findCheck(cleaningId,period){
+    return (data.cleaningChecks||[]).find(c=>c.cleaningId===cleaningId&&c.date===todayISO&&(c.period||null)===(period||null));
+  }
+
+  // Coche/décoche UN créneau précis (matin ou soir) d'une zone quotidienne.
+  // Contrairement à l'ancien système, ceci n'écrase jamais rien : cocher
+  // crée une ligne permanente dans l'historique, décocher ne fait que
+  // supprimer CETTE ligne précise (l'autre créneau n'est jamais touché).
+  async function toggleSlot(zone,period){
+    if(busy)return;
+    haptic.light();
+    const existing=findCheck(zone.id,period);
+    setBusy(`${zone.id}-${period}`);
+    markLocalWrite?.();
+    if(existing){
+      setData(d=>({...d,cleaningChecks:d.cleaningChecks.filter(c=>c.id!==existing.id)}));
+      const res=await db.deleteCleaningCheck(existing.id);
+      if(res?.error){ alert("Impossible de décocher. Vérifie la connexion Supabase."); await reload?.({force:true}); setBusy(null); return; }
+    }else{
+      const res=await db.saveCleaningCheck({cleaningId:zone.id,zone:zone.zone,freq:zone.freq,date:todayISO,period,operator:user?.name});
+      if(res?.error||!res?.data){ alert("Le nettoyage n'a pas été enregistré. Vérifie la connexion Supabase."); await reload?.({force:true}); setBusy(null); return; }
+      const row=res.data;
+      setData(d=>({...d,cleaningChecks:[...d.cleaningChecks,{id:row.id,cleaningId:zone.id,zone:zone.zone,freq:zone.freq,date:todayISO,period,operator:user?.name,createdAt:row.created_at}]}));
+    }
+    setBusy(null);
+    haptic.success();
+  }
+
+  // Coche/décoche une zone à passage unique (Hebdo/Mensuel/Trimestriel/Après
+  // usage) : un seul créneau (period=null), mais on écrit désormais AUSSI
+  // dans l'historique permanent — la case cleaning.done reste comme avant
+  // pour l'affichage rapide (accueil, pastilles), mais n'est plus la seule
+  // trace de ce nettoyage.
   async function toggle(id){
     if(busy)return;
     haptic.light();
     const c=data.cleaning.find(x=>x.id===id);
     const next=!c.done;
     const stamp=next?new Date().toISOString():null;
+    const op=next?(user?.name||null):null;
     setBusy(id);
     markLocalWrite?.();
-    setData(d=>({...d,cleaning:d.cleaning.map(x=>x.id===id?{...x,done:next,doneAt:stamp}:x)}));
-    const res=await db.toggleCleaning(id,next);
-    setBusy(null);
+    setData(d=>({...d,cleaning:d.cleaning.map(x=>x.id===id?{...x,done:next,doneAt:stamp,operator:op}:x)}));
+    const res=await db.toggleCleaning(id,next,op);
     if(res?.error){
       alert("Le nettoyage n'a pas été enregistré. Vérifie la connexion Supabase.");
       await reload?.({force:true});
+      setBusy(null);
+      return;
     }
+    if(next){
+      // Trace permanente du passage — jamais réinitialisée, contrairement à
+      // cleaning.done qui, lui, repart à zéro à l'expiration de la fréquence.
+      const chk=await db.saveCleaningCheck({cleaningId:id,zone:c.zone,freq:c.freq,date:todayISO,period:null,operator:op});
+      if(chk?.data){
+        setData(d=>({...d,cleaningChecks:[...d.cleaningChecks,{id:chk.data.id,cleaningId:id,zone:c.zone,freq:c.freq,date:todayISO,period:null,operator:op,createdAt:chk.data.created_at}]}));
+      }
+    }
+    setBusy(null);
   }
 
   // Répartit les zones existantes par fréquence ; celles dont la fréquence ne
@@ -2256,18 +2551,43 @@ function Cleaning({data,setData,db,reload,go,markLocalWrite}){
   if(orphans.length) byFreq["Quotidien"]=[...byFreq["Quotidien"],...orphans];
 
   const list = byFreq[tab]||[];
-  const done = list.filter(c=>c.done).length;
+  const isDaily = tab==="Quotidien";
+
+  // Pour le quotidien, une zone compte comme "faite" seulement si matin ET
+  // soir sont cochés aujourd'hui — dérivé de l'historique réel, pas d'un
+  // état qu'on aurait pu oublier de resynchroniser.
+  function dailyDone(zone){ return !!findCheck(zone.id,"matin") && !!findCheck(zone.id,"soir"); }
+
+  const done = isDaily ? list.filter(dailyDone).length : list.filter(c=>c.done).length;
   const pct = safePct(done, list.length);
-  const totalDone = data.cleaning.filter(c=>c.done).length;
+  const totalDone = data.cleaning.filter(c=>c.freq==="Quotidien"?dailyDone(c):c.done).length;
   const totalPct = safePct(totalDone, data.cleaning.length);
 
-  // Coche d'un coup toutes les zones restantes de la fréquence affichée.
-  // Chaque zone est enregistrée individuellement en base (Supabase n'a pas de
-  // requête groupée simple ici), mais toutes partent en parallèle et l'écran
-  // se met à jour immédiatement.
+  // Coche d'un coup tout ce qui manque sur la fréquence affichée. Pour le
+  // quotidien, complète les créneaux manquants (matin et/ou soir) de chaque
+  // zone ; pour les autres fréquences, coche les zones restantes comme avant.
   async function markAllDone(){
+    if(busy)return;
+    if(isDaily){
+      const missing=[];
+      list.forEach(zone=>{
+        if(!findCheck(zone.id,"matin")) missing.push({zone,period:"matin"});
+        if(!findCheck(zone.id,"soir")) missing.push({zone,period:"soir"});
+      });
+      if(!missing.length) return;
+      const ok=window.confirm(`Marquer ${missing.length} créneau${missing.length>1?"x":""} restant${missing.length>1?"s":""} de « Quotidien » comme fait${missing.length>1?"s":""} ?`);
+      if(!ok) return;
+      haptic.medium(); setBusy("all");
+      const results=await Promise.all(missing.map(({zone,period})=>db.saveCleaningCheck({cleaningId:zone.id,zone:zone.zone,freq:zone.freq,date:todayISO,period,operator:user?.name})));
+      setBusy(null);
+      if(results.some(r=>r?.error||!r?.data)){ alert("Certains créneaux n'ont pas été enregistrés. Vérifie la connexion Supabase."); await reload?.({force:true}); return; }
+      markLocalWrite?.();
+      setData(d=>({...d,cleaningChecks:[...d.cleaningChecks,...results.map((r,i)=>({id:r.data.id,cleaningId:missing[i].zone.id,zone:missing[i].zone.zone,freq:missing[i].zone.freq,date:todayISO,period:missing[i].period,operator:user?.name,createdAt:r.data.created_at}))]}));
+      haptic.success();
+      return;
+    }
     const pending = list.filter(c=>!c.done);
-    if(!pending.length || busy) return;
+    if(!pending.length) return;
     const ok = window.confirm(`Marquer les ${pending.length} zone${pending.length>1?"s":""} restante${pending.length>1?"s":""} de « ${tab} » comme faite${pending.length>1?"s":""} ?`);
     if(!ok) return;
     haptic.medium();
@@ -2275,26 +2595,34 @@ function Cleaning({data,setData,db,reload,go,markLocalWrite}){
     const stamp = new Date().toISOString();
     const ids = pending.map(c=>c.id);
     markLocalWrite?.();
-    setData(d=>({...d,cleaning:d.cleaning.map(x=>ids.includes(x.id)?{...x,done:true,doneAt:stamp}:x)}));
-    const results = await Promise.all(ids.map(id=>db.toggleCleaning(id,true)));
-    setBusy(null);
+    setData(d=>({...d,cleaning:d.cleaning.map(x=>ids.includes(x.id)?{...x,done:true,doneAt:stamp,operator:user?.name}:x)}));
+    const results = await Promise.all(ids.map(id=>db.toggleCleaning(id,true,user?.name)));
     if(results.some(r=>r?.error)){
       alert("Certaines zones n'ont pas été enregistrées. Vérifie la connexion Supabase.");
       await reload?.({force:true});
+      setBusy(null);
       return;
     }
+    const checks = await Promise.all(pending.map(c=>db.saveCleaningCheck({cleaningId:c.id,zone:c.zone,freq:c.freq,date:todayISO,period:null,operator:user?.name})));
+    setBusy(null);
+    setData(d=>({...d,cleaningChecks:[...d.cleaningChecks,...checks.filter(c=>c?.data).map(c=>({id:c.data.id,cleaningId:c.data.cleaning_id,zone:c.data.zone,freq:c.data.freq,date:todayISO,period:null,operator:user?.name,createdAt:c.data.created_at}))]}));
     haptic.success();
   }
 
   return(<div className="page">
     <GbphHelpButton section="clean" go={go}/>
-    <div className="section-title">Nettoyage</div>
-    <div className="section-sub">Ensemble : {totalDone} / {data.cleaning.length} · {Math.round(totalPct)}%</div>
+    <div className="section-title">{t("clean_title",lang)}</div>
+    <div className="section-sub">{t("clean_overall",lang)} : {totalDone} / {data.cleaning.length} · {Math.round(totalPct)}%</div>
 
     <div className="tabs" style={{marginBottom:16}}>
       {CLEAN_FREQS.map(f=>{
         const n=byFreq[f.key]?.length||0;
-        return <button key={f.key} className={`tab ${tab===f.key?"active":""}`} onClick={()=>{haptic.light();setTab(f.key);}}>{f.icon} {f.label}{n>0?` (${n})`:""}</button>;
+        // Traduction du libellé de fréquence, clé par clé (pas de texte
+        // traduit stocké dans CLEAN_FREQS lui-même — il reste en français,
+        // c'est ici qu'on choisit la bonne langue à l'affichage).
+        const FREQ_KEYS={"Quotidien":"clean_freq_daily","Hebdomadaire":"clean_freq_weekly","Mensuel":"clean_freq_monthly","Trimestriel":"clean_freq_quarterly","Après usage":"clean_freq_after_use"};
+        const label = FREQ_KEYS[f.key] ? t(FREQ_KEYS[f.key],lang) : f.label;
+        return <button key={f.key} className={`tab ${tab===f.key?"active":""}`} onClick={()=>{haptic.light();setTab(f.key);}}>{f.icon} {label}{n>0?` (${n})`:""}</button>;
       })}
     </div>
 
@@ -2302,24 +2630,43 @@ function Cleaning({data,setData,db,reload,go,markLocalWrite}){
       <div className="card mb14"><div className="pbar"><div className="pfill" style={{width:`${pct}%`,background:T.accent}}></div></div></div>
     )}
 
-    {list.some(c=>!c.done) && (
+    {((isDaily && list.some(z=>!dailyDone(z))) || (!isDaily && list.some(c=>!c.done))) && (
       <button className="btn mb14" onClick={markAllDone} disabled={busy==="all"} style={{borderColor:T.good,color:T.good,background:T.goodBg}}>
-        {busy==="all" ? "Enregistrement…" : `✓ Tout marquer fait — ${tab}`}
+        {busy==="all" ? t("clean_saving",lang) : `✓ ${t("clean_mark_all",lang)} — ${tab}`}
       </button>
     )}
 
     {list.length===0
-      ? <div className="empty"><div className="empty-icon">🧹</div><div className="empty-title">Aucune zone</div><div className="empty-sub">Rien de programmé sur cette fréquence</div></div>
-      : list.map(c=>(
-        <div key={c.id} className="item" onClick={()=>toggle(c.id)} style={{opacity:c.done?.6:1,pointerEvents:busy?"none":"auto"}}>
-          <div className="item-icon" style={{background:T.bg3}}>{c.icon}</div>
-          <div className="item-body">
-            <div className="item-title" style={{textDecoration:c.done?"line-through":"none"}}>{c.zone}</div>
-            <div className="item-sub">{c.produit} · {c.dilution}{c.done&&c.doneAt?` · fait le ${fmtDateTime(c.doneAt)}`:""}</div>
+      ? <div className="empty"><div className="empty-icon">🧹</div><div className="empty-title">{t("clean_empty_title",lang)}</div><div className="empty-sub">{t("clean_empty_sub",lang)}</div></div>
+      : isDaily
+        ? list.map(zone=>{
+          const cMatin=findCheck(zone.id,"matin"), cSoir=findCheck(zone.id,"soir");
+          return (
+            <div key={zone.id} className="card" style={{marginBottom:10}}>
+              <div className="row gap10 mb10"><div style={{fontSize:20}}>{zone.icon}</div><div className="item-title">{zone.zone}</div></div>
+              <div className="row gap8">
+                <button className={`temp-slot ${cMatin?"good":"empty"}`} onClick={()=>toggleSlot(zone,"matin")} disabled={busy===`${zone.id}-matin`}>
+                  <div className="temp-slot-period">☀️ {t("temp_morning",lang)}</div>
+                  {cMatin?<div className="temp-slot-meta tabular">✓ {cMatin.operator||""}</div>:<div className="temp-slot-cta">{busy===`${zone.id}-matin`?"…":"Cocher"}</div>}
+                </button>
+                <button className={`temp-slot ${cSoir?"good":"empty"}`} onClick={()=>toggleSlot(zone,"soir")} disabled={busy===`${zone.id}-soir`}>
+                  <div className="temp-slot-period">🌙 {t("temp_evening",lang)}</div>
+                  {cSoir?<div className="temp-slot-meta tabular">✓ {cSoir.operator||""}</div>:<div className="temp-slot-cta">{busy===`${zone.id}-soir`?"…":"Cocher"}</div>}
+                </button>
+              </div>
+            </div>
+          );
+        })
+        : list.map(c=>(
+          <div key={c.id} className="item" onClick={()=>toggle(c.id)} style={{opacity:c.done?.6:1,pointerEvents:busy?"none":"auto"}}>
+            <div className="item-icon" style={{background:T.bg3}}>{c.icon}</div>
+            <div className="item-body">
+              <div className="item-title" style={{textDecoration:c.done?"line-through":"none"}}>{c.zone}</div>
+              <div className="item-sub">{c.produit} · {c.dilution}{c.done&&c.doneAt?` · ${t("clean_done_on",lang)} ${fmtDateTime(c.doneAt)}${c.operator?` ${t("clean_done_by",lang)} ${c.operator}`:""}`:""}</div>
+            </div>
+            <div className={`check ${c.done?"on":""}`}>{busy===c.id?"…":c.done?"✓":""}</div>
           </div>
-          <div className={`check ${c.done?"on":""}`}>{busy===c.id?"…":c.done?"✓":""}</div>
-        </div>
-      ))}
+        ))}
   </div>);
 }
 
@@ -3099,7 +3446,7 @@ function TaskRow({t,cat,onToggle,onDelete,canDelete}){
   );
 }
 
-function Tasks({data,setData,db,reload,user}){
+function Tasks({data,setData,db,reload,user,lang}){
   const[show,setShow]=useState(false);const[filter,setFilter]=useState("all");const[busy,setBusy]=useState(false);
   const[form,setForm]=useState({task:"",resp:"",qty:"",prio:"med",categoryId:null});
   // Seuls les admins peuvent supprimer une tâche (appui long).
@@ -3158,7 +3505,8 @@ function Tasks({data,setData,db,reload,user}){
   // service). Plus de bouton manuel — personne ne peut clôturer par erreur
   // ou oublier de le faire.
   async function removeTask(t){
-    if(!isAdmin)return; // double garde : l'appui long est déjà désactivé côté UI
+    // Ouvert à toute l'équipe : la confirmation reste le seul garde-fou
+    // contre une suppression accidentelle.
     if(!window.confirm(`Supprimer "${t.task}" ?`))return;
     const res=await db.deleteTask?.(t.id);
     if(res?.error){alert("La tâche n'a pas été supprimée. Vérifie la connexion Supabase.");await reload?.({force:true});return;}
@@ -3186,28 +3534,28 @@ function Tasks({data,setData,db,reload,user}){
         <button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={()=>setDayOffset(o=>Math.max(o-1,0))} disabled={dayOffset===0}>‹</button>
         <div style={{textAlign:"center",flex:1}}>
           <div style={{fontWeight:800,fontSize:16,textTransform:"capitalize",lineHeight:1.2}}>
-            {service==="midi"?"☀️":"🌙"} {dayLabel} · {service==="midi"?"Midi":"Soir"}
+            {service==="midi"?"☀️":"🌙"} {dayLabel} · {service==="midi"?t("tasks_slot_midi",lang):t("tasks_slot_soir",lang)}
           </div>
           <div style={{fontSize:11,fontWeight:700,color:isCurrentSlot?T.good:T.warn,marginTop:3}}>
-            {isCurrentSlot ? "● Service en cours" : "◆ Vous préparez un autre créneau"}
+            {isCurrentSlot ? `● ${t("tasks_current_service",lang)}` : `◆ ${t("tasks_other_slot",lang)}`}
           </div>
         </div>
         <button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={()=>setDayOffset(o=>o+1)}>›</button>
       </div>
 
       <div style={{height:12}}></div>
-      <SegmentedControl value={service} onChange={setService} options={[{value:"midi",label:"☀️ Midi"},{value:"soir",label:"🌙 Soir"}]}/>
+      <SegmentedControl value={service} onChange={setService} options={[{value:"midi",label:`☀️ ${t("tasks_slot_midi",lang)}`},{value:"soir",label:`🌙 ${t("tasks_slot_soir",lang)}`}]}/>
 
       {/* Retour rapide au service en cours, visible seulement si on s'en est éloigné */}
       {!isCurrentSlot && (
         <button className="btn btn-sm mt10" onClick={goToCurrentSlot} style={{borderColor:T.warn,color:T.warn,background:"transparent"}}>
-          ↩ Revenir au service en cours
+          ↩ {t("tasks_back_to_current",lang)}
         </button>
       )}
 
       <div style={{height:12}}></div>
       <div className="between mb6">
-        <span className="text-xs" style={{fontWeight:700,color:T.textDim}}>{done} / {total} fait{done>1?"s":""}</span>
+        <span className="text-xs" style={{fontWeight:700,color:T.textDim}}>{done} / {total} {t("tasks_done_count",lang)}</span>
         {urgentLeft>0&&<span className="badge b-bad">{urgentLeft} urgent{urgentLeft>1?"s":""}</span>}
       </div>
       <div className="pbar"><div className="pfill" style={{width:`${pct}%`,background:T.accent}}></div></div>
@@ -3219,21 +3567,25 @@ function Tasks({data,setData,db,reload,user}){
     {grouped.map(({cat,tasks})=>{if(!cat)return null;const catDone=tasks.filter(t=>t.done).length;return(<div key={cat.id} style={{marginBottom:18}}>
       <div className="between mb8" style={{padding:"0 4px"}}><div className="row gap8"><span style={{fontSize:18}}>{cat.icon}</span><span style={{fontSize:13,fontWeight:700,color:cat.color}}>{cat.name}</span><span className="text-xs text-dim">· {catDone}/{tasks.length}</span></div><button onClick={()=>openAddFor(cat.id)} style={{background:"transparent",border:"none",color:cat.color,fontSize:18,fontWeight:700,padding:"4px 8px",cursor:"pointer"}}>+</button></div>
       {prios.map(p=>{const pt=tasks.filter(t=>t.prio===p.k);if(!pt.length)return null;return(<div key={p.k} style={{marginBottom:8}}><div style={{fontSize:10,fontWeight:700,color:p.c,marginBottom:4,marginLeft:6,letterSpacing:".06em",textTransform:"uppercase"}}>{p.l}</div>{pt.map(t=>(
-      <TaskRow key={t.id} t={t} cat={cat} canDelete={isAdmin}
+      <TaskRow key={t.id} t={t} cat={cat} canDelete={true}
         onToggle={()=>toggle(t.id)}
         onDelete={()=>removeTask(t)}/>
     ))}</div>);})}
     </div>);})}
-    <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
+    {/* Reprend la catégorie affichée par le filtre actif (l'onglet "Froid",
+        "Chaud"...) : pas besoin de la resélectionner dans le formulaire.
+        Sur "Tous", rien à présélectionner — openAddFor(null) garde le
+        comportement d'avant. */}
+    <div className="fab-anchor"><button className="btn-fab" onClick={()=>openAddFor(filter==="all"?null:filter)}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
-      <div className="sheet-handle"></div><div className="sheet-title">Nouvelle tâche</div>
+      <div className="sheet-handle"></div><div className="sheet-title">{t("tasks_add",lang)}</div>
       {/* Rappel du créneau de destination : c'est ici que les erreurs se
           produisaient — rien n'indiquait où la tâche allait atterrir. */}
       <div className="banner mb14" style={{background:isCurrentSlot?T.infoBg:T.warnBg,border:`1px solid ${isCurrentSlot?T.info+"44":T.warn+"66"}`}}>
         <span>{service==="midi"?"☀️":"🌙"}</span>
         <div style={{fontSize:12,lineHeight:1.45}}>
-          Cette tâche sera ajoutée à <b style={{textTransform:"capitalize"}}>{dayLabel} · {service==="midi"?"Midi":"Soir"}</b>
-          {!isCurrentSlot && <span style={{display:"block",color:T.warn,fontWeight:700,marginTop:2}}>Ce n'est pas le service en cours</span>}
+          {t("tasks_will_be_added_to",lang)} <b style={{textTransform:"capitalize"}}>{dayLabel} · {service==="midi"?t("tasks_slot_midi",lang):t("tasks_slot_soir",lang)}</b>
+          {!isCurrentSlot && <span style={{display:"block",color:T.warn,fontWeight:700,marginTop:2}}>{t("tasks_not_current",lang)}</span>}
         </div>
       </div>
       <div className="field"><label className="label">Catégorie</label><div className="chips">{categories.map(c=><button key={c.id} className={`chip ${form.categoryId===c.id?"sel":""}`} onClick={()=>setForm({...form,categoryId:c.id})}>{c.icon} {c.name.replace("Mise en place ","")}</button>)}</div></div>
@@ -3790,12 +4142,34 @@ function SettingsHaccp({data,setData,db,reload}){
 
     <CollapsibleSection title="Plan de nettoyage" icon="🧹" count={cleaningItems.length}>
       <div className="text-xs text-dim mb8" style={{marginLeft:2}}>Touchez pour modifier · appui long pour supprimer</div>
-      {cleaningItems.map(c=>(
-        <EditableRow key={c.id} icon={c.icon} iconBg={T.goodBg} onOpen={()=>openClean(c)} onDelete={()=>{if(window.confirm(`Supprimer ${c.zone} ?`))delClean(c);}}>
-          <div className="item-title">{c.zone}</div>
-          <div className="item-sub">{c.freq} · {c.produit}{c.dilution?` · ${c.dilution}`:""}</div>
-        </EditableRow>
-      ))}
+      {(() => {
+        // Même ordre que l'écran de travail Nettoyage, pour ne pas avoir deux
+        // logiques différentes selon qu'on configure ou qu'on utilise l'app.
+        // Une fréquence non reconnue (saisie libre ancienne, etc.) atterrit
+        // dans un dernier groupe "Autre" plutôt que d'être perdue.
+        const order = CLEAN_FREQS.map(f=>f.key);
+        const groups = {};
+        cleaningItems.forEach(c=>{
+          const key = order.includes(c.freq) ? c.freq : "__autre__";
+          (groups[key]=groups[key]||[]).push(c);
+        });
+        const orderedKeys = [...order.filter(k=>groups[k]), ...(groups["__autre__"]?["__autre__"]:[])];
+        return orderedKeys.map(key=>{
+          const freqMeta = CLEAN_FREQS.find(f=>f.key===key);
+          const label = freqMeta ? `${freqMeta.icon} ${freqMeta.label}` : "📦 Autre";
+          return (
+            <div key={key} style={{marginBottom:10}}>
+              <div className="text-xs" style={{fontWeight:700,color:T.textDim,marginBottom:4,marginLeft:2}}>{label} · {groups[key].length}</div>
+              {groups[key].map(c=>(
+                <EditableRow key={c.id} icon={c.icon} iconBg={T.goodBg} onOpen={()=>openClean(c)} onDelete={()=>{if(window.confirm(`Supprimer ${c.zone} ?`))delClean(c);}}>
+                  <div className="item-title">{c.zone}</div>
+                  <div className="item-sub">{c.freq} · {c.produit}{c.dilution?` · ${c.dilution}`:""}</div>
+                </EditableRow>
+              ))}
+            </div>
+          );
+        });
+      })()}
       <button className="inline-add mt6" onClick={()=>openClean(null)}>+ Ajouter une zone</button>
     </CollapsibleSection>
 
@@ -3986,6 +4360,78 @@ function NotificationToggle({user,db}){
       )}
     </div>
   );
+}
+
+// Changement de code PIN personnel — chacun peut changer LE SIEN, jamais
+// celui d'un autre (contrairement à la modification via Paramètres → Équipe,
+// réservée aux admins). Redemande l'ancien code avant d'accepter le
+// changement : sans ça, un téléphone laissé déverrouillé permettrait à
+// n'importe qui de reprendre le compte de la personne connectée.
+function PinChangeButton({user,db,onUserUpdated}){
+  const[open,setOpen]=useState(false);
+  const[step,setStep]=useState("current"); // current | new | confirm
+  const[current,setCurrent]=useState("");
+  const[next,setNext]=useState("");
+  const[confirm,setConfirm]=useState("");
+  const[err,setErr]=useState("");
+  const[busy,setBusy]=useState(false);
+
+  function reset(){ setOpen(false); setStep("current"); setCurrent(""); setNext(""); setConfirm(""); setErr(""); }
+
+  function submitCurrent(){
+    if(current!==user.pin){ haptic.error(); setErr("Code actuel incorrect"); setCurrent(""); return; }
+    setErr(""); setStep("new");
+  }
+  function submitNew(){
+    if(next.length<4){ setErr("4 chiffres minimum"); return; }
+    setErr(""); setStep("confirm");
+  }
+  async function submitConfirm(){
+    if(confirm!==next){ haptic.error(); setErr("Les deux codes ne correspondent pas"); setConfirm(""); return; }
+    setBusy(true);
+    const res=await db.updateUser(user.id,{pin:next});
+    setBusy(false);
+    if(res?.error){ alert("Le code n'a pas été changé. Vérifie la connexion Supabase."); return; }
+    haptic.success();
+    onUserUpdated({...user,pin:next});
+    reset();
+  }
+
+  return(<>
+    <button className="btn btn-ghost mb8" onClick={()=>setOpen(true)}>🔑 Changer mon code PIN</button>
+    {open&&<div className="overlay" onClick={reset}><div className="sheet" onClick={e=>e.stopPropagation()}>
+      <div className="sheet-handle"></div>
+      <div className="sheet-title">Changer mon code PIN</div>
+      {step==="current"&&<>
+        <p className="text-sm text-dim mb14">Entre ton code actuel pour confirmer que c'est bien toi.</p>
+        <input className="input" type="password" inputMode="numeric" maxLength={6} value={current} autoFocus
+          onChange={e=>{setCurrent(e.target.value.replace(/\D/g,""));setErr("");}}
+          onKeyDown={e=>e.key==="Enter"&&current.length>=4&&submitCurrent()}
+          placeholder="Code actuel" style={{textAlign:"center",fontSize:26,letterSpacing:8}}/>
+        {err&&<p style={{color:T.bad,fontSize:12,margin:"8px 0",textAlign:"center"}}>{err}</p>}
+        <button className="btn btn-primary mt14" onClick={submitCurrent} disabled={current.length<4}>Continuer</button>
+      </>}
+      {step==="new"&&<>
+        <p className="text-sm text-dim mb14">Choisis ton nouveau code (4 à 6 chiffres).</p>
+        <input className="input" type="password" inputMode="numeric" maxLength={6} value={next} autoFocus
+          onChange={e=>{setNext(e.target.value.replace(/\D/g,""));setErr("");}}
+          onKeyDown={e=>e.key==="Enter"&&next.length>=4&&submitNew()}
+          placeholder="Nouveau code" style={{textAlign:"center",fontSize:26,letterSpacing:8}}/>
+        {err&&<p style={{color:T.bad,fontSize:12,margin:"8px 0",textAlign:"center"}}>{err}</p>}
+        <button className="btn btn-primary mt14" onClick={submitNew} disabled={next.length<4}>Continuer</button>
+      </>}
+      {step==="confirm"&&<>
+        <p className="text-sm text-dim mb14">Retape le même code pour confirmer.</p>
+        <input className="input" type="password" inputMode="numeric" maxLength={6} value={confirm} autoFocus
+          onChange={e=>{setConfirm(e.target.value.replace(/\D/g,""));setErr("");}}
+          onKeyDown={e=>e.key==="Enter"&&confirm.length>=4&&submitConfirm()}
+          placeholder="Confirme le code" style={{textAlign:"center",fontSize:26,letterSpacing:8}}/>
+        {err&&<p style={{color:T.bad,fontSize:12,margin:"8px 0",textAlign:"center"}}>{err}</p>}
+        <button className="btn btn-primary mt14" onClick={submitConfirm} disabled={confirm.length<4||busy}>{busy?"Enregistrement…":"Valider"}</button>
+      </>}
+      <button className="btn btn-ghost mt8" onClick={reset}>Annuler</button>
+    </div></div>}
+  </>);
 }
 
 function SettingsPrinter({user}){
@@ -4369,6 +4815,20 @@ export default function App(){
     else navigator.clearAppBadge?.().catch(()=>{});
   },[data,user]);
 
+  // Langue de l'équipe, choisie à la connexion et gardée sur cet appareil.
+  // Phase 1 : ne couvre que les écrans du quotidien (connexion, nav,
+  // Températures, Nettoyage, Mise en place) — le reste de l'app reste en
+  // français pour tout le monde. Voir locales/ps.js pour le statut de
+  // relecture avant élargissement.
+  const[lang,setLang]=useState(()=>{
+    try{ return localStorage.getItem("fuego_lang")||"fr"; }catch{ return "fr"; }
+  });
+  function changeLang(l){
+    setLang(l);
+    try{ localStorage.setItem("fuego_lang",l); }catch{}
+  }
+  useEffect(()=>{ document.documentElement.dir = dirFor(lang); },[lang]);
+
   const lastWriteRef = useRef(0);
   const markLocalWrite = useCallback(()=>{ lastWriteRef.current = Date.now(); },[]);
   const WRITE_LOCK_MS = 6000;
@@ -4533,12 +4993,12 @@ export default function App(){
     </div></>
   );
 
-  if(!user)return(<><style>{S}</style><Login users={data.users} onLogin={u=>setUser(u)}/></>);
+  if(!user)return(<><style>{S}</style><Login users={data.users} onLogin={u=>setUser(u)} lang={lang} onChangeLang={changeLang}/></>);
 
   const isRoot=ROOT_PAGES.includes(page);
   const backTo=HACCP_PAGES.includes(page)?"haccp":MORE_PAGES.includes(page)?"more":"home";
   const activeTab=ROOT_PAGES.includes(page)?page:HACCP_PAGES.includes(page)?"haccp":MORE_PAGES.includes(page)?"more":page;
-  const props={data,setData,user,go,db:DB,reload,markLocalWrite,onVoiceOpen:()=>setVoiceOpen(true)};
+  const props={data,setData,user,go,db:DB,reload,markLocalWrite,onVoiceOpen:()=>setVoiceOpen(true),lang};
   const pages={
     home:<Aujourdhui {...props}/>,haccp:<HaccpHub {...props}/>,
     temps:<Temperatures {...props}/>,reception:<Reception {...props}/>,
@@ -4546,10 +5006,10 @@ export default function App(){
     oils:<Oils {...props}/>,trace:<Traceability {...props}/>,
     labels:<Labels {...props}/>,testmeals:<TestMeals {...props}/>,
     clean:<Cleaning {...props}/>,pests:<Pests {...props}/>,
-    training:<Training data={data} go={go}/>,registre:<Registre data={data}/>,gbph:<GbphGuide initialSection={gbphSection}/>,manual:<ManualGuide user={user}/>,
+    training:<Training data={data} go={go}/>,registre:<Registre data={data} db={DB}/>,gbph:<GbphGuide initialSection={gbphSection}/>,manual:<ManualGuide user={user}/>,
     recipes:<Recipes data={data} setData={setData} db={DB} reload={reload} user={user} markLocalWrite={markLocalWrite}/>,
     margins:<Margins data={data}/>,planning:<Planning {...props}/>,
-    tasks:<Tasks data={data} setData={setData} db={DB} reload={reload} user={user}/>,
+    tasks:<Tasks data={data} setData={setData} db={DB} reload={reload} user={user} lang={lang}/>,
     more:<More go={go} user={user}/>,
     settings:<Settings data={data} setData={setData} user={user} onLogout={logout} db={DB} reload={reload} markLocalWrite={markLocalWrite}/>,
   };
@@ -4570,6 +5030,10 @@ export default function App(){
       <div className="text-xs text-mute mb12" style={{paddingLeft:4}}>{wakeEnabled?"Dites « Fuego » pour activer la commande vocale sans toucher l'écran":"Activez pour piloter à la voix, mains libres"}</div>
       </>}
       <NotificationToggle user={user} db={DB}/>
+      <PinChangeButton user={user} db={DB} onUserUpdated={(updated)=>{
+        setUser(updated);
+        setData(d=>({...d,users:d.users.map(u=>u.id===updated.id?updated:u)}));
+      }}/>
       <button className="btn btn-ghost mb8" onClick={()=>{setProfile(false);go("settings");}}>⚙️ Paramètres</button>
       <button className="btn" style={{background:T.badBg,color:T.bad}} onClick={logout}>Déconnexion</button>
       {/* Mention de propriété — année calculée automatiquement pour ne jamais
@@ -4590,6 +5054,12 @@ export default function App(){
       />
     )}
 
-    {!voiceOpen && !profile && <div className="bottomnav">{NAV.map(n=><button key={n.k} className={`nav-item ${activeTab===n.k?"active":""}`} onClick={()=>go(n.k)}><span className="nav-icon">{n.i}</span><span className="nav-label">{n.l}</span></button>)}</div>}
+    {!voiceOpen && !profile && <div className="bottomnav">{NAV.map(n=>{
+      // Traduction seulement pour les 4 onglets du quotidien (phase 1) ; les
+      // autres (ex. Recettes) restent en français pour l'instant.
+      const NAV_KEYS={home:"nav_home",haccp:"nav_haccp",tasks:"nav_tasks",more:"nav_more"};
+      const label = NAV_KEYS[n.k] ? t(NAV_KEYS[n.k],lang) : n.l;
+      return <button key={n.k} className={`nav-item ${activeTab===n.k?"active":""}`} onClick={()=>go(n.k)}><span className="nav-icon">{n.i}</span><span className="nav-label">{label}</span></button>;
+    })}</div>}
   </div></>);
 }
