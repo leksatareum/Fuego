@@ -25,6 +25,7 @@ const sbFetch = async (table, opts={}) => {
     "Authorization": `Bearer ${SUPABASE_ANON}`,
     "Content-Type": "application/json",
     "Prefer": single ? "return=representation,resolution=ignore-duplicates" : "return=representation",
+    ...(opts.headers||{}), // en-têtes optionnels (ex. upsert push) — écrasent les défauts
   };
   try {
     const res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
@@ -38,6 +39,31 @@ const sbGet    = (table, params="")    => sbFetch(table, { params });
 const sbPost   = (table, body)         => sbFetch(table, { method:"POST", body, single:true });
 const sbPatch  = (table, body, params) => sbFetch(table, { method:"PATCH", body, params });
 const sbDelete = (table, params)       => sbFetch(table, { method:"DELETE", params });
+
+// ── Notifications push ──────────────────────────────────────────────────────
+// Clé PUBLIQUE VAPID : elle identifie l'expéditeur des notifications (Fuego)
+// auprès du navigateur. Sans danger à exposer — la clé privée, elle, reste
+// uniquement côté serveur (étape 3).
+const VAPID_PUBLIC_KEY = "BF3vl3jBGEnprNre9s1_Zkk04y3IiWpVKTPZIOnZGS3jbgGcouFO5PgWX1fMGAdlIWtYMtyQTfJoDySgcZS_CL0";
+
+// Le navigateur fournit la clé au format base64url ; l'API push la réclame en
+// tableau d'octets. Conversion nécessaire.
+function urlBase64ToUint8Array(base64String){
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  const arr = new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+
+// État actuel des notifications sur cet appareil, pour afficher le bon bouton.
+function pushSupported(){
+  return typeof window!=="undefined"
+    && "serviceWorker" in navigator
+    && "PushManager" in window
+    && "Notification" in window;
+}
 
 // ── Supabase Storage : envoi/suppression de vrais fichiers (PDF de rapports).
 // Contrairement aux photos de traçabilité stockées en base, les PDF peuvent
@@ -242,6 +268,19 @@ const DB = {
   },
   async deleteRecipe(id){return sbDelete("recipes",qs(`id=eq.${id}`));},
   async deleteTask(id){return sbDelete("tasks",qs(`id=eq.${id}`));},
+  // Enregistre l'abonnement push d'un appareil. endpoint est unique : si
+  // l'appareil se réabonne, on écrase l'ancienne ligne (upsert via Prefer).
+  async savePushSubscription(sub, userId){
+    return sbFetch("push_subscriptions", {
+      method:"POST",
+      body:{ user_id:userId, endpoint:sub.endpoint, p256dh:sub.keys.p256dh, auth:sub.keys.auth },
+      single:true,
+      headers:{ "Prefer":"resolution=merge-duplicates,return=representation" },
+    });
+  },
+  async deletePushSubscription(endpoint){
+    return sbDelete("push_subscriptions", qs(`endpoint=eq.${encodeURIComponent(endpoint)}`));
+  },
   async addTask(t){return sbPost("tasks",{category_id:t.categoryId,task:t.task,resp:t.resp,qty:t.qty,prio:t.prio,done:false,date:t.date||todayStr(),service:t.service||"midi"});},
   async toggleTask(id,done){return sbPatch("tasks",{done},qs(`id=eq.${id}`));},
   async clearTasks(dateStr,service){
@@ -3860,6 +3899,87 @@ function SettingsUsers({data,setData,user,db,reload,onLogout}){
   </>);
 }
 
+// Réglage personnel (par appareil) : activer les rappels sur ce téléphone.
+// Placé dans le menu profil car chacun décide pour son propre appareil.
+function NotificationToggle({user,db}){
+  const[state,setState]=useState("checking"); // checking | unsupported | off | on | denied | busy
+  const[endpoint,setEndpoint]=useState(null);
+
+  useEffect(()=>{
+    if(!pushSupported()){ setState("unsupported"); return; }
+    if(Notification.permission==="denied"){ setState("denied"); return; }
+    // Un abonnement existe-t-il déjà sur cet appareil ?
+    navigator.serviceWorker.ready
+      .then(reg=>reg.pushManager.getSubscription())
+      .then(sub=>{ if(sub){ setEndpoint(sub.endpoint); setState("on"); } else setState("off"); })
+      .catch(()=>setState("off"));
+  },[]);
+
+  async function enable(){
+    setState("busy");
+    try{
+      const perm = await Notification.requestPermission();
+      if(perm!=="granted"){ setState(perm==="denied"?"denied":"off"); return; }
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly:true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+      const json = sub.toJSON();
+      const res = await db.savePushSubscription(
+        { endpoint:sub.endpoint, keys:{ p256dh:json.keys.p256dh, auth:json.keys.auth } },
+        user.id
+      );
+      if(res?.error){ alert("L'activation a échoué côté serveur. Réessaie plus tard."); setState("off"); return; }
+      setEndpoint(sub.endpoint); setState("on"); haptic.success();
+    }catch(e){
+      alert("Impossible d'activer les notifications sur cet appareil.");
+      setState("off");
+    }
+  }
+
+  async function disable(){
+    setState("busy");
+    try{
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if(sub){ await sub.unsubscribe(); await db.deletePushSubscription?.(sub.endpoint); }
+      setEndpoint(null); setState("off"); haptic.light();
+    }catch(e){ setState("on"); }
+  }
+
+  if(state==="unsupported") return null; // navigateur incompatible : on n'affiche rien
+  if(state==="checking") return null;
+
+  return(
+    <div style={{marginBottom:12}}>
+      {state==="denied" ? (
+        <div className="banner banner-warn"><span>🔕</span><div style={{fontSize:11,lineHeight:1.5}}>
+          Les notifications sont bloquées pour Fuego. Pour les réactiver : réglages du téléphone → Fuego → Notifications.
+        </div></div>
+      ) : (
+        <>
+          <button className="btn btn-ghost" style={{width:"100%",justifyContent:"space-between"}}
+            onClick={state==="on"?disable:enable} disabled={state==="busy"}>
+            <span style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:18}}>{state==="on"?"🔔":"🔕"}</span>
+              <span style={{fontSize:13,fontWeight:600}}>Rappels sur ce téléphone</span>
+            </span>
+            <span style={{width:42,height:24,borderRadius:999,background:state==="on"?"linear-gradient(135deg,#FF6B00,#E8390A)":"#2A2A2A",position:"relative",transition:"background .2s",flexShrink:0}}>
+              <span style={{position:"absolute",top:2,left:state==="on"?20:2,width:20,height:20,borderRadius:"50%",background:"white",transition:"left .2s"}}></span>
+            </span>
+          </button>
+          <div className="text-xs text-mute mb12" style={{paddingLeft:4}}>
+            {state==="on"
+              ? "Ce téléphone recevra les rappels (relevés, tâches…) même Fuego fermé."
+              : "Activez pour être prévenu des relevés et tâches à faire, même sans ouvrir l'app."}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function SettingsPrinter({user}){
   const[relayInput,setRelayInput]=useState(getRelayUrl());
   const[testState,setTestState]=useState(null); // null | "testing" | {ok,...}
@@ -4432,6 +4552,7 @@ export default function App(){
       </button>
       <div className="text-xs text-mute mb12" style={{paddingLeft:4}}>{wakeEnabled?"Dites « Fuego » pour activer la commande vocale sans toucher l'écran":"Activez pour piloter à la voix, mains libres"}</div>
       </>}
+      <NotificationToggle user={user} db={DB}/>
       <button className="btn btn-ghost mb8" onClick={()=>{setProfile(false);go("settings");}}>⚙️ Paramètres</button>
       <button className="btn" style={{background:T.badBg,color:T.bad}} onClick={logout}>Déconnexion</button>
       {/* Mention de propriété — année calculée automatiquement pour ne jamais
