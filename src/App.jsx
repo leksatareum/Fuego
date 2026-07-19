@@ -593,6 +593,14 @@ const S = `
 
   .item{display:flex;align-items:center;gap:12px;padding:12px 14px;background:${T.bg2};border-radius:12px;margin-bottom:6px;border:1px solid ${T.border};box-shadow:inset 0 1px 0 rgba(255,255,255,.025);transition:transform var(--dur-fast),border-color var(--dur-fast);}
   .item:active{transform:scale(.99);border-color:${T.borderHi};}
+  /* Ligne plate — sans fond, sans bordure, séparée par un simple trait.
+     Réservée aux listes de navigation simples (menu HACCP, menu Plus) : ce
+     ne sont pas des blocs à examiner, juste des destinations à toucher.
+     .item reste inchangé partout ailleurs (trop d'écrans en dépendent pour
+     le modifier globalement sans risque). */
+  .row-line{display:flex;align-items:center;gap:12px;padding:14px 2px;border-bottom:1px solid ${T.border};transition:opacity var(--dur-fast);}
+  .row-line:last-child{border-bottom:none;}
+  .row-line:active{opacity:.6;}
   .item-icon{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;}
   .item-body{flex:1;min-width:0;}
   .item-title{font-size:15px;font-weight:700;color:${T.text};margin-bottom:1px;}
@@ -2086,7 +2094,7 @@ function HaccpHub({data,go,lang}){
       <div className="item-body"><div className="item-title">Guide des bonnes pratiques</div><div className="item-sub">Aide-mémoire hygiène, températures, DLC</div></div>
       <span className="item-arrow">›</span>
     </div>
-    {groups.map(g=>(<div key={g.title} style={{marginBottom:20}}><div className="bucket-label">{g.title}</div>{g.items.map(it=><div key={it.key} className="item" onClick={()=>go(it.key)}><div className="item-icon" style={{background:it.bg}}>{it.icon}</div><div className="item-body"><div className="item-title">{it.title}</div><div className="item-sub">{it.sub}</div></div><span className={`badge ${it.badge.c}`}>{it.badge.l}</span></div>)}</div>))}
+    {groups.map(g=>(<div key={g.title} style={{marginBottom:20}}><div className="bucket-label">{g.title}</div>{g.items.map(it=><div key={it.key} className="row-line" onClick={()=>go(it.key)} style={{cursor:"pointer"}}><div className="item-icon" style={{background:it.bg}}>{it.icon}</div><div className="item-body"><div className="item-title">{it.title}</div><div className="item-sub">{it.sub}</div></div><span className={`badge ${it.badge.c}`}>{it.badge.l}</span></div>)}</div>))}
   </div>);
 }
 
@@ -4131,12 +4139,12 @@ function TaskCategoriesEditor({data,setData,db,reload,markLocalWrite}){
 function More({go,user,lang}){
   const items=[{key:"margins",icon:"📊",bg:T.goodBg,title:t("more_margins",lang),sub:t("more_margins_sub",lang)},{key:"planning",icon:"📅",bg:T.warnBg,title:t("more_team_planning",lang),sub:t("more_team_planning_sub",lang)}];
   return(<div className="page"><div className="section-title">{t("more_title",lang)}</div><div className="section-sub">{t("more_subtitle",lang)}</div>
-    {items.map(it=><div key={it.key} className="item" onClick={()=>go(it.key)}><div className="item-icon" style={{background:it.bg}}>{it.icon}</div><div className="item-body"><div className="item-title">{it.title}</div><div className="item-sub">{it.sub}</div></div><div className="item-arrow">›</div></div>)}
+    {items.map(it=><div key={it.key} className="row-line" onClick={()=>go(it.key)} style={{cursor:"pointer"}}><div className="item-icon" style={{background:it.bg}}>{it.icon}</div><div className="item-body"><div className="item-title">{it.title}</div><div className="item-sub">{it.sub}</div></div><div className="item-arrow">›</div></div>)}
     <div className="bucket-label mt14">{t("more_help",lang)}</div>
-    <div className="item" onClick={()=>go("manual")}><div className="item-icon" style={{background:T.infoBg}}>📖</div><div className="item-body"><div className="item-title">{t("more_manual",lang)}</div><div className="item-sub">{t("more_manual_sub",lang)}</div></div><div className="item-arrow">›</div></div>
-    <div className="item" onClick={()=>go("gbph")}><div className="item-icon" style={{background:T.goodBg}}>🛡️</div><div className="item-body"><div className="item-title">{t("more_gbph",lang)}</div><div className="item-sub">{t("more_gbph_sub",lang)}</div></div><div className="item-arrow">›</div></div>
+    <div className="row-line" onClick={()=>go("manual")} style={{cursor:"pointer"}}><div className="item-icon" style={{background:T.infoBg}}>📖</div><div className="item-body"><div className="item-title">{t("more_manual",lang)}</div><div className="item-sub">{t("more_manual_sub",lang)}</div></div><div className="item-arrow">›</div></div>
+    <div className="row-line" onClick={()=>go("gbph")} style={{cursor:"pointer"}}><div className="item-icon" style={{background:T.goodBg}}>🛡️</div><div className="item-body"><div className="item-title">{t("more_gbph",lang)}</div><div className="item-sub">{t("more_gbph_sub",lang)}</div></div><div className="item-arrow">›</div></div>
     <div className="bucket-label mt14">{user.isAdmin?"Administration":t("more_settings_group_staff",lang)}</div>
-    <div className="item" onClick={()=>go("settings")}><div className="item-icon" style={{background:T.accentLt}}>⚙️</div><div className="item-body"><div className="item-title">{t("more_settings",lang)}</div><div className="item-sub">{user.isAdmin?"Restaurant, équipe, HACCP":t("more_settings_printer_sub",lang)}</div></div><div className="item-arrow">›</div></div>
+    <div className="row-line" onClick={()=>go("settings")} style={{cursor:"pointer"}}><div className="item-icon" style={{background:T.accentLt}}>⚙️</div><div className="item-body"><div className="item-title">{t("more_settings",lang)}</div><div className="item-sub">{user.isAdmin?"Restaurant, équipe, HACCP":t("more_settings_printer_sub",lang)}</div></div><div className="item-arrow">›</div></div>
   </div>);
 }
 
