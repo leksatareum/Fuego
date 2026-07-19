@@ -441,7 +441,7 @@ const DB = {
 const T = {
   bg0:"#090909", bg1:"#111111", bg2:"#1A1A1A", bg3:"#242424",
   border:"#2A2A2A", borderHi:"#3A3A3A",
-  text:"#FFFFFF", textDim:"#A0A0A0", textMute:"#606060", textGhost:"#383838",
+  text:"#FFFFFF", textDim:"#A0A0A0", textMute:"#8C8C8C", textGhost:"#383838",
   accent:"#E8390A",     // rouge flamme principal
   accentOrange:"#FF6B00", // orange logo (le O)
   accentDk:"#B82D08",
@@ -2528,7 +2528,7 @@ function Traceability({data,setData,db,reload,go,markLocalWrite,lang}){
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">{t("trace_add_product",lang)}</div>
       {photo
-        ? <div style={{position:"relative",marginBottom:14}}><img src={photo} alt="" style={{width:"100%",borderRadius:14}}/><button onClick={()=>setPhoto(null)} style={{position:"absolute",top:8,right:8,width:32,height:32,borderRadius:"50%",background:"rgba(0,0,0,.6)",border:"none",color:"#fff",fontSize:16}}>✕</button></div>
+        ? <div style={{position:"relative",marginBottom:14}}><img src={photo} alt="" style={{width:"100%",borderRadius:14}}/><button onClick={()=>setPhoto(null)} style={{position:"absolute",top:8,right:8,width:44,height:44,borderRadius:"50%",background:"rgba(0,0,0,.6)",border:"none",color:"#fff",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button></div>
         : <label className="scan" style={{cursor:"pointer",display:"block"}}><div className="scan-icon">📸</div><div className="scan-title">{t("trace_photo",lang)}</div><div className="scan-sub">{t("trace_photo_sub",lang)}</div><input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handlePhoto}/></label>
       }
       <div className="field"><label className="label">{t("trace_product",lang)}</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})}/></div>
@@ -3325,7 +3325,7 @@ function Pests({data,setData,db,reload,go,markLocalWrite,lang}){
           ? <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",background:T.goodBg,border:`1px solid ${T.good}44`,borderRadius:10}}>
               <span style={{fontSize:16}}>📄</span>
               <span style={{flex:1,fontSize:12,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{reportFile.name}</span>
-              <button onClick={()=>setReportFile(null)} style={{background:"none",border:"none",color:T.textDim,fontSize:15,padding:"0 4px"}}>✕</button>
+              <button onClick={()=>setReportFile(null)} style={{background:"none",border:"none",color:T.textDim,fontSize:15,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
             </div>
           : <label style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"12px",background:T.bg3,border:`1px dashed ${T.border}`,borderRadius:10,cursor:"pointer",color:T.textDim,fontSize:13,fontWeight:600}}>
               {t("pest_join_pdf",lang)}
@@ -3510,7 +3510,7 @@ function RecipeEditor({recipe,allRecipes,products=[],defaultType="plat",onSave,o
     <div className="card"><div className="between mb8"><div className="bucket-label">{t("redit_ingredients",lang)}</div><div className="row gap6"><button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={addIngredient}>{t("redit_add_ingredient",lang)}</button>{otherRecipes.length>0&&<button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={addSubrecipe}>{t("redit_add_prep",lang)}</button>}</div></div>
       {components.length===0&&<div className="text-xs text-dim center" style={{padding:"10px 0"}}>{t("redit_no_ingredient",lang)}</div>}
       {components.map((c,i)=>{
-        if(c.kind!=="ingredient")return(<div key={i} style={{padding:"10px 0",borderBottom:i<components.length-1?`1px solid ${T.border}`:"none"}}><div className="row gap6 mb6"><span style={{fontSize:16}}>🧪</span><select className="input input-sm" style={{flex:1}} value={c.subrecipeId} onChange={e=>{const sub=allRecipes.find(r=>r.id===parseInt(e.target.value));updateComp(i,{subrecipeId:parseInt(e.target.value),unit:sub.yield.unit});}}>{otherRecipes.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}</select></div><div className="row gap6"><input className="input input-sm" style={{flex:1}} type="text" inputMode="decimal" value={c.qty} onChange={e=>{const v=e.target.value;if(/^\d*[.,]?\d*$/.test(v))updateComp(i,{qty:v.replace(",",".")});}}/><span style={{padding:"9px 12px",color:T.textDim,fontSize:13}}>{c.unit}</span><button style={{width:34,height:34,borderRadius:9,background:T.badBg,color:T.bad,border:"none",fontSize:16,flexShrink:0}} onClick={()=>removeComp(i)}>×</button></div></div>);
+        if(c.kind!=="ingredient")return(<div key={i} style={{padding:"10px 0",borderBottom:i<components.length-1?`1px solid ${T.border}`:"none"}}><div className="row gap6 mb6"><span style={{fontSize:16}}>🧪</span><select className="input input-sm" style={{flex:1}} value={c.subrecipeId} onChange={e=>{const sub=allRecipes.find(r=>r.id===parseInt(e.target.value));updateComp(i,{subrecipeId:parseInt(e.target.value),unit:sub.yield.unit});}}>{otherRecipes.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}</select></div><div className="row gap6"><input className="input input-sm" style={{flex:1}} type="text" inputMode="decimal" value={c.qty} onChange={e=>{const v=e.target.value;if(/^\d*[.,]?\d*$/.test(v))updateComp(i,{qty:v.replace(",",".")});}}/><span style={{padding:"9px 12px",color:T.textDim,fontSize:13}}>{c.unit}</span><button style={{width:44,height:44,borderRadius:9,background:T.badBg,color:T.bad,border:"none",fontSize:16,flexShrink:0}} onClick={()=>removeComp(i)}>×</button></div></div>);
         // Ligne ingrédient : soit lié à un produit du catalogue (coût auto), soit saisie libre
         const linkedProduct=c.productId?products.find(p=>p.id===c.productId):null;
         const autoCost=linkedProduct?computeIngredientCost(parseFloat(String(c.qty).replace(",","."))||0,c.unit,linkedProduct):null;
@@ -3533,7 +3533,7 @@ function RecipeEditor({recipe,allRecipes,products=[],defaultType="plat",onSave,o
             {c.productId
               ? <div className="input input-sm" style={{flex:1,display:"flex",alignItems:"center",color:unitMismatch?T.bad:T.good,fontWeight:700,background:T.bg3}}>{unitMismatch?"⚠ unité":`${(autoCost||0).toFixed(2)} €`}</div>
               : <input className="input input-sm" style={{flex:1}} type="text" inputMode="decimal" value={c.cost} onChange={e=>{const v=e.target.value;if(/^\d*[.,]?\d*$/.test(v))updateComp(i,{cost:v.replace(",",".")});}} placeholder="€"/>}
-            <button style={{width:34,height:34,borderRadius:9,background:T.badBg,color:T.bad,border:"none",fontSize:16,flexShrink:0}} onClick={()=>removeComp(i)}>×</button>
+            <button style={{width:44,height:44,borderRadius:9,background:T.badBg,color:T.bad,border:"none",fontSize:16,flexShrink:0}} onClick={()=>removeComp(i)}>×</button>
           </div>
           {unitMismatch&&<div className="text-xs mt4" style={{color:T.bad}}>Ce produit est acheté au {linkedProduct.unit} — choisissez une unité compatible ({linkedProduct.unit==="kg"?"g ou kg":linkedProduct.unit==="L"?"ml ou L":"pce"}).</div>}
         </div>);
@@ -3541,7 +3541,7 @@ function RecipeEditor({recipe,allRecipes,products=[],defaultType="plat",onSave,o
     </div>
     <div className="card"><div className="between mb8"><div className="bucket-label">{t("redit_steps",lang)}</div><button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={addStep}>{t("redit_add_step",lang)}</button></div>
       {steps.length===0&&<div className="text-xs text-dim center" style={{padding:"10px 0"}}>{t("redit_no_step",lang)}</div>}
-      {steps.map((s,i)=><div key={i} className="row gap8 mb6"><div className="step-num">{i+1}</div><input className="input input-sm" style={{flex:1}} value={s} onChange={e=>updateStep(i,e.target.value)} placeholder={t("redit_describe",lang)}/><button style={{width:30,height:30,borderRadius:8,background:T.badBg,color:T.bad,border:"none",fontSize:14,flexShrink:0}} onClick={()=>removeStep(i)}>×</button></div>)}
+      {steps.map((s,i)=><div key={i} className="row gap8 mb6"><div className="step-num">{i+1}</div><input className="input input-sm" style={{flex:1}} value={s} onChange={e=>updateStep(i,e.target.value)} placeholder={t("redit_describe",lang)}/><button style={{width:44,height:44,borderRadius:8,background:T.badBg,color:T.bad,border:"none",fontSize:14,flexShrink:0}} onClick={()=>removeStep(i)}>×</button></div>)}
     </div>
     <div className="card"><div className="field" style={{marginBottom:0}}><label className="label">{t("redit_allergens",lang)}</label><input className="input input-sm" value={allergensStr} onChange={e=>setAllergensStr(e.target.value)} placeholder="Gluten, Lait..."/></div></div>
     <button className="btn btn-primary mb14" onClick={save}>✓ {isEditing?t("redit_update",lang):t("redit_create",lang)}</button>
@@ -4011,7 +4011,7 @@ function ProductsEditor({data,setData,db,reload,markLocalWrite}){
           {items.map(p=><div key={p.id} className="item">
             <div className="item-icon" style={{background:T.infoBg}}>{CATEGORY_ICONS[cat]||"🧾"}</div>
             <div className="item-body"><div className="item-title">{p.name}</div><div className="item-sub">{p.price.toFixed(2)} € / {p.unit}</div></div>
-            <div className="row gap6"><button onClick={()=>openEdit(p)} style={{background:"transparent",border:"none",color:T.textDim,fontSize:16,padding:"6px 8px"}}>✏️</button><button onClick={()=>remove(p)} style={{background:"transparent",border:"none",color:T.bad,fontSize:16,padding:"6px 8px"}}>🗑</button></div>
+            <div className="row gap6"><button onClick={()=>openEdit(p)} style={{background:"transparent",border:"none",color:T.textDim,fontSize:16,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>✏️</button><button onClick={()=>remove(p)} style={{background:"transparent",border:"none",color:T.bad,fontSize:16,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>🗑</button></div>
           </div>)}
         </CollapsibleSection>
       );
@@ -4069,7 +4069,7 @@ function TaskCategoriesEditor({data,setData,db,reload,markLocalWrite}){
   }
   async function remove(catId){const tasksInCat=data.tasks.filter(t=>t.categoryId===catId).length;const msg=tasksInCat>0?`${tasksInCat} tâche(s) seront déplacées. Supprimer ?`:"Supprimer cette catégorie ?";if(!window.confirm(msg))return;const remaining=data.taskCategories.filter(c=>c.id!==catId);const fallbackId=remaining[0]?.id;await db.deleteTaskCategory(catId,fallbackId);await reload({force:true});}
   return(<><div className="text-xs text-dim mb12" style={{lineHeight:1.5}}>Organisez votre mise en place par zones de production.</div>
-    {data.taskCategories.map(cat=>{const count=data.tasks.filter(t=>t.categoryId===cat.id).length;return(<div key={cat.id} className="item" style={{borderLeft:`3px solid ${cat.color}`}}><div className="item-icon" style={{background:`${cat.color}22`}}>{cat.icon}</div><div className="item-body"><div className="item-title">{cat.name}</div><div className="item-sub">{count} tâche{count>1?"s":""}</div></div><div className="row gap6"><button onClick={()=>openEdit(cat)} style={{background:"transparent",border:"none",color:T.textDim,fontSize:16,padding:"6px 8px"}}>✏️</button><button onClick={()=>remove(cat.id)} style={{background:"transparent",border:"none",color:T.bad,fontSize:16,padding:"6px 8px"}}>🗑</button></div></div>);})}
+    {data.taskCategories.map(cat=>{const count=data.tasks.filter(t=>t.categoryId===cat.id).length;return(<div key={cat.id} className="item" style={{borderLeft:`3px solid ${cat.color}`}}><div className="item-icon" style={{background:`${cat.color}22`}}>{cat.icon}</div><div className="item-body"><div className="item-title">{cat.name}</div><div className="item-sub">{count} tâche{count>1?"s":""}</div></div><div className="row gap6"><button onClick={()=>openEdit(cat)} style={{background:"transparent",border:"none",color:T.textDim,fontSize:16,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>✏️</button><button onClick={()=>remove(cat.id)} style={{background:"transparent",border:"none",color:T.bad,fontSize:16,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>🗑</button></div></div>);})}
     <button className="btn btn-primary mt8" onClick={openAdd}>+ Nouvelle catégorie</button>
     {showAdd&&<div className="overlay" onClick={()=>setShowAdd(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">{editing?"Modifier":"Nouvelle catégorie"}</div>
