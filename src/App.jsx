@@ -1187,10 +1187,10 @@ function Login({users,onLogin,lang="fr",onChangeLang}){
 // il suffit de repasser ce drapeau à true pour tout réafficher d'un coup.
 const VOICE_FEATURE_ENABLED = false;
 
-function Aujourdhui({data,go,user,onVoiceOpen}){
+function Aujourdhui({data,go,user,onVoiceOpen,lang}){
   const[,setTick]=useState(0);
   useEffect(()=>{const i=setInterval(()=>setTick(t=>t+1),30000);return()=>clearInterval(i);},[]);
-  const h=new Date().getHours();const greeting=h<12?"Bonjour":h<18?"Bon après-midi":"Bonsoir";
+  const h=new Date().getHours();const greeting=h<12?t("home_greeting_morning",lang):h<18?t("home_greeting_afternoon",lang):t("home_greeting_evening",lang);
   const today=new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"});
   const win=getServiceWindow();
   const fridgesOutOfNorm=data.haccpSettings.fridgeTargets.filter(f=>{const m=getReleve(data,f.id,"matin"),s=getReleve(data,f.id,"soir");return(m&&tempStatus(m.temp,f.target)==="bad")||(s&&tempStatus(s.temp,f.target)==="bad");});
@@ -1231,18 +1231,18 @@ function Aujourdhui({data,go,user,onVoiceOpen}){
 
   const nowItems=[];const upcomingItems=[];
   if(win.id==="morning"){
-    if(matinDone<totalFridges)nowItems.push({icon:"☀️",title:"Relevés matin",done:matinDone,total:totalFridges,color:T.warn,goto:"temps"});
-    if(tasksDone<tasksTotal)nowItems.push({icon:"✅",title:"Mise en place",done:tasksDone,total:tasksTotal,color:T.accent,goto:"tasks"});
-    upcomingItems.push({icon:"🚚",title:"Réception fournisseurs",sub:"Avant 11h",goto:"reception"});
+    if(matinDone<totalFridges)nowItems.push({icon:"☀️",title:t("home_morning_readings",lang),done:matinDone,total:totalFridges,color:T.warn,goto:"temps"});
+    if(tasksDone<tasksTotal)nowItems.push({icon:"✅",title:t("home_tasks",lang),done:tasksDone,total:tasksTotal,color:T.accent,goto:"tasks"});
+    upcomingItems.push({icon:"🚚",title:t("home_supplier_reception",lang),sub:"Avant 11h",goto:"reception"});
   }else if(win.id==="lunch"||win.id==="dinner"){
-    upcomingItems.push({icon:"🧹",title:"Nettoyage de fin",sub:`${cleanDone}/${cleanTotal} fait`,goto:"clean"});
+    upcomingItems.push({icon:"🧹",title:t("home_end_cleaning",lang),sub:`${cleanDone}/${cleanTotal} fait`,goto:"clean"});
   }else if(win.id==="prep_pm"){
-    if(tasksDone<tasksTotal)nowItems.push({icon:"✅",title:"Mise en place",done:tasksDone,total:tasksTotal,color:T.accent,goto:"tasks"});
-    upcomingItems.push({icon:"🌙",title:"Relevés soir",sub:"Avant 23h",goto:"temps"});
+    if(tasksDone<tasksTotal)nowItems.push({icon:"✅",title:t("home_tasks",lang),done:tasksDone,total:tasksTotal,color:T.accent,goto:"tasks"});
+    upcomingItems.push({icon:"🌙",title:t("home_evening_readings",lang),sub:"Avant 23h",goto:"temps"});
   }else if(win.id==="closing"){
-    if(soirDone<totalFridges)nowItems.push({icon:"🌙",title:"Relevés soir",done:soirDone,total:totalFridges,color:T.info,goto:"temps"});
-    if(cleanDone<cleanTotal)nowItems.push({icon:"🧹",title:"Nettoyage",done:cleanDone,total:cleanTotal,color:T.good,goto:"clean"});
-    upcomingItems.push({icon:"🏷️",title:"Étiquetage produits",goto:"labels"});
+    if(soirDone<totalFridges)nowItems.push({icon:"🌙",title:t("home_evening_readings",lang),done:soirDone,total:totalFridges,color:T.info,goto:"temps"});
+    if(cleanDone<cleanTotal)nowItems.push({icon:"🧹",title:t("home_cleaning",lang),done:cleanDone,total:cleanTotal,color:T.good,goto:"clean"});
+    upcomingItems.push({icon:"🏷️",title:t("home_product_labeling",lang),goto:"labels"});
   }
 
   const allClear=criticalAlerts.length===0&&activeCoolings.length===0&&nowItems.length===0;
@@ -1263,12 +1263,12 @@ function Aujourdhui({data,go,user,onVoiceOpen}){
       <div className="urgent-label"><span style={{fontSize:14}}>🚨</span>{criticalAlerts.length===1?"ALERTE CRITIQUE":`${criticalAlerts.length} ALERTES CRITIQUES`}</div>
       <div className="urgent-title">{criticalAlerts[0].title}</div>
       <div className="urgent-sub">{criticalAlerts[0].sub}</div>
-      <button className="urgent-cta" onClick={()=>go(criticalAlerts[0].goto)}>Traiter maintenant →</button>
+      <button className="urgent-cta" onClick={()=>go(criticalAlerts[0].goto)}>{t("home_handle_now",lang)}</button>
       {criticalAlerts.length>1&&<div style={{marginTop:10,fontSize:11,opacity:.8}}>+ {criticalAlerts.length-1} autre{criticalAlerts.length>2?"s":""} alerte{criticalAlerts.length>2?"s":""}</div>}
     </div>}
 
     {activeCoolings.length>0&&<>
-      <div className="bucket-label"><span className="bucket-label-dot" style={{background:T.warn}}></span>En cours</div>
+      <div className="bucket-label"><span className="bucket-label-dot" style={{background:T.warn}}></span>{t("home_ongoing",lang)}</div>
       {activeCoolings.map(c=>{
         const elMs=Date.now()-c.startedMs;const elMin=Math.floor(elMs/60000);const elSec=Math.floor((elMs%60000)/1000);
         const maxMs=Math.max(1,safeNum(data.haccpSettings.coolingMax,120))*60000;const pct=safePct(elMs,maxMs);
@@ -1283,7 +1283,7 @@ function Aujourdhui({data,go,user,onVoiceOpen}){
     </>}
 
     {nowItems.length>0&&<>
-      <div className="bucket-label" style={{marginTop:14}}><span className="bucket-label-dot" style={{background:T.accent}}></span>Maintenant</div>
+      <div className="bucket-label" style={{marginTop:14}}><span className="bucket-label-dot" style={{background:T.accent}}></span>{t("home_now",lang)}</div>
       {nowItems.map((it,i)=>(<div key={i} className="check-row" onClick={()=>go(it.goto)}>
         <div className="check-row-icon" style={{background:`${it.color}22`,color:it.color}}>{it.icon}</div>
         <div className="check-row-body"><div className="check-row-title">{it.title}</div>
@@ -1294,7 +1294,7 @@ function Aujourdhui({data,go,user,onVoiceOpen}){
     </>}
 
     {upcomingItems.length>0&&<>
-      <div className="bucket-label" style={{marginTop:14}}><span className="bucket-label-dot" style={{background:T.textMute}}></span>À venir</div>
+      <div className="bucket-label" style={{marginTop:14}}><span className="bucket-label-dot" style={{background:T.textMute}}></span>{t("home_upcoming",lang)}</div>
       {upcomingItems.map((it,i)=>(<div key={i} className="check-row" onClick={()=>go(it.goto)} style={{opacity:.75}}>
         <div className="check-row-icon" style={{background:T.bg3,color:T.textDim}}>{it.icon}</div>
         <div className="check-row-body"><div className="check-row-title">{it.title}</div><div className="check-row-progress">{it.sub||"À planifier"}</div></div>
@@ -1302,15 +1302,15 @@ function Aujourdhui({data,go,user,onVoiceOpen}){
       </div>))}
     </>}
 
-    {allClear&&<div className="empty"><div className="empty-icon">✓</div><div className="empty-title">Tout est sous contrôle</div><div className="empty-sub">Profitez d'un moment de calme</div></div>}
+    {allClear&&<div className="empty"><div className="empty-icon">✓</div><div className="empty-title">{t("home_all_clear_title",lang)}</div><div className="empty-sub">{t("home_all_clear_sub",lang)}</div></div>}
 
-    <div className="bucket-label" style={{marginTop:18}}><span className="bucket-label-dot" style={{background:T.textMute}}></span>Accès rapide</div>
+    <div className="bucket-label" style={{marginTop:18}}><span className="bucket-label-dot" style={{background:T.textMute}}></span>{t("home_quick_access",lang)}</div>
     <div className="tiles">
-      <div className="tile" onClick={()=>go("labels")}><div className="tile-icon">🏷️</div><div className="tile-label">Étiquetage</div><div className="tile-value tabular">{data.labels.length}</div></div>
-      <div className="tile" onClick={()=>go("temps")}><span className="tile-dot" style={{background:tempComplete?T.good:T.bad}}></span><div className="tile-icon">🌡️</div><div className="tile-label">Températures</div><div className="tile-value tabular">{matinDone+soirDone}/{totalFridges*2}</div></div>
-      <div className="tile" onClick={()=>go("trace")}><span className="tile-dot" style={{background:traceComplete?T.good:T.bad}}></span><div className="tile-icon">📦</div><div className="tile-label">Traçabilité</div><div className="tile-value tabular">{data.traceability.length}</div></div>
-      <div className="tile" onClick={()=>go("tasks")}><span className="tile-dot" style={{background:tasksComplete?T.good:T.bad}}></span><div className="tile-icon">✅</div><div className="tile-label">Mise en place</div><div className="tile-value tabular">{tasksDone}/{tasksTotal}</div></div>
-      <div className="tile" onClick={()=>go("clean")}><span className="tile-dot" style={{background:cleanComplete?T.good:T.bad}}></span><div className="tile-icon">🧹</div><div className="tile-label">Nettoyage</div><div className="tile-value tabular">{cleanDone}/{cleanTotal}</div></div>
+      <div className="tile" onClick={()=>go("labels")}><div className="tile-icon">🏷️</div><div className="tile-label">{t("home_tile_labeling",lang)}</div><div className="tile-value tabular">{data.labels.length}</div></div>
+      <div className="tile" onClick={()=>go("temps")}><span className="tile-dot" style={{background:tempComplete?T.good:T.bad}}></span><div className="tile-icon">🌡️</div><div className="tile-label">{t("home_tile_temps",lang)}</div><div className="tile-value tabular">{matinDone+soirDone}/{totalFridges*2}</div></div>
+      <div className="tile" onClick={()=>go("trace")}><span className="tile-dot" style={{background:traceComplete?T.good:T.bad}}></span><div className="tile-icon">📦</div><div className="tile-label">{t("home_tile_trace",lang)}</div><div className="tile-value tabular">{data.traceability.length}</div></div>
+      <div className="tile" onClick={()=>go("tasks")}><span className="tile-dot" style={{background:tasksComplete?T.good:T.bad}}></span><div className="tile-icon">✅</div><div className="tile-label">{t("home_tasks",lang)}</div><div className="tile-value tabular">{tasksDone}/{tasksTotal}</div></div>
+      <div className="tile" onClick={()=>go("clean")}><span className="tile-dot" style={{background:cleanComplete?T.good:T.bad}}></span><div className="tile-icon">🧹</div><div className="tile-label">{t("home_cleaning",lang)}</div><div className="tile-value tabular">{cleanDone}/{cleanTotal}</div></div>
     </div>
   </div>);
 }
@@ -2003,7 +2003,7 @@ function GbphHelpButton({section,go}){
   );
 }
 
-function HaccpHub({data,go}){
+function HaccpHub({data,go,lang}){
   const total=data.haccpSettings.fridgeTargets.length;
   const fridgesAlert=data.haccpSettings.fridgeTargets.filter(f=>{const m=getReleve(data,f.id,"matin"),s=getReleve(data,f.id,"soir");return(m&&tempStatus(m.temp,f.target)==="bad")||(s&&tempStatus(s.temp,f.target)==="bad");}).length;
   const cleanOk=data.cleaning.filter(c=>c.done).length;
@@ -2012,24 +2012,24 @@ function HaccpHub({data,go}){
   const coolAlert=data.cooling.filter(c=>c.status==="alert").length;
   const trAlert=data.training.filter(t=>new Date(t.haccpExp.split("/").reverse().join("-"))<new Date()).length;
   const groups=[
-    {title:"Contrôles quotidiens",items:[
-      {key:"temps",icon:"🌡️",bg:T.infoBg,title:"Températures",sub:"Matin et soir, par frigo",badge:fridgesAlert>0?{l:`${fridgesAlert} hors norme`,c:"b-bad"}:{l:"OK",c:"b-good"}},
-      {key:"reception",icon:"🚚",bg:T.infoBg,title:"Réception",sub:"Contrôle livraisons",badge:{l:`${data.reception.length} fiches`,c:"b-info"}},
-      {key:"cooling",icon:"❄️",bg:T.infoBg,title:"Cellule",sub:"Refroidissement & surgélation",badge:coolAlert>0?{l:`${coolAlert} alerte`,c:"b-bad"}:{l:"OK",c:"b-good"}},
-      {key:"reheating",icon:"🔥",bg:T.warnBg,title:"Remise en température",sub:"≥ 63°C en moins d'1h",badge:{l:"Suivi",c:"b-mute"}},
-      {key:"oils",icon:"🍟",bg:T.warnBg,title:"Huiles de friture",sub:"Composés polaires < 25%",badge:oilAlert>0?{l:"À changer",c:"b-bad"}:{l:"OK",c:"b-good"}},
+    {title:t("haccp_group_daily",lang),items:[
+      {key:"temps",icon:"🌡️",bg:T.infoBg,title:t("temp_title",lang),sub:t("temp_hub_sub",lang),badge:fridgesAlert>0?{l:`${fridgesAlert} hors norme`,c:"b-bad"}:{l:"OK",c:"b-good"}},
+      {key:"reception",icon:"🚚",bg:T.infoBg,title:t("recv_title",lang),sub:t("recv_hub_sub",lang),badge:{l:`${data.reception.length} fiches`,c:"b-info"}},
+      {key:"cooling",icon:"❄️",bg:T.infoBg,title:t("cool_title",lang),sub:t("cool_subtitle",lang),badge:coolAlert>0?{l:`${coolAlert} alerte`,c:"b-bad"}:{l:"OK",c:"b-good"}},
+      {key:"reheating",icon:"🔥",bg:T.warnBg,title:t("reheat_title",lang),sub:t("reheat_hub_sub",lang),badge:{l:"Suivi",c:"b-mute"}},
+      {key:"oils",icon:"🍟",bg:T.warnBg,title:t("oils_title",lang),sub:t("oils_subtitle",lang),badge:oilAlert>0?{l:"À changer",c:"b-bad"}:{l:"OK",c:"b-good"}},
     ]},
-    {title:"Traçabilité",items:[
-      {key:"trace",icon:"📦",bg:T.warnBg,title:"Traçabilité produits",sub:`${data.traceability.length} produits`,badge:alerts>0?{l:`${alerts} alerte`,c:"b-bad"}:{l:"OK",c:"b-good"}},
-      {key:"labels",icon:"🏷️",bg:T.goodBg,title:"Étiquetage Brother",sub:"Impression DLC + allergènes",badge:{l:`${data.labels.length}`,c:"b-info"}},
+    {title:t("haccp_group_trace",lang),items:[
+      {key:"trace",icon:"📦",bg:T.warnBg,title:t("trace_title",lang),sub:`${data.traceability.length} produits`,badge:alerts>0?{l:`${alerts} alerte`,c:"b-bad"}:{l:"OK",c:"b-good"}},
+      {key:"labels",icon:"🏷️",bg:T.goodBg,title:t("label_title",lang),sub:t("label_hub_sub",lang),badge:{l:`${data.labels.length}`,c:"b-info"}},
     ]},
-    {title:"Hygiène et personnel",items:[
-      {key:"clean",icon:"🧹",bg:T.goodBg,title:"Nettoyage",sub:`${cleanOk}/${data.cleaning.length} zones`,badge:cleanOk===data.cleaning.length?{l:"Terminé",c:"b-good"}:{l:"En cours",c:"b-warn"}},
-      {key:"pests",icon:"🐀",bg:T.badBg,title:"Nuisibles",sub:"Visites et contrôles",badge:{l:"À jour",c:"b-good"}},
-      {key:"training",icon:"🎓",bg:T.infoBg,title:"Formation HACCP",sub:"Attestations",badge:trAlert>0?{l:`${trAlert} expiré`,c:"b-bad"}:{l:"OK",c:"b-good"}},
+    {title:t("haccp_group_hygiene",lang),items:[
+      {key:"clean",icon:"🧹",bg:T.goodBg,title:t("clean_title",lang),sub:`${cleanOk}/${data.cleaning.length} zones`,badge:cleanOk===data.cleaning.length?{l:"Terminé",c:"b-good"}:{l:"En cours",c:"b-warn"}},
+      {key:"pests",icon:"🐀",bg:T.badBg,title:t("pest_title",lang),sub:t("pest_hub_sub",lang),badge:{l:"À jour",c:"b-good"}},
+      {key:"training",icon:"🎓",bg:T.infoBg,title:t("train_title",lang),sub:t("train_hub_sub",lang),badge:trAlert>0?{l:`${trAlert} expiré`,c:"b-bad"}:{l:"OK",c:"b-good"}},
     ]},
   ];
-  return(<div className="page"><div className="section-title">HACCP</div><div className="section-sub">Plan de Maîtrise Sanitaire</div>
+  return(<div className="page"><div className="section-title">{t("haccp_hub_title",lang)}</div><div className="section-sub">{t("haccp_hub_subtitle",lang)}</div>
     <div className="item" onClick={()=>go("registre")} style={{background:"linear-gradient(135deg,#1A1A1A,#242424)",border:"1px solid #FF6B00",marginBottom:10}}>
       <div className="item-icon" style={{background:"linear-gradient(135deg,#FF6B00,#E8390A)"}}>📋</div>
       <div className="item-body"><div className="item-title">Registre HACCP</div><div className="item-sub">Historique complet, filtres, export PDF</div></div>
@@ -2212,42 +2212,48 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite,lang}){
       {step===0&&<><div className="sheet-title">{t("cool_new",lang)}</div>
         <div className="text-sm text-dim center mb14">{t("cool_which_operation",lang)}</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:8}}>
-          {Object.values(CELL_MODES).map(cm=>(
-            <button key={cm.key} onClick={()=>{haptic.light();setMode(cm.key);setEndTemp(cm.endCenter);setStep(1);}}
-              style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,padding:"22px 10px",borderRadius:16,border:`1.5px solid ${T.border}`,background:T.bg2,color:T.text,cursor:"pointer"}}>
-              <span style={{fontSize:34}}>{cm.icon}</span>
-              <span style={{fontSize:14,fontWeight:800}}>{cm.label}</span>
-              <span style={{fontSize:10.5,color:T.textDim,textAlign:"center",lineHeight:1.2}}>{cm.sub}</span>
-            </button>
-          ))}
+          {Object.values(CELL_MODES).map(cm=>{
+            // CELL_MODES est une constante hors composant : on traduit ici,
+            // au rendu, comme pour CLEAN_FREQS.
+            const lbl = cm.key==="refroid" ? t("cool_mode_refroid",lang) : t("cool_mode_surgel",lang);
+            const sb = cm.key==="refroid" ? t("cool_mode_refroid_sub",lang) : t("cool_mode_surgel_sub",lang);
+            return (
+              <button key={cm.key} onClick={()=>{haptic.light();setMode(cm.key);setEndTemp(cm.endCenter);setStep(1);}}
+                style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,padding:"22px 10px",borderRadius:16,border:`1.5px solid ${T.border}`,background:T.bg2,color:T.text,cursor:"pointer"}}>
+                <span style={{fontSize:34}}>{cm.icon}</span>
+                <span style={{fontSize:14,fontWeight:800}}>{lbl}</span>
+                <span style={{fontSize:10.5,color:T.textDim,textAlign:"center",lineHeight:1.2}}>{sb}</span>
+              </button>
+            );
+          })}
         </div></>}
-      {step===1&&<><div className="sheet-title">{M.icon} {M.label}</div>
-        <div className="text-xs text-dim center mb12">{M.sub}{M.dlcMonths?` · DLC +${M.dlcMonths} mois`:""}</div>
+      {step===1&&<><div className="sheet-title">{M.icon} {mode==="refroid"?t("cool_mode_refroid",lang):t("cool_mode_surgel",lang)}</div>
+        <div className="text-xs text-dim center mb12">{mode==="refroid"?t("cool_mode_refroid_sub",lang):t("cool_mode_surgel_sub",lang)}{M.dlcMonths?` · DLC +${M.dlcMonths} mois`:""}</div>
         <div className="field"><label className="label">{t("cool_product",lang)}</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})}/></div>
         <div className="field"><label className="label">{t("cool_qty",lang)}</label><input className="input" value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})}/></div>
         <div className="field"><label className="label">{t("cool_start_temp",lang)}</label><TapDial value={startTemp} onChange={setStartTemp} center={65} step={2} colorFn={v=>v>=63?"good":"warn"}/></div>
         <div className="row gap8"><button className="btn btn-ghost" style={{flex:"0 0 auto",width:52}} onClick={()=>setStep(0)}>←</button><button className="btn btn-primary" style={{flex:1}} onClick={start} disabled={!form.product}>{t("cool_start_timer",lang)}</button></div></>}
       {step===2&&<><div className="sheet-title center">{form.product}</div>
-        <div className="text-sm text-dim center mb6">Départ : {startTemp}°C · Limite : {maxMin} min</div>
+        <div className="text-sm text-dim center mb6">{t("cool_departure",lang)} : {startTemp}°C · {t("cool_limit",lang)} : {maxMin} min</div>
         <div className="timer-display tabular" style={{color:overtime?T.bad:elapsed>maxMin*60*.75?T.warn:T.text}}>{fmt(elapsed)}</div>
-        <div className="center mb12"><span style={{fontSize:12,fontWeight:600,color:overtime?T.bad:elapsed>maxMin*60*.75?T.warn:T.good}}>{overtime?"⚠ Limite dépassée":elapsed>maxMin*60*.75?"⚠ Bientôt la limite":"✓ Dans les temps"}</span></div>
+        <div className="center mb12"><span style={{fontSize:12,fontWeight:600,color:overtime?T.bad:elapsed>maxMin*60*.75?T.warn:T.good}}>{overtime?t("cool_over_limit",lang):elapsed>maxMin*60*.75?t("cool_near_limit",lang):t("cool_on_time",lang)}</span></div>
         <div className="pbar mb12"><div className="pfill" style={{width:`${progress}%`,background:overtime?T.bad:elapsed>maxMin*60*.75?T.warn:T.good}}></div></div>
         <button className="btn btn-primary" onClick={()=>setStep(3)}>{t("cool_read_final",lang)}</button></>}
       {step===3&&<><div className="sheet-title">{t("cool_final_temp",lang)}</div>
-        <div className="text-sm text-dim mb12">Durée : <b style={{color:T.text}}>{Math.floor(elapsed/60)} min</b></div>
+        <div className="text-sm text-dim mb12">{t("cool_duration",lang)} : <b style={{color:T.text}}>{Math.floor(elapsed/60)} min</b></div>
         {mode==="surgel"
-          ? <div className="field"><label className="label">T° à cœur — cible ≤ −18°C</label><TapDial value={endTemp} onChange={setEndTemp} center={-18} step={2} colorFn={v=>v<=-18?"good":"bad"}/></div>
-          : <div className="field"><label className="label">T° à cœur — cible ≤ 10°C</label><TapDial value={endTemp} onChange={setEndTemp} center={8} colorFn={v=>v<=10?"good":"bad"}/></div>}
-        {mode==="surgel"&&endTemp>-18&&<div className="banner banner-bad mb12"><span>⚠️</span><div><b>Non conforme.</b> Poursuivre la surgélation.</div></div>}
-        {mode==="surgel"&&endTemp<=-18&&<div className="banner banner-good mb12"><span>✓</span><div><b>Conforme.</b> Surgelé · DLC +6 mois.</div></div>}
-        {mode==="refroid"&&endTemp>10&&<div className="banner banner-bad mb12"><span>⚠️</span><div><b>Non conforme.</b> Remettre en cuisson ou jeter.</div></div>}
-        {mode==="refroid"&&endTemp<=10&&elapsed<=maxMin*60&&<div className="banner banner-good mb12"><span>✓</span><div><b>Conforme.</b> DLC J+{data.haccpSettings.labelDlcDefault}.</div></div>}
-        <button className="btn btn-primary" onClick={finish}>Enregistrer</button></>}
+          ? <div className="field"><label className="label">{t("cool_core_temp_surgel",lang)}</label><TapDial value={endTemp} onChange={setEndTemp} center={-18} step={2} colorFn={v=>v<=-18?"good":"bad"}/></div>
+          : <div className="field"><label className="label">{t("cool_core_temp_refroid",lang)}</label><TapDial value={endTemp} onChange={setEndTemp} center={8} colorFn={v=>v<=10?"good":"bad"}/></div>}
+        {mode==="surgel"&&endTemp>-18&&<div className="banner banner-bad mb12"><span>⚠️</span><div><b>{t("cool_nonconform",lang)}</b> {t("cool_continue_freezing",lang)}</div></div>}
+        {mode==="surgel"&&endTemp<=-18&&<div className="banner banner-good mb12"><span>✓</span><div><b>{t("cool_conform",lang)}</b> {t("cool_frozen_dlc",lang)}</div></div>}
+        {mode==="refroid"&&endTemp>10&&<div className="banner banner-bad mb12"><span>⚠️</span><div><b>{t("cool_nonconform",lang)}</b> {t("cool_recook_discard",lang)}</div></div>}
+        {mode==="refroid"&&endTemp<=10&&elapsed<=maxMin*60&&<div className="banner banner-good mb12"><span>✓</span><div><b>{t("cool_conform",lang)}</b> {t("cool_dlc_j",lang)}{data.haccpSettings.labelDlcDefault}.</div></div>}
+        <button className="btn btn-primary" onClick={finish}>{t("cool_save",lang)}</button></>}
     </div></div>}
   </div>);
 }
 
-function Reheating({data,setData,user,db,reload,go,markLocalWrite}){
+function Reheating({data,setData,user,db,reload,go,markLocalWrite,lang}){
   const[show,setShow]=useState(false);const[form,setForm]=useState({product:""});const[endTemp,setEndTemp]=useState(65);const[duration,setDuration]=useState(30);
   const{reheatMin,reheatMaxTime}=data.haccpSettings;
   async function save(){
@@ -2261,20 +2267,20 @@ function Reheating({data,setData,user,db,reload,go,markLocalWrite}){
   }
   return(<div className="page">
     <GbphHelpButton section="temp" go={go}/>
-    <div className="section-title">Remise en T°</div><div className="section-sub">≥ {reheatMin}°C en moins de {reheatMaxTime} min</div>
-    {data.reheating.length===0 && <div className="empty"><div className="empty-icon">🔥</div><div className="empty-title">Aucune remise en température</div><div className="empty-sub">Enregistre ta prochaine remise en T° avec le bouton +</div></div>}
+    <div className="section-title">{t("reheat_title",lang)}</div><div className="section-sub">≥ {reheatMin}°C en moins de {reheatMaxTime} min</div>
+    {data.reheating.length===0 && <div className="empty"><div className="empty-icon">🔥</div><div className="empty-title">{t("reheat_empty_title",lang)}</div><div className="empty-sub">{t("reheat_empty_sub",lang)}</div></div>}
     {data.reheating.map(r=><div key={r.id} className="card">
       <div className="between mb6"><div><div className="item-title">{r.product}</div><div className="item-sub">{r.date} · {r.operator}</div></div><span className={`badge ${r.status==="ok"?"b-good":"b-bad"}`}>{r.status==="ok"?"✓":"⚠"}</span></div>
-      <div className="row gap12" style={{flexWrap:"wrap"}}><div><div className="text-xs text-dim">T° finale</div><div className="text-sm fw7 tabular" style={{color:r.endTemp>=reheatMin?T.good:T.bad}}>{r.endTemp}°C</div></div><div><div className="text-xs text-dim">Durée</div><div className="text-sm fw7 tabular" style={{color:r.duration<=reheatMaxTime?T.good:T.bad}}>{r.duration} min</div></div></div>
+      <div className="row gap12" style={{flexWrap:"wrap"}}><div><div className="text-xs text-dim">{t("reheat_final_temp",lang)}</div><div className="text-sm fw7 tabular" style={{color:r.endTemp>=reheatMin?T.good:T.bad}}>{r.endTemp}°C</div></div><div><div className="text-xs text-dim">{t("reheat_duration",lang)}</div><div className="text-sm fw7 tabular" style={{color:r.duration<=reheatMaxTime?T.good:T.bad}}>{r.duration} min</div></div></div>
     </div>)}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
-      <div className="sheet-handle"></div><div className="sheet-title">Remise en température</div>
-      <div className="field"><label className="label">Produit</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})}/></div>
-      <div className="field"><label className="label">T° finale à cœur</label><TapDial value={endTemp} onChange={setEndTemp} center={65} colorFn={v=>v>=reheatMin?"good":"bad"}/></div>
-      <div className="field"><label className="label">Durée (minutes)</label><TapDial value={duration} onChange={setDuration} center={30} step={5} colorFn={v=>v<=reheatMaxTime?"good":"bad"} format={v=>`${v}'`}/></div>
-      {endTemp>=reheatMin&&duration<=reheatMaxTime&&<div className="banner banner-good mb8"><span>✓</span><div><b>Conforme.</b></div></div>}
-      <button className="btn btn-primary mt8" onClick={save} disabled={!form.product}>Enregistrer</button>
+      <div className="sheet-handle"></div><div className="sheet-title">{t("reheat_new",lang)}</div>
+      <div className="field"><label className="label">{t("reheat_product",lang)}</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})}/></div>
+      <div className="field"><label className="label">{t("reheat_core_temp",lang)}</label><TapDial value={endTemp} onChange={setEndTemp} center={65} colorFn={v=>v>=reheatMin?"good":"bad"}/></div>
+      <div className="field"><label className="label">{t("reheat_duration_min",lang)}</label><TapDial value={duration} onChange={setDuration} center={30} step={5} colorFn={v=>v<=reheatMaxTime?"good":"bad"} format={v=>`${v}'`}/></div>
+      {endTemp>=reheatMin&&duration<=reheatMaxTime&&<div className="banner banner-good mb8"><span>✓</span><div><b>{t("reheat_conform",lang)}</b></div></div>}
+      <button className="btn btn-primary mt8" onClick={save} disabled={!form.product}>{t("reheat_save",lang)}</button>
     </div></div>}
   </div>);
 }
@@ -3346,38 +3352,38 @@ function Training({data,setData,go,db,reload,markLocalWrite,user,lang}){
   </div>);
 }
 
-function RecipeDetail({recipe,allRecipes,onBack,onEdit}){
+function RecipeDetail({recipe,allRecipes,onBack,onEdit,lang}){
   const[mult,setMult]=useState(1);
   const cost=recipeTotalCost(recipe,allRecipes);
   const costPerPortion=recipeCostPerPortion(recipe,allRecipes);
   const m=recipeMargin(recipe,allRecipes);
   const allergens=recipeAllergens(recipe,allRecipes);
   const usedIn=recipe.type==="mere"?findUsedIn(recipe.id,allRecipes):[];
-  return(<div className="page"><button className="btn btn-ghost mb14" onClick={onBack}>← Retour</button>
-    <div className="card"><div style={{fontSize:42,textAlign:"center",marginBottom:8}}>{recipe.emoji}</div><div className="center" style={{fontFamily:"'Inter',sans-serif",letterSpacing:"-.03em",fontSize:22,fontWeight:600,color:T.text}}>{recipe.name}</div><div className="center text-xs text-dim mb14">{recipe.type==="mere"?`🧪 Préparation · Rendement ${recipe.yield.qty} ${recipe.yield.unit}`:`${recipe.category} · ${recipe.portions} portion${recipe.portions>1?"s":""}`}</div>
+  return(<div className="page"><button className="btn btn-ghost mb14" onClick={onBack}>{t("rdet_back",lang)}</button>
+    <div className="card"><div style={{fontSize:42,textAlign:"center",marginBottom:8}}>{recipe.emoji}</div><div className="center" style={{fontFamily:"'Inter',sans-serif",letterSpacing:"-.03em",fontSize:22,fontWeight:600,color:T.text}}>{recipe.name}</div><div className="center text-xs text-dim mb14">{recipe.type==="mere"?`🧪 ${t("rdet_prep",lang)} · ${t("rdet_yield",lang)} ${recipe.yield.qty} ${recipe.yield.unit}`:`${recipe.category} · ${recipe.portions} portion${recipe.portions>1?"s":""}`}</div>
       <div className="tiles">
-        {recipe.type==="plat"&&<div style={{background:T.infoBg,padding:12,borderRadius:10,textAlign:"center"}}><div className="text-xs text-dim mb6">PRIX</div><div className="tabular" style={{fontFamily:"'Inter',sans-serif",letterSpacing:"-.03em",fontSize:24,fontWeight:700,color:T.info}}>{recipe.price} €</div></div>}
-        <div style={{background:m>=70?T.goodBg:T.infoBg,padding:12,borderRadius:10,textAlign:"center"}}><div className="text-xs text-dim mb6">COÛT {recipe.type==="mere"?"TOTAL":"/ PORTION"}</div><div className="tabular" style={{fontFamily:"'Inter',sans-serif",letterSpacing:"-.03em",fontSize:24,fontWeight:700,color:T.text}}>{recipe.type==="mere"?cost.toFixed(2):costPerPortion.toFixed(2)} €</div></div>
-        {recipe.type==="plat"&&<div style={{background:m>=70?T.goodBg:T.infoBg,padding:12,borderRadius:10,textAlign:"center"}}><div className="text-xs text-dim mb6">MARGE</div><div className="tabular" style={{fontFamily:"'Inter',sans-serif",letterSpacing:"-.03em",fontSize:24,fontWeight:700,color:m>=70?T.good:T.info}}>{m}%</div></div>}
+        {recipe.type==="plat"&&<div style={{background:T.infoBg,padding:12,borderRadius:10,textAlign:"center"}}><div className="text-xs text-dim mb6">{t("rdet_price",lang)}</div><div className="tabular" style={{fontFamily:"'Inter',sans-serif",letterSpacing:"-.03em",fontSize:24,fontWeight:700,color:T.info}}>{recipe.price} €</div></div>}
+        <div style={{background:m>=70?T.goodBg:T.infoBg,padding:12,borderRadius:10,textAlign:"center"}}><div className="text-xs text-dim mb6">{recipe.type==="mere"?t("rdet_cost_total",lang):t("rdet_cost_portion",lang)}</div><div className="tabular" style={{fontFamily:"'Inter',sans-serif",letterSpacing:"-.03em",fontSize:24,fontWeight:700,color:T.text}}>{recipe.type==="mere"?cost.toFixed(2):costPerPortion.toFixed(2)} €</div></div>
+        {recipe.type==="plat"&&<div style={{background:m>=70?T.goodBg:T.infoBg,padding:12,borderRadius:10,textAlign:"center"}}><div className="text-xs text-dim mb6">{t("rdet_margin",lang)}</div><div className="tabular" style={{fontFamily:"'Inter',sans-serif",letterSpacing:"-.03em",fontSize:24,fontWeight:700,color:m>=70?T.good:T.info}}>{m}%</div></div>}
       </div>
     </div>
-    <div className="card"><div className="bucket-label mb8">Mode production</div>
-      <div className="mult-row"><span className="mult-label">Multiplier ×</span><button className="mult-btn" onClick={()=>setMult(Math.max(.5,mult-.5))}>−</button><div className="mult-val tabular">{mult}</div><button className="mult-btn" onClick={()=>setMult(mult+.5)}>+</button></div>
+    <div className="card"><div className="bucket-label mb8">{t("rdet_production_mode",lang)}</div>
+      <div className="mult-row"><span className="mult-label">{t("rdet_multiply",lang)}</span><button className="mult-btn" onClick={()=>setMult(Math.max(.5,mult-.5))}>−</button><div className="mult-val tabular">{mult}</div><button className="mult-btn" onClick={()=>setMult(mult+.5)}>+</button></div>
       <div className="chips mt8">{[1,2,3,5,10,20].map(v=><button key={v} className={`chip ${mult===v?"sel":""}`} onClick={()=>setMult(v)}>×{v}</button>)}</div>
       {recipe.type==="plat"&&<div className="text-xs text-dim mt8 center">→ <b style={{color:T.text}}>{recipe.portions*mult} portion{recipe.portions*mult>1?"s":""}</b> · Coût : <b style={{color:T.text}}>{(cost*mult).toFixed(2)} €</b></div>}
       {recipe.type==="mere"&&<div className="text-xs text-dim mt8 center">→ <b style={{color:T.text}}>{recipe.yield.qty*mult} {recipe.yield.unit}</b> · Coût : <b style={{color:T.text}}>{(cost*mult).toFixed(2)} €</b></div>}
     </div>
-    <div className="card"><div className="bucket-label mb8">Ingrédients</div>
-      {recipe.components.map((c,i)=>{const isLast=i===recipe.components.length-1;if(c.kind==="ingredient")return(<div key={i} className="between" style={{padding:"9px 0",borderBottom:isLast?"none":`1px solid ${T.border}`}}><span style={{fontSize:13,color:T.text}}>{c.item}</span><span className="text-xs text-dim tabular">{(c.qty*mult).toFixed(c.qty<10?1:0)} {c.unit} · {(c.cost*mult).toFixed(2)} €</span></div>);const sub=allRecipes.find(r=>r.id===c.subrecipeId);if(!sub)return null;const subUnitCost=recipeTotalCost(sub,allRecipes)/Math.max(1,safeNum(sub.yield?.qty,1));return(<div key={i} className="between" style={{padding:"9px 0",borderBottom:isLast?"none":`1px solid ${T.border}`}}><span style={{fontSize:13,color:T.text}}><span style={{color:T.warn}}>🧪</span> {sub.name} <span className="text-xs text-dim">(recette)</span></span><span className="text-xs text-dim tabular">{(c.qty*mult).toFixed(c.qty<10?1:0)} {c.unit} · {(c.qty*mult*subUnitCost).toFixed(2)} €</span></div>);})}
+    <div className="card"><div className="bucket-label mb8">{t("rdet_ingredients",lang)}</div>
+      {recipe.components.map((c,i)=>{const isLast=i===recipe.components.length-1;if(c.kind==="ingredient")return(<div key={i} className="between" style={{padding:"9px 0",borderBottom:isLast?"none":`1px solid ${T.border}`}}><span style={{fontSize:13,color:T.text}}>{c.item}</span><span className="text-xs text-dim tabular">{(c.qty*mult).toFixed(c.qty<10?1:0)} {c.unit} · {(c.cost*mult).toFixed(2)} €</span></div>);const sub=allRecipes.find(r=>r.id===c.subrecipeId);if(!sub)return null;const subUnitCost=recipeTotalCost(sub,allRecipes)/Math.max(1,safeNum(sub.yield?.qty,1));return(<div key={i} className="between" style={{padding:"9px 0",borderBottom:isLast?"none":`1px solid ${T.border}`}}><span style={{fontSize:13,color:T.text}}><span style={{color:T.warn}}>🧪</span> {sub.name} <span className="text-xs text-dim">{t("rdet_recipe_tag",lang)}</span></span><span className="text-xs text-dim tabular">{(c.qty*mult).toFixed(c.qty<10?1:0)} {c.unit} · {(c.qty*mult*subUnitCost).toFixed(2)} €</span></div>);})}
     </div>
-    <div className="card"><div className="bucket-label mb8">Préparation</div>{recipe.steps.map((s,i)=><div key={i} className="row gap10 mb8"><div className="step-num">{i+1}</div><div style={{fontSize:13,paddingTop:4,color:T.text}}>{s}</div></div>)}</div>
-    <div className="card"><div className="bucket-label mb8">Allergènes</div>{allergens.length===0?<span className="badge b-mute">Aucun</span>:<div className="row gap6" style={{flexWrap:"wrap"}}>{allergens.map(a=><span key={a} className="badge b-warn">{a}</span>)}</div>}</div>
-    {recipe.type==="mere"&&usedIn.length>0&&<div className="card"><div className="bucket-label mb8">Utilisée dans</div>{usedIn.map(r=><div key={r.id} className="row gap8 mb6"><span style={{fontSize:16}}>{r.emoji}</span><span style={{fontSize:13,color:T.text}}>{r.name}</span></div>)}</div>}
-    <button className="btn btn-ghost mt8" onClick={onEdit}>✏️ Modifier</button>
+    <div className="card"><div className="bucket-label mb8">{t("rdet_preparation",lang)}</div>{recipe.steps.map((s,i)=><div key={i} className="row gap10 mb8"><div className="step-num">{i+1}</div><div style={{fontSize:13,paddingTop:4,color:T.text}}>{s}</div></div>)}</div>
+    <div className="card"><div className="bucket-label mb8">{t("rdet_allergens",lang)}</div>{allergens.length===0?<span className="badge b-mute">{t("rdet_none",lang)}</span>:<div className="row gap6" style={{flexWrap:"wrap"}}>{allergens.map(a=><span key={a} className="badge b-warn">{a}</span>)}</div>}</div>
+    {recipe.type==="mere"&&usedIn.length>0&&<div className="card"><div className="bucket-label mb8">{t("rdet_used_in",lang)}</div>{usedIn.map(r=><div key={r.id} className="row gap8 mb6"><span style={{fontSize:16}}>{r.emoji}</span><span style={{fontSize:13,color:T.text}}>{r.name}</span></div>)}</div>}
+    <button className="btn btn-ghost mt8" onClick={onEdit}>{t("rdet_edit",lang)}</button>
   </div>);
 }
 
-function RecipeEditor({recipe,allRecipes,products=[],defaultType="plat",onSave,onCancel}){
+function RecipeEditor({recipe,allRecipes,products=[],defaultType="plat",onSave,onCancel,lang}){
   const isEditing=!!recipe;
   const[type,setType]=useState(recipe?.type||defaultType);
   const[name,setName]=useState(recipe?.name||"");
@@ -3423,20 +3429,20 @@ function RecipeEditor({recipe,allRecipes,products=[],defaultType="plat",onSave,o
   const preview={components:normForPreview,type,price:parseFloat(price)||0,portions:parseInt(portions)||1,yield:{qty:parseFloat(yieldQty)||1,unit:yieldUnit},allergens:[],id:-1};
   const previewCost=recipeCostPerPortion(preview,allRecipes);
   const previewMargin=type==="plat"&&price?Math.round(((parseFloat(price)-previewCost)/parseFloat(price))*100):null;
-  return(<div className="page"><div className="between mb14"><button className="btn btn-ghost btn-sm" style={{width:"auto"}} onClick={onCancel}>← Annuler</button><button className="btn btn-primary btn-sm" style={{width:"auto"}} onClick={save}>✓ {isEditing?"Mettre à jour":"Créer"}</button></div>
-    <div className="section-title">{isEditing?"Modifier":"Nouvelle recette"}</div><div className="section-sub">Coûts calculés automatiquement</div>
+  return(<div className="page"><div className="between mb14"><button className="btn btn-ghost btn-sm" style={{width:"auto"}} onClick={onCancel}>{t("redit_cancel",lang)}</button><button className="btn btn-primary btn-sm" style={{width:"auto"}} onClick={save}>✓ {isEditing?t("redit_update",lang):t("redit_create",lang)}</button></div>
+    <div className="section-title">{isEditing?t("redit_title_edit",lang):t("redit_title_new",lang)}</div><div className="section-sub">{t("redit_subtitle",lang)}</div>
     <div className="card">
-      <div className="field"><label className="label">Type</label><SegmentedControl value={type} onChange={setType} options={[{value:"plat",label:"🍽️ Plat"},{value:"mere",label:"🧪 Préparation"}]}/></div>
-      <div className="row gap8"><div style={{flex:0}}><label className="label">Icône</label><input className="input input-sm" style={{width:60,textAlign:"center"}} value={emoji} onChange={e=>setEmoji(e.target.value)} maxLength={2}/></div><div style={{flex:1}}><label className="label">Nom</label><input className="input input-sm" value={name} onChange={e=>setName(e.target.value)}/></div></div>
+      <div className="field"><label className="label">{t("redit_type",lang)}</label><SegmentedControl value={type} onChange={setType} options={[{value:"plat",label:t("redit_type_dish",lang)},{value:"mere",label:t("redit_type_prep",lang)}]}/></div>
+      <div className="row gap8"><div style={{flex:0}}><label className="label">{t("redit_icon",lang)}</label><input className="input input-sm" style={{width:60,textAlign:"center"}} value={emoji} onChange={e=>setEmoji(e.target.value)} maxLength={2}/></div><div style={{flex:1}}><label className="label">{t("redit_name",lang)}</label><input className="input input-sm" value={name} onChange={e=>setName(e.target.value)}/></div></div>
       <div style={{height:14}}></div>
-      <div className="field"><label className="label">Catégorie</label><input className="input input-sm" value={category} onChange={e=>setCategory(e.target.value)} placeholder={type==="plat"?"ex : Côté Mer":"ex : Bases"}/></div>
-      {type==="plat"?<div className="row gap8"><div style={{flex:1}}><label className="label">Prix (€)</label><input className="input input-sm" type="number" step="0.5" value={price} onChange={e=>setPrice(e.target.value)}/></div><div style={{flex:1}}><label className="label">Portions</label><input className="input input-sm" type="number" value={portions} onChange={e=>setPortions(e.target.value)}/></div></div>:<div className="row gap8"><div style={{flex:1}}><label className="label">Rendement</label><input className="input input-sm" type="number" value={yieldQty} onChange={e=>setYieldQty(e.target.value)}/></div><div style={{flex:0,width:80}}><label className="label">Unité</label><select className="input input-sm" value={yieldUnit} onChange={e=>setYieldUnit(e.target.value)}><option>ml</option><option>L</option><option>g</option><option>kg</option><option>pce</option></select></div></div>}
+      <div className="field"><label className="label">{t("redit_category",lang)}</label><input className="input input-sm" value={category} onChange={e=>setCategory(e.target.value)} placeholder={type==="plat"?"ex : Côté Mer":"ex : Bases"}/></div>
+      {type==="plat"?<div className="row gap8"><div style={{flex:1}}><label className="label">{t("redit_price",lang)}</label><input className="input input-sm" type="number" step="0.5" value={price} onChange={e=>setPrice(e.target.value)}/></div><div style={{flex:1}}><label className="label">{t("redit_portions",lang)}</label><input className="input input-sm" type="number" value={portions} onChange={e=>setPortions(e.target.value)}/></div></div>:<div className="row gap8"><div style={{flex:1}}><label className="label">{t("redit_yield",lang)}</label><input className="input input-sm" type="number" value={yieldQty} onChange={e=>setYieldQty(e.target.value)}/></div><div style={{flex:0,width:80}}><label className="label">{t("redit_unit",lang)}</label><select className="input input-sm" value={yieldUnit} onChange={e=>setYieldUnit(e.target.value)}><option>ml</option><option>L</option><option>g</option><option>kg</option><option>pce</option></select></div></div>}
     </div>
-    <div className="card" style={{background:T.bg3}}><div className="bucket-label mb8">Aperçu coûts</div>
-      <div className="row gap12" style={{flexWrap:"wrap"}}>{type==="plat"?<><div><div className="text-xs text-dim">Coût/portion</div><div className="fw7 tabular" style={{color:T.text}}>{previewCost.toFixed(2)} €</div></div>{price&&<div><div className="text-xs text-dim">Marge</div><div className="fw7 tabular" style={{color:previewMargin>=70?T.good:previewMargin>=50?T.info:T.bad}}>{previewMargin}%</div></div>}</>:<><div><div className="text-xs text-dim">Coût total</div><div className="fw7 tabular" style={{color:T.text}}>{normForPreview.reduce((a,c)=>a+(c.cost||0),0).toFixed(2)} €</div></div></>}</div>
+    <div className="card" style={{background:T.bg3}}><div className="bucket-label mb8">{t("redit_cost_preview",lang)}</div>
+      <div className="row gap12" style={{flexWrap:"wrap"}}>{type==="plat"?<><div><div className="text-xs text-dim">{t("redit_cost_per_portion",lang)}</div><div className="fw7 tabular" style={{color:T.text}}>{previewCost.toFixed(2)} €</div></div>{price&&<div><div className="text-xs text-dim">{t("redit_margin",lang)}</div><div className="fw7 tabular" style={{color:previewMargin>=70?T.good:previewMargin>=50?T.info:T.bad}}>{previewMargin}%</div></div>}</>:<><div><div className="text-xs text-dim">{t("redit_total_cost",lang)}</div><div className="fw7 tabular" style={{color:T.text}}>{normForPreview.reduce((a,c)=>a+(c.cost||0),0).toFixed(2)} €</div></div></>}</div>
     </div>
-    <div className="card"><div className="between mb8"><div className="bucket-label">Ingrédients</div><div className="row gap6"><button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={addIngredient}>+ Ingrédient</button>{otherRecipes.length>0&&<button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={addSubrecipe}>+ 🧪 Prépa</button>}</div></div>
-      {components.length===0&&<div className="text-xs text-dim center" style={{padding:"10px 0"}}>Aucun ingrédient</div>}
+    <div className="card"><div className="between mb8"><div className="bucket-label">{t("redit_ingredients",lang)}</div><div className="row gap6"><button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={addIngredient}>{t("redit_add_ingredient",lang)}</button>{otherRecipes.length>0&&<button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={addSubrecipe}>{t("redit_add_prep",lang)}</button>}</div></div>
+      {components.length===0&&<div className="text-xs text-dim center" style={{padding:"10px 0"}}>{t("redit_no_ingredient",lang)}</div>}
       {components.map((c,i)=>{
         if(c.kind!=="ingredient")return(<div key={i} style={{padding:"10px 0",borderBottom:i<components.length-1?`1px solid ${T.border}`:"none"}}><div className="row gap6 mb6"><span style={{fontSize:16}}>🧪</span><select className="input input-sm" style={{flex:1}} value={c.subrecipeId} onChange={e=>{const sub=allRecipes.find(r=>r.id===parseInt(e.target.value));updateComp(i,{subrecipeId:parseInt(e.target.value),unit:sub.yield.unit});}}>{otherRecipes.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}</select></div><div className="row gap6"><input className="input input-sm" style={{flex:1}} type="text" inputMode="decimal" value={c.qty} onChange={e=>{const v=e.target.value;if(/^\d*[.,]?\d*$/.test(v))updateComp(i,{qty:v.replace(",",".")});}}/><span style={{padding:"9px 12px",color:T.textDim,fontSize:13}}>{c.unit}</span><button style={{width:34,height:34,borderRadius:9,background:T.badBg,color:T.bad,border:"none",fontSize:16,flexShrink:0}} onClick={()=>removeComp(i)}>×</button></div></div>);
         // Ligne ingrédient : soit lié à un produit du catalogue (coût auto), soit saisie libre
@@ -3450,13 +3456,13 @@ function RecipeEditor({recipe,allRecipes,products=[],defaultType="plat",onSave,o
               const prod=pid?products.find(p=>p.id===pid):null;
               updateComp(i,{productId:pid,item:prod?prod.name:c.item});
             }}>
-              <option value="">— Saisie libre —</option>
+              <option value="">{t("redit_free_entry",lang)}</option>
               {products.map(p=><option key={p.id} value={p.id}>{p.name} ({p.price.toFixed(2)}€/{p.unit})</option>)}
             </select>
           </div>
-          {!c.productId&&<input className="input input-sm mb6" value={c.item} onChange={e=>updateComp(i,{item:e.target.value})} placeholder="Nom de l'ingrédient"/>}
+          {!c.productId&&<input className="input input-sm mb6" value={c.item} onChange={e=>updateComp(i,{item:e.target.value})} placeholder={t("redit_ingredient_name",lang)}/>}
           <div className="row gap6">
-            <input className="input input-sm" style={{flex:1}} type="text" inputMode="decimal" value={c.qty} onChange={e=>{const v=e.target.value;if(/^\d*[.,]?\d*$/.test(v))updateComp(i,{qty:v.replace(",",".")});}} placeholder="Qté"/>
+            <input className="input input-sm" style={{flex:1}} type="text" inputMode="decimal" value={c.qty} onChange={e=>{const v=e.target.value;if(/^\d*[.,]?\d*$/.test(v))updateComp(i,{qty:v.replace(",",".")});}} placeholder={t("redit_qty",lang)}/>
             <select className="input input-sm" style={{flex:0,width:60}} value={c.unit} onChange={e=>updateComp(i,{unit:e.target.value})}><option>g</option><option>kg</option><option>ml</option><option>L</option><option>pce</option><option>u</option></select>
             {c.productId
               ? <div className="input input-sm" style={{flex:1,display:"flex",alignItems:"center",color:unitMismatch?T.bad:T.good,fontWeight:700,background:T.bg3}}>{unitMismatch?"⚠ unité":`${(autoCost||0).toFixed(2)} €`}</div>
@@ -3467,22 +3473,22 @@ function RecipeEditor({recipe,allRecipes,products=[],defaultType="plat",onSave,o
         </div>);
       })}
     </div>
-    <div className="card"><div className="between mb8"><div className="bucket-label">Étapes</div><button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={addStep}>+ Étape</button></div>
-      {steps.length===0&&<div className="text-xs text-dim center" style={{padding:"10px 0"}}>Aucune étape</div>}
-      {steps.map((s,i)=><div key={i} className="row gap8 mb6"><div className="step-num">{i+1}</div><input className="input input-sm" style={{flex:1}} value={s} onChange={e=>updateStep(i,e.target.value)} placeholder="Décrire…"/><button style={{width:30,height:30,borderRadius:8,background:T.badBg,color:T.bad,border:"none",fontSize:14,flexShrink:0}} onClick={()=>removeStep(i)}>×</button></div>)}
+    <div className="card"><div className="between mb8"><div className="bucket-label">{t("redit_steps",lang)}</div><button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={addStep}>{t("redit_add_step",lang)}</button></div>
+      {steps.length===0&&<div className="text-xs text-dim center" style={{padding:"10px 0"}}>{t("redit_no_step",lang)}</div>}
+      {steps.map((s,i)=><div key={i} className="row gap8 mb6"><div className="step-num">{i+1}</div><input className="input input-sm" style={{flex:1}} value={s} onChange={e=>updateStep(i,e.target.value)} placeholder={t("redit_describe",lang)}/><button style={{width:30,height:30,borderRadius:8,background:T.badBg,color:T.bad,border:"none",fontSize:14,flexShrink:0}} onClick={()=>removeStep(i)}>×</button></div>)}
     </div>
-    <div className="card"><div className="field" style={{marginBottom:0}}><label className="label">Allergènes</label><input className="input input-sm" value={allergensStr} onChange={e=>setAllergensStr(e.target.value)} placeholder="Gluten, Lait..."/></div></div>
-    <button className="btn btn-primary mb14" onClick={save}>✓ {isEditing?"Mettre à jour":"Créer"}</button>
+    <div className="card"><div className="field" style={{marginBottom:0}}><label className="label">{t("redit_allergens",lang)}</label><input className="input input-sm" value={allergensStr} onChange={e=>setAllergensStr(e.target.value)} placeholder="Gluten, Lait..."/></div></div>
+    <button className="btn btn-primary mb14" onClick={save}>✓ {isEditing?t("redit_update",lang):t("redit_create",lang)}</button>
   </div>);
 }
 
-function Recipes({data,setData,db,reload,user,markLocalWrite}){
+function Recipes({data,setData,db,reload,user,markLocalWrite,lang}){
   const[view,setView]=useState("list");const[sel,setSel]=useState(null);const[typeFilter,setTypeFilter]=useState("plat");
   const allRecipes=data.recipes;
   const filtered=allRecipes.filter(r=>r.type===typeFilter);
   const nbPlats=allRecipes.filter(r=>r.type==="plat").length;
   const nbPreps=allRecipes.filter(r=>r.type==="mere").length;
-  if(view==="edit")return<RecipeEditor recipe={sel?allRecipes.find(r=>r.id===sel):null} defaultType={typeFilter} allRecipes={allRecipes} products={data.products||[]} onSave={async(rec)=>{
+  if(view==="edit")return<RecipeEditor recipe={sel?allRecipes.find(r=>r.id===sel):null} defaultType={typeFilter} allRecipes={allRecipes} products={data.products||[]} lang={lang} onSave={async(rec)=>{
     const res=await db.saveRecipe(rec);
     if(res?.error){alert("La fiche n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload({force:true});return;}
     // Une fiche technique est un objet riche (composants, étapes…) : on
@@ -3495,11 +3501,11 @@ function Recipes({data,setData,db,reload,user,markLocalWrite}){
     } else { await reload({force:true}); }
     setView("list");setSel(null);
   }} onCancel={()=>{setView("list");setSel(null);}}/>;
-  if(view==="detail"&&sel)return<RecipeDetail recipe={allRecipes.find(r=>r.id===sel)} allRecipes={allRecipes} onBack={()=>{setView("list");setSel(null);}} onEdit={()=>setView("edit")}/>;
-  return(<div className="page"><div className="section-title">Fiches techniques</div><div className="section-sub">{nbPlats} plat{nbPlats>1?"s":""} · {nbPreps} préparation{nbPreps>1?"s":""}</div>
-    <SegmentedControl value={typeFilter} onChange={setTypeFilter} options={[{value:"plat",label:`🍽️ Plats${nbPlats?` (${nbPlats})`:""}`},{value:"mere",label:`🧪 Préparations${nbPreps?` (${nbPreps})`:""}`}]}/>
+  if(view==="detail"&&sel)return<RecipeDetail recipe={allRecipes.find(r=>r.id===sel)} allRecipes={allRecipes} onBack={()=>{setView("list");setSel(null);}} onEdit={()=>setView("edit")} lang={lang}/>;
+  return(<div className="page"><div className="section-title">{t("recipe_title",lang)}</div><div className="section-sub">{nbPlats} plat{nbPlats>1?"s":""} · {nbPreps} préparation{nbPreps>1?"s":""}</div>
+    <SegmentedControl value={typeFilter} onChange={setTypeFilter} options={[{value:"plat",label:`🍽️ ${t("recipe_tab_dishes",lang)}${nbPlats?` (${nbPlats})`:""}`},{value:"mere",label:`🧪 ${t("recipe_tab_preps",lang)}${nbPreps?` (${nbPreps})`:""}`}]}/>
     <div style={{height:14}}></div>
-    {filtered.length===0 && <div className="empty"><div className="empty-icon">{typeFilter==="mere"?"🧪":"🍽️"}</div><div className="empty-title">Aucun{typeFilter==="mere"?"e préparation":" plat"}</div><div className="empty-sub">{typeFilter==="mere"?"Crée tes bases (sauces, fonds…) avec le bouton +":"Crée ton premier plat avec le bouton +"}</div></div>}
+    {filtered.length===0 && <div className="empty"><div className="empty-icon">{typeFilter==="mere"?"🧪":"🍽️"}</div><div className="empty-title">{typeFilter==="mere"?t("recipe_empty_prep",lang):t("recipe_empty_dish",lang)}</div><div className="empty-sub">{typeFilter==="mere"?t("recipe_empty_prep_sub",lang):t("recipe_empty_dish_sub",lang)}</div></div>}
     {filtered.map(rec=>{
       const cost=recipeCostPerPortion(rec,allRecipes);const m=recipeMargin(rec,allRecipes);
       const row=<div className="item" style={{marginBottom:0}} onClick={()=>{setSel(rec.id);setView("detail");}}><div className="item-icon" style={{background:rec.type==="mere"?T.warnBg:T.infoBg}}>{rec.emoji}</div><div className="item-body"><div className="item-title">{rec.name}</div><div className="item-sub">{rec.type==="mere"?<>{rec.yield?.qty||0} {rec.yield?.unit||"u"} · {cost.toFixed(2)} €/{rec.yield?.unit||"u"}</>:<>{rec.category} · {rec.price} €</>}</div></div>{rec.type==="plat"?<span className={`badge ${m>=70?"b-good":m>=50?"b-info":"b-bad"}`}>{m}%</span>:<span className="badge b-warn tabular">{cost.toFixed(2)} €</span>}</div>;
@@ -3702,7 +3708,7 @@ function Margins({data}){
 // service du soir qui traverse minuit.
 const isoDate=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 function mondayOf(d){const x=new Date(d);const wd=(x.getDay()+6)%7;x.setDate(x.getDate()-wd);x.setHours(0,0,0,0);return x;}
-function Planning({data,setData,user,db,reload,markLocalWrite}){
+function Planning({data,setData,user,db,reload,markLocalWrite,lang}){
   const[weekStart,setWeekStart]=useState(()=>mondayOf(new Date()));
   const[dayIdx,setDayIdx]=useState(()=>((new Date().getDay()+6)%7));
   const[sheet,setSheet]=useState(null); // null | {shift?} pour ajout/édition
@@ -3750,14 +3756,14 @@ function Planning({data,setData,user,db,reload,markLocalWrite}){
   function openAddFor(userId,dayDate){setSheet({userId,date:isoDate(dayDate),start:"09:00",end:"15:00"});}
 
   return(<div className="page">
-    <div className="section-title">Planning</div>
+    <div className="section-title">{t("planning_title",lang)}</div>
     <div className="between mb12">
       <button className="btn btn-ghost btn-sm" style={{width:"auto"}} onClick={()=>{const d=new Date(weekStart);d.setDate(d.getDate()-7);setWeekStart(d);}}>‹</button>
       <div className="section-sub" style={{margin:0}}>{fmtRange}</div>
       <button className="btn btn-ghost btn-sm" style={{width:"auto"}} onClick={()=>{const d=new Date(weekStart);d.setDate(d.getDate()+7);setWeekStart(d);}}>›</button>
     </div>
 
-    <SegmentedControl value={viewMode} onChange={setViewMode} options={[{value:"table",label:"📋 Tableau"},{value:"day",label:"📅 Par jour"}]}/>
+    <SegmentedControl value={viewMode} onChange={setViewMode} options={[{value:"table",label:`📋 ${t("planning_view_table",lang)}`},{value:"day",label:`📅 ${t("planning_view_day",lang)}`}]}/>
     <div style={{height:14}}></div>
 
     {viewMode==="table" ? (
@@ -3765,7 +3771,7 @@ function Planning({data,setData,user,db,reload,markLocalWrite}){
         <table style={{borderCollapse:"collapse",width:"100%",minWidth:560,fontSize:12.5}}>
           <thead>
             <tr style={{background:T.bg2}}>
-              <th style={{position:"sticky",left:0,background:T.bg2,padding:"10px 12px",textAlign:"left",fontWeight:700,fontSize:12,color:T.textDim,zIndex:1,minWidth:104}}>Équipe</th>
+              <th style={{position:"sticky",left:0,background:T.bg2,padding:"10px 12px",textAlign:"left",fontWeight:700,fontSize:12,color:T.textDim,zIndex:1,minWidth:104}}>{t("planning_team",lang)}</th>
               {days.map((d,i)=>{const isToday=isoDate(d)===isoDate(new Date());return(
                 <th key={i} style={{padding:"10px 8px",textAlign:"center",fontWeight:700,fontSize:11.5,color:isToday?T.accent:T.textDim,minWidth:78}}>{DAYS[i]}<br/><span className="tabular">{d.getDate()}</span></th>
               );})}
@@ -3983,15 +3989,15 @@ function TaskCategoriesEditor({data,setData,db,reload,markLocalWrite}){
   </>);
 }
 
-function More({go,user}){
-  const items=[{key:"margins",icon:"📊",bg:T.goodBg,title:"Marges",sub:"Rentabilité"},{key:"planning",icon:"📅",bg:T.warnBg,title:"Planning équipe",sub:"Horaires"}];
-  return(<div className="page"><div className="section-title">Outils</div><div className="section-sub">Toutes les fonctions</div>
+function More({go,user,lang}){
+  const items=[{key:"margins",icon:"📊",bg:T.goodBg,title:t("more_margins",lang),sub:t("more_margins_sub",lang)},{key:"planning",icon:"📅",bg:T.warnBg,title:t("more_team_planning",lang),sub:t("more_team_planning_sub",lang)}];
+  return(<div className="page"><div className="section-title">{t("more_title",lang)}</div><div className="section-sub">{t("more_subtitle",lang)}</div>
     {items.map(it=><div key={it.key} className="item" onClick={()=>go(it.key)}><div className="item-icon" style={{background:it.bg}}>{it.icon}</div><div className="item-body"><div className="item-title">{it.title}</div><div className="item-sub">{it.sub}</div></div><div className="item-arrow">›</div></div>)}
-    <div className="bucket-label mt14">Aide</div>
-    <div className="item" onClick={()=>go("manual")}><div className="item-icon" style={{background:T.infoBg}}>📖</div><div className="item-body"><div className="item-title">Notice d'utilisation</div><div className="item-sub">Comment se servir de Fuego</div></div><div className="item-arrow">›</div></div>
-    <div className="item" onClick={()=>go("gbph")}><div className="item-icon" style={{background:T.goodBg}}>🛡️</div><div className="item-body"><div className="item-title">Guide des bonnes pratiques</div><div className="item-sub">Règles d'hygiène HACCP</div></div><div className="item-arrow">›</div></div>
-    <div className="bucket-label mt14">{user.isAdmin?"Administration":"Réglages"}</div>
-    <div className="item" onClick={()=>go("settings")}><div className="item-icon" style={{background:T.accentLt}}>⚙️</div><div className="item-body"><div className="item-title">Paramètres</div><div className="item-sub">{user.isAdmin?"Restaurant, équipe, HACCP":"Imprimante d'étiquettes"}</div></div><div className="item-arrow">›</div></div>
+    <div className="bucket-label mt14">{t("more_help",lang)}</div>
+    <div className="item" onClick={()=>go("manual")}><div className="item-icon" style={{background:T.infoBg}}>📖</div><div className="item-body"><div className="item-title">{t("more_manual",lang)}</div><div className="item-sub">{t("more_manual_sub",lang)}</div></div><div className="item-arrow">›</div></div>
+    <div className="item" onClick={()=>go("gbph")}><div className="item-icon" style={{background:T.goodBg}}>🛡️</div><div className="item-body"><div className="item-title">{t("more_gbph",lang)}</div><div className="item-sub">{t("more_gbph_sub",lang)}</div></div><div className="item-arrow">›</div></div>
+    <div className="bucket-label mt14">{user.isAdmin?"Administration":t("more_settings_group_staff",lang)}</div>
+    <div className="item" onClick={()=>go("settings")}><div className="item-icon" style={{background:T.accentLt}}>⚙️</div><div className="item-body"><div className="item-title">{t("more_settings",lang)}</div><div className="item-sub">{user.isAdmin?"Restaurant, équipe, HACCP":t("more_settings_printer_sub",lang)}</div></div><div className="item-arrow">›</div></div>
   </div>);
 }
 
@@ -5095,10 +5101,10 @@ export default function App(){
     labels:<Labels {...props}/>,
     clean:<Cleaning {...props}/>,pests:<Pests {...props}/>,
     training:<Training data={data} go={go} setData={setData} db={DB} reload={reload} markLocalWrite={markLocalWrite} user={user} lang={lang}/>,registre:<Registre data={data} db={DB}/>,gbph:<GbphGuide initialSection={gbphSection}/>,manual:<ManualGuide user={user}/>,
-    recipes:<Recipes data={data} setData={setData} db={DB} reload={reload} user={user} markLocalWrite={markLocalWrite}/>,
+    recipes:<Recipes data={data} setData={setData} db={DB} reload={reload} user={user} markLocalWrite={markLocalWrite} lang={lang}/>,
     margins:<Margins data={data}/>,planning:<Planning {...props}/>,
     tasks:<Tasks data={data} setData={setData} db={DB} reload={reload} user={user} lang={lang}/>,
-    more:<More go={go} user={user}/>,
+    more:<More go={go} user={user} lang={lang}/>,
     settings:<Settings data={data} setData={setData} user={user} onLogout={logout} db={DB} reload={reload} markLocalWrite={markLocalWrite}/>,
   };
   return(<><style>{S}</style><GlobalSheetSwipe/><div className="shell">
