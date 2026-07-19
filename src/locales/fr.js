@@ -181,6 +181,32 @@ export default {
   train_update: "Mettre à jour",
   train_delete: "🗑 Supprimer cette fiche",
 
+  // Mots restés en français dans la première passe (repérés lors d'une
+  // relecture) : compteurs de recettes, badge de suivi, mot "produits",
+  // onglet Recettes de la barre du bas.
+  recipe_count_dish: "plat",
+  recipe_count_dishes: "plats",
+  recipe_count_prep: "préparation",
+  recipe_count_preps: "préparations",
+  reheat_badge_tracked: "Suivi",
+  trace_count_products: "produits",
+  nav_recipes: "Recettes",
+
+  // Isolation bidi (sécurité) : mots de liaison utilisés autour des chiffres
+  // isolés en <bdi dir="ltr">, pour que 63°C, 25% etc. ne puissent jamais se
+  // réordonner visuellement au milieu d'une phrase qui se lit de droite à
+  // gauche — un risque réel signalé lors d'une relecture externe.
+  common_within: "en moins de",
+  oils_legal_threshold: "Polaires — seuil légal :",
+
+  // Versions "label seul" (le chiffre est isolé séparément au rendu, voir
+  // common_within/oils_legal_threshold ci-dessus pour le même principe)
+  oils_subtitle_label: "Composés polaires",
+  reheat_hub_label: "Remise en température à",
+  clean_zones_word: "zones",
+  clean_status_done: "Terminé",
+  clean_status_ongoing: "En cours",
+
   // ─── Vague 3 : Accueil, menu Plus, Recettes (liste), Planning (vue).
   // Les bannières très dynamiques de la Cellule et de la Réception, ainsi
   // que l'éditeur complet de fiches techniques, restent en français pour
@@ -342,4 +368,9 @@ export default {
   label_hub_sub: "Impression DLC + allergènes",
   pest_hub_sub: "Visites et contrôles",
   train_hub_sub: "Attestations",
+
+  // Pense-bête "à commander"
+  shop_title: "À commander",
+  shop_placeholder: "Ajouter un article…",
+  shop_empty: "Rien à commander pour l'instant",
 };
