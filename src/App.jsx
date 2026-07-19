@@ -116,7 +116,7 @@ const DB = {
     const today = todayStr();
     const [
       ru, rhs, rft, rfr, rrec, rcool, rreh, roil,
-      rcl, rtr, rlb, rtm, rtr2, rpe, rrc, rcat, rtk, rre, rpr, rsh, rcc
+      rcl, rtr, rlb, rtr2, rpe, rrc, rcat, rtk, rre, rpr, rsh, rcc
     ] = await Promise.all([
       sbGet("users",           qs(q.order("id"),q.select())),
       sbGet("haccp_settings",  qs(q.limit(1),q.select())),
@@ -163,7 +163,6 @@ const DB = {
     const cleanChecks = rcc.data || [];
     const trace   = rtr.data  || [];
     const labels  = rlb.data  || [];
-    const tm      = rtm.data  || [];
     const train   = rtr2.data || [];
     const pests   = rpe.data  || [];
     const recipes = rrc.data  || [];
