@@ -116,7 +116,7 @@ const DB = {
     const today = todayStr();
     const [
       ru, rhs, rft, rfr, rrec, rcool, rreh, roil,
-      rcl, rtr, rlb, rtr2, rpe, rrc, rcat, rtk, rre, rpr, rsh, rcc
+      rcl, rtr, rlb, rtr2, rpe, rrc, rcat, rtk, rre, rpr, rsh, rcc, rsl
     ] = await Promise.all([
       sbGet("users",           qs(q.order("id"),q.select())),
       sbGet("haccp_settings",  qs(q.limit(1),q.select())),
@@ -150,6 +150,7 @@ const DB = {
       // la preuve d'un passage, contrairement à l'ancien système qui
       // écrasait l'état à chaque changement de service.
       sbGet("cleaning_checks", qs(`date=gte.${isoDate(new Date(Date.now()-100*86400000))}`,q.order("date",false),q.limit(2000),q.select())),
+      sbGet("shopping_list",   qs(q.order("created_at",false),q.limit(200),q.select())),
     ]);
     const users   = ru.data   || [];
     const hs      = rhs.data?.[0] || {};
@@ -161,6 +162,7 @@ const DB = {
     const oils    = roil.data || [];
     const clean   = rcl.data  || [];
     const cleanChecks = rcc.data || [];
+    const shoppingList = rsl.data || [];
     const trace   = rtr.data  || [];
     const labels  = rlb.data  || [];
     const train   = rtr2.data || [];
@@ -195,6 +197,7 @@ const DB = {
       cleaning: clean.map(c=>({id:c.id,zone:c.zone,icon:c.icon,freq:c.freq,produit:c.produit,dilution:c.dilution,done:c.done,doneAt:c.done_at,operator:c.operator||null})),
       // Historique permanent — jamais réinitialisé, source du Registre HACCP.
       cleaningChecks: cleanChecks.map(c=>({id:c.id,cleaningId:c.cleaning_id,zone:c.zone,freq:c.freq,date:c.date,period:c.period,operator:c.operator,createdAt:c.created_at})),
+      shoppingList: shoppingList.map(s=>({id:s.id,item:s.item,done:s.done,operator:s.operator,createdAt:s.created_at})),
       // hasPhoto : la photo elle-même n'est pas chargée ici (trop lourde), on
       // sait juste si la fiche en a une. photo reste null jusqu'à ce qu'on
       // ouvre la fiche, qui déclenche alors le chargement de l'image.
@@ -237,6 +240,10 @@ const DB = {
   async addTraining(t){return sbPost("training",{name:t.name,role:t.role,haccp_exp:t.haccpExp,visa_exp:t.visaExp});},
   async updateTraining(id,t){return sbPatch("training",{name:t.name,role:t.role,haccp_exp:t.haccpExp,visa_exp:t.visaExp},qs(`id=eq.${id}`));},
   async deleteTraining(id){return sbDelete("training",qs(`id=eq.${id}`));},
+  // Liste "à commander" — pense-bête simple, ouvert à toute l'équipe.
+  async addShoppingItem(item,operator){return sbPost("shopping_list",{item,operator});},
+  async toggleShoppingItem(id,done){return sbPatch("shopping_list",{done},qs(`id=eq.${id}`));},
+  async deleteShoppingItem(id){return sbDelete("shopping_list",qs(`id=eq.${id}`));},
   async updateOil(id,{polaires,operator,changed,dateInstall}){
     const body={polaires,operator,last_test:todayStr()};
     if(changed)body.date_install=dateInstall;
@@ -732,86 +739,6 @@ const S = `
 `;
 
 // ─── HOOKS & MICRO-UX ────────────────────────────────────────────────────────
-// ─── SWIPE TO DELETE (style iOS) ────────────────────────────────────────────
-// Glisser vers la gauche révèle une croix rouge ; taper dessus supprime après
-// confirmation. Actif uniquement si `enabled` (réservé aux admins). Implémenté
-// en tactile pur (pas de librairie) pour rester léger.
-// Registre global : une seule carte ouverte à la fois sur tout l'écran (comme iOS).
-// Chaque SwipeToDelete monté s'y enregistre pour pouvoir se fermer si un autre s'ouvre.
-const _swipeOpenRegistry = { current: null };
-
-function SwipeToDelete({enabled,onDelete,confirmLabel="Supprimer ?",children}){
-  const[dragX,setDragX]=useState(0);
-  const[dragging,setDragging]=useState(false);
-  const startX=useRef(0);
-  const startedHoriz=useRef(false);
-  const dragStartX=useRef(0); // position de dragX au moment du touchstart (0 ou -REVEAL)
-  const closeSelf=useRef(()=>{});
-  const REVEAL=76; // largeur de la zone croix révélée
-
-  closeSelf.current=()=>setDragX(0);
-
-  // Nettoyage : si ce composant est démonté (changement d'écran) pendant qu'il
-  // était la carte ouverte, on retire sa référence du registre global pour ne
-  // jamais appeler une fonction fantôme depuis un composant qui n'existe plus.
-  useEffect(()=>{
-    return ()=>{ if(_swipeOpenRegistry.current===closeSelf.current) _swipeOpenRegistry.current=null; };
-  },[]);
-
-  if(!enabled) return children;
-
-  function onTouchStart(e){
-    startX.current=e.touches[0].clientX;
-    startedHoriz.current=false;
-    dragStartX.current=dragX;
-  }
-  function onTouchMove(e){
-    const dx=e.touches[0].clientX-startX.current;
-    if(!startedHoriz.current){
-      if(Math.abs(dx)<8)return; // tolérance avant de trancher swipe horizontal vs scroll vertical
-      startedHoriz.current=true;
-      // Une nouvelle carte s'ouvre : referme celle qui l'était avant.
-      if(_swipeOpenRegistry.current && _swipeOpenRegistry.current!==closeSelf.current){
-        _swipeOpenRegistry.current();
-      }
-    }
-    const next=Math.max(Math.min(dragStartX.current+dx,0),-REVEAL-20);
-    setDragging(true); setDragX(next);
-  }
-  function onTouchEnd(){
-    setDragging(false);
-    setDragX(prev=>{
-      const open = prev<-REVEAL/2;
-      if(open) _swipeOpenRegistry.current=closeSelf.current;
-      else if(_swipeOpenRegistry.current===closeSelf.current) _swipeOpenRegistry.current=null;
-      return open ? -REVEAL : 0;
-    });
-  }
-  function onRowClick(e){
-    // Si la carte est ouverte, un tap dessus la referme au lieu de déclencher l'action normale (ex: ouvrir la fiche).
-    if(dragX<0){ e.stopPropagation(); e.preventDefault(); setDragX(0); if(_swipeOpenRegistry.current===closeSelf.current)_swipeOpenRegistry.current=null; }
-  }
-  async function confirmDelete(){
-    if(!window.confirm(confirmLabel))return;
-    setDragX(0);
-    if(_swipeOpenRegistry.current===closeSelf.current)_swipeOpenRegistry.current=null;
-    await onDelete();
-  }
-
-  return(
-    <div style={{position:"relative",overflow:"hidden",borderRadius:12,marginBottom:6}}>
-      <div style={{position:"absolute",top:0,right:0,bottom:0,width:REVEAL,display:"flex",alignItems:"center",justifyContent:"center",background:T.bad,zIndex:0}}>
-        <button onClick={confirmDelete} style={{width:"100%",height:"100%",background:"none",border:"none",color:"#fff",fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}} aria-label="Supprimer">✕</button>
-      </div>
-      <div
-        onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onClickCapture={onRowClick}
-        style={{transform:`translateX(${dragX}px)`,transition:dragging?"none":"transform .2s ease-out",position:"relative",zIndex:1,marginBottom:0}}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
 
 function useLongPress(onLongPress, ms=550){
   const [pressing,setPressing]=useState(false);
@@ -892,6 +819,12 @@ function GlobalSheetSwipe(){
       // hors de React) sans jamais réellement fermer l'état React derrière —
       // ce qui laissait un écran vide et figé, sans plus rien de cliquable.
       if(found.dataset.swipeLock==='true') return;
+      // Si le contenu n'est pas déjà tout en haut, glisser vers le bas sert à
+      // faire défiler vers le haut, pas à fermer — sinon les deux gestes se
+      // ressemblent et l'un déclenche l'autre par erreur. On ne capture le
+      // geste de fermeture que si on est déjà au sommet du contenu (même
+      // règle que les fenêtres natives iOS).
+      if(found.scrollTop>0) return;
       sheet=found;
       sx=t.clientX; sy=t.clientY; dragging=true;
       sheet.style.transition='none';
@@ -987,6 +920,7 @@ const INIT={
     {id:8,zone:"Friteuse",icon:"🍟",freq:"Hebdomadaire",produit:"Dégraissant friteuse",dilution:"Pur",done:false},
   ],
   cleaningChecks:[],
+  shoppingList:[],
   traceability:[
     {id:1,product:"Saumon Gravlax",emoji:"🐟",supplier:"Marée Pêche Bretagne",lot:"SP2605A",dlc:"13/05",qty:"2 kg",allergenes:["Poisson"],status:"ok"},
     {id:2,product:"Bœuf Angus",emoji:"🥩",supplier:"Boucherie Dupont",lot:"BA0510",dlc:"15/05",qty:"5 kg",allergenes:[],status:"ok"},
@@ -1194,9 +1128,46 @@ function Login({users,onLogin,lang="fr",onChangeLang}){
 // il suffit de repasser ce drapeau à true pour tout réafficher d'un coup.
 const VOICE_FEATURE_ENABLED = false;
 
-function Aujourdhui({data,go,user,onVoiceOpen,lang}){
+// Ligne de la liste "à commander" : tap = cocher/décocher, appui long =
+// supprimer. Même geste que partout ailleurs dans l'app.
+function ShoppingRow({it,onToggle,onDelete}){
+  const lp=useLongPress(()=>{ haptic.medium(); onDelete(it); });
+  return(
+    <div className="item" {...lp.handlers} onClick={()=>{ if(!lp.didFire()) onToggle(it); }} style={{opacity:it.done?.5:1}}>
+      <div className={`check ${it.done?"on":""}`}>{it.done?"✓":""}</div>
+      <div className="item-body"><div className="item-title" style={{textDecoration:it.done?"line-through":"none"}}>{it.item}</div></div>
+    </div>
+  );
+}
+
+function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWrite}){
   const[,setTick]=useState(0);
   useEffect(()=>{const i=setInterval(()=>setTick(t=>t+1),30000);return()=>clearInterval(i);},[]);
+  const[shopText,setShopText]=useState("");
+  async function addShopItem(){
+    const text=shopText.trim();
+    if(!text)return;
+    setShopText("");
+    const res=await db.addShoppingItem(text,user?.name);
+    if(res?.error||!res?.data){alert("Impossible d'ajouter. Vérifie la connexion Supabase.");await reload?.({force:true});return;}
+    markLocalWrite?.();
+    const r=res.data;
+    setData(d=>({...d,shoppingList:[{id:r.id,item:r.item,done:r.done,operator:r.operator,createdAt:r.created_at},...(d.shoppingList||[])]}));
+  }
+  async function toggleShopItem(it){
+    const next=!it.done;
+    markLocalWrite?.();
+    setData(d=>({...d,shoppingList:d.shoppingList.map(x=>x.id===it.id?{...x,done:next}:x)}));
+    const res=await db.toggleShoppingItem(it.id,next);
+    if(res?.error){alert("Impossible d'enregistrer. Vérifie la connexion Supabase.");await reload?.({force:true});}
+  }
+  async function removeShopItem(it){
+    if(!window.confirm(`Retirer "${it.item}" de la liste ?`))return;
+    const res=await db.deleteShoppingItem(it.id);
+    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload?.({force:true});return;}
+    markLocalWrite?.();
+    setData(d=>({...d,shoppingList:d.shoppingList.filter(x=>x.id!==it.id)}));
+  }
   const h=new Date().getHours();const greeting=h<12?t("home_greeting_morning",lang):h<18?t("home_greeting_afternoon",lang):t("home_greeting_evening",lang);
   const today=new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"});
   const win=getServiceWindow();
@@ -1318,6 +1289,21 @@ function Aujourdhui({data,go,user,onVoiceOpen,lang}){
       <div className="tile" onClick={()=>go("trace")}><span className="tile-dot" style={{background:traceComplete?T.good:T.bad}}></span><div className="tile-icon">📦</div><div className="tile-label">{t("home_tile_trace",lang)}</div><div className="tile-value tabular">{data.traceability.length}</div></div>
       <div className="tile" onClick={()=>go("tasks")}><span className="tile-dot" style={{background:tasksComplete?T.good:T.bad}}></span><div className="tile-icon">✅</div><div className="tile-label">{t("home_tasks",lang)}</div><div className="tile-value tabular">{tasksDone}/{tasksTotal}</div></div>
       <div className="tile" onClick={()=>go("clean")}><span className="tile-dot" style={{background:cleanComplete?T.good:T.bad}}></span><div className="tile-icon">🧹</div><div className="tile-label">{t("home_cleaning",lang)}</div><div className="tile-value tabular">{cleanDone}/{cleanTotal}</div></div>
+    </div>
+
+    {/* Pense-bête "à commander" — volontairement simple : texte libre, tap
+        pour cocher, appui long pour supprimer. Ouvert à toute l'équipe. */}
+    <div className="bucket-label" style={{marginTop:18}}><span className="bucket-label-dot" style={{background:T.textMute}}></span>{t("shop_title",lang)}</div>
+    <div className="card">
+      <div className="row gap8 mb10">
+        <input className="input input-sm" style={{flex:1}} value={shopText} onChange={e=>setShopText(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&addShopItem()} placeholder={t("shop_placeholder",lang)}/>
+        <button className="btn btn-primary btn-sm" style={{width:"auto",padding:"0 16px"}} onClick={addShopItem} disabled={!shopText.trim()}>+</button>
+      </div>
+      {(data.shoppingList||[]).length===0
+        ? <div className="text-xs text-dim center" style={{padding:"6px 0"}}>{t("shop_empty",lang)}</div>
+        : (data.shoppingList||[]).map(it=><ShoppingRow key={it.id} it={it} onToggle={toggleShopItem} onDelete={removeShopItem}/>)
+      }
     </div>
   </div>);
 }
@@ -2040,15 +2026,15 @@ function HaccpHub({data,go,lang}){
       {key:"temps",icon:"🌡️",bg:T.infoBg,title:t("temp_title",lang),sub:t("temp_hub_sub",lang),badge:fridgesAlert>0?{l:`${fridgesAlert} hors norme`,c:"b-bad"}:{l:"OK",c:"b-good"}},
       {key:"reception",icon:"🚚",bg:T.infoBg,title:t("recv_title",lang),sub:t("recv_hub_sub",lang),badge:{l:`${data.reception.length} fiches`,c:"b-info"}},
       {key:"cooling",icon:"❄️",bg:T.infoBg,title:t("cool_title",lang),sub:t("cool_subtitle",lang),badge:coolAlert>0?{l:`${coolAlert} alerte`,c:"b-bad"}:{l:"OK",c:"b-good"}},
-      {key:"reheating",icon:"🔥",bg:T.warnBg,title:t("reheat_title",lang),sub:t("reheat_hub_sub",lang),badge:{l:"Suivi",c:"b-mute"}},
-      {key:"oils",icon:"🍟",bg:T.warnBg,title:t("oils_title",lang),sub:t("oils_subtitle",lang),badge:oilAlert>0?{l:"À changer",c:"b-bad"}:{l:"OK",c:"b-good"}},
+      {key:"reheating",icon:"🔥",bg:T.warnBg,title:t("reheat_title",lang),sub:<>{t("reheat_hub_label",lang)} <bdi dir="ltr">≥ 63°C</bdi></>,badge:{l:t("reheat_badge_tracked",lang),c:"b-mute"}},
+      {key:"oils",icon:"🍟",bg:T.warnBg,title:t("oils_title",lang),sub:<>{t("oils_subtitle_label",lang)} <bdi dir="ltr">&lt; 25%</bdi></>,badge:oilAlert>0?{l:"À changer",c:"b-bad"}:{l:"OK",c:"b-good"}},
     ]},
     {title:t("haccp_group_trace",lang),items:[
-      {key:"trace",icon:"📦",bg:T.warnBg,title:t("trace_title",lang),sub:`${data.traceability.length} produits`,badge:alerts>0?{l:`${alerts} alerte`,c:"b-bad"}:{l:"OK",c:"b-good"}},
+      {key:"trace",icon:"📦",bg:T.warnBg,title:t("trace_title",lang),sub:`${data.traceability.length} ${t("trace_count_products",lang)}`,badge:alerts>0?{l:`${alerts} alerte`,c:"b-bad"}:{l:"OK",c:"b-good"}},
       {key:"labels",icon:"🏷️",bg:T.goodBg,title:t("label_title",lang),sub:t("label_hub_sub",lang),badge:{l:`${data.labels.length}`,c:"b-info"}},
     ]},
     {title:t("haccp_group_hygiene",lang),items:[
-      {key:"clean",icon:"🧹",bg:T.goodBg,title:t("clean_title",lang),sub:`${cleanOk}/${data.cleaning.length} zones`,badge:cleanOk===data.cleaning.length?{l:"Terminé",c:"b-good"}:{l:"En cours",c:"b-warn"}},
+      {key:"clean",icon:"🧹",bg:T.goodBg,title:t("clean_title",lang),sub:`${cleanOk}/${data.cleaning.length} ${t("clean_zones_word",lang)}`,badge:cleanOk===data.cleaning.length?{l:t("clean_status_done",lang),c:"b-good"}:{l:t("clean_status_ongoing",lang),c:"b-warn"}},
       {key:"pests",icon:"🐀",bg:T.badBg,title:t("pest_title",lang),sub:t("pest_hub_sub",lang),badge:{l:"À jour",c:"b-good"}},
       {key:"training",icon:"🎓",bg:T.infoBg,title:t("train_title",lang),sub:t("train_hub_sub",lang),badge:trAlert>0?{l:`${trAlert} expiré`,c:"b-bad"}:{l:"OK",c:"b-good"}},
     ]},
@@ -2325,7 +2311,7 @@ function Reheating({data,setData,user,db,reload,go,markLocalWrite,lang}){
   }
   return(<div className="page">
     <GbphHelpButton section="temp" go={go}/>
-    <div className="section-title">{t("reheat_title",lang)}</div><div className="section-sub">≥ {reheatMin}°C en moins de {reheatMaxTime} min</div>
+    <div className="section-title">{t("reheat_title",lang)}</div><div className="section-sub"><bdi dir="ltr">≥ {reheatMin}°C</bdi> {t("common_within",lang)} <bdi dir="ltr">{reheatMaxTime} min</bdi></div>
     {data.reheating.length===0 && <div className="empty"><div className="empty-icon">🔥</div><div className="empty-title">{t("reheat_empty_title",lang)}</div><div className="empty-sub">{t("reheat_empty_sub",lang)}</div></div>}
     {data.reheating.map(r=><div key={r.id} className="card">
       <div className="between mb6"><div><div className="item-title">{r.product}</div><div className="item-sub">{r.date} · {r.operator}</div></div><span className={`badge ${r.status==="ok"?"b-good":"b-bad"}`}>{r.status==="ok"?"✓":"⚠"}</span></div>
@@ -2379,7 +2365,7 @@ function Oils({data,setData,user,db,reload,go,markLocalWrite,lang}){
   return(<div className="page">
     <GbphHelpButton section="oils" go={go}/>
     <div className="section-title">{t("oils_title",lang)}</div>
-    <div className="section-sub">Polaires — seuil légal : {max}%</div>
+    <div className="section-sub">{t("oils_legal_threshold",lang)} <bdi dir="ltr">{max}%</bdi></div>
 
     {data.oils.length===0 ? (
       <div className="empty">
@@ -2500,7 +2486,7 @@ function Traceability({data,setData,db,reload,go,markLocalWrite,lang}){
   const filtered=filter==="all"?data.traceability:filter==="alerts"?data.traceability.filter(t=>t.status!=="ok"):data.traceability.filter(t=>t.status==="ok");
   return(<div className="page">
     <GbphHelpButton section="trace" go={go}/>
-    <div className="section-title">{t("trace_title",lang)}</div><div className="section-sub">{data.traceability.length} produits</div>
+    <div className="section-title">{t("trace_title",lang)}</div><div className="section-sub">{data.traceability.length} {t("trace_count_products",lang)}</div>
     <SegmentedControl value={filter} onChange={setFilter} options={[{value:"all",label:"Tous"},{value:"alerts",label:"⚠ Alertes"},{value:"ok",label:"✓ OK"}]}/>
     <div style={{height:14}}></div>
     {filtered.length===0?<div className="empty"><div className="empty-icon">✓</div><div className="empty-title">{t("trace_all_ok",lang)}</div></div>:(
@@ -3562,6 +3548,19 @@ function RecipeEditor({recipe,allRecipes,products=[],defaultType="plat",onSave,o
   </div>);
 }
 
+// Ligne de recette : tap = ouvrir le détail, appui long = supprimer (admin
+// seul). Remplace le swipe pour uniformiser avec le reste de l'app.
+function RecipeRow({rec,cost,m,canDelete,onOpen,onDelete}){
+  const lp=useLongPress(()=>{ if(!canDelete)return; haptic.medium(); onDelete(rec); });
+  return(
+    <div className="item" {...(canDelete?lp.handlers:{})} style={{marginBottom:0}} onClick={()=>{ if(!lp.didFire()) onOpen(rec); }}>
+      <div className="item-icon" style={{background:rec.type==="mere"?T.warnBg:T.infoBg}}>{rec.emoji}</div>
+      <div className="item-body"><div className="item-title">{rec.name}</div><div className="item-sub">{rec.type==="mere"?<>{rec.yield?.qty||0} {rec.yield?.unit||"u"} · {cost.toFixed(2)} €/{rec.yield?.unit||"u"}</>:<>{rec.category} · {rec.price} €</>}</div></div>
+      {rec.type==="plat"?<span className={`badge ${m>=70?"b-good":m>=50?"b-info":"b-bad"}`}>{m}%</span>:<span className="badge b-warn tabular">{cost.toFixed(2)} €</span>}
+    </div>
+  );
+}
+
 function Recipes({data,setData,db,reload,user,markLocalWrite,lang}){
   const[view,setView]=useState("list");const[sel,setSel]=useState(null);const[typeFilter,setTypeFilter]=useState("plat");
   const allRecipes=data.recipes;
@@ -3582,19 +3581,21 @@ function Recipes({data,setData,db,reload,user,markLocalWrite,lang}){
     setView("list");setSel(null);
   }} onCancel={()=>{setView("list");setSel(null);}}/>;
   if(view==="detail"&&sel)return<RecipeDetail recipe={allRecipes.find(r=>r.id===sel)} allRecipes={allRecipes} onBack={()=>{setView("list");setSel(null);}} onEdit={()=>setView("edit")} lang={lang}/>;
-  return(<div className="page"><div className="section-title">{t("recipe_title",lang)}</div><div className="section-sub">{nbPlats} plat{nbPlats>1?"s":""} · {nbPreps} préparation{nbPreps>1?"s":""}</div>
+  return(<div className="page"><div className="section-title">{t("recipe_title",lang)}</div><div className="section-sub">{nbPlats} {nbPlats>1?t("recipe_count_dishes",lang):t("recipe_count_dish",lang)} · {nbPreps} {nbPreps>1?t("recipe_count_preps",lang):t("recipe_count_prep",lang)}</div>
     <SegmentedControl value={typeFilter} onChange={setTypeFilter} options={[{value:"plat",label:`🍽️ ${t("recipe_tab_dishes",lang)}${nbPlats?` (${nbPlats})`:""}`},{value:"mere",label:`🧪 ${t("recipe_tab_preps",lang)}${nbPreps?` (${nbPreps})`:""}`}]}/>
     <div style={{height:14}}></div>
     {filtered.length===0 && <div className="empty"><div className="empty-icon">{typeFilter==="mere"?"🧪":"🍽️"}</div><div className="empty-title">{typeFilter==="mere"?t("recipe_empty_prep",lang):t("recipe_empty_dish",lang)}</div><div className="empty-sub">{typeFilter==="mere"?t("recipe_empty_prep_sub",lang):t("recipe_empty_dish_sub",lang)}</div></div>}
     {filtered.map(rec=>{
       const cost=recipeCostPerPortion(rec,allRecipes);const m=recipeMargin(rec,allRecipes);
-      const row=<div className="item" style={{marginBottom:0}} onClick={()=>{setSel(rec.id);setView("detail");}}><div className="item-icon" style={{background:rec.type==="mere"?T.warnBg:T.infoBg}}>{rec.emoji}</div><div className="item-body"><div className="item-title">{rec.name}</div><div className="item-sub">{rec.type==="mere"?<>{rec.yield?.qty||0} {rec.yield?.unit||"u"} · {cost.toFixed(2)} €/{rec.yield?.unit||"u"}</>:<>{rec.category} · {rec.price} €</>}</div></div>{rec.type==="plat"?<span className={`badge ${m>=70?"b-good":m>=50?"b-info":"b-bad"}`}>{m}%</span>:<span className="badge b-warn tabular">{cost.toFixed(2)} €</span>}</div>;
-      return(<SwipeToDelete key={rec.id} enabled={!!user?.isAdmin} confirmLabel={`Supprimer "${rec.name}" ?`} onDelete={async()=>{
-        const res=await db.deleteRecipe(rec.id);
-        if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload({force:true});return;}
-        markLocalWrite?.();
-        setData(d=>({...d,recipes:d.recipes.filter(r=>r.id!==rec.id)}));
-      }}>{row}</SwipeToDelete>);
+      return(<RecipeRow key={rec.id} rec={rec} cost={cost} m={m} canDelete={!!user?.isAdmin}
+        onOpen={r=>{setSel(r.id);setView("detail");}}
+        onDelete={async(r)=>{
+          if(!window.confirm(`Supprimer "${r.name}" ?`))return;
+          const res=await db.deleteRecipe(r.id);
+          if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload({force:true});return;}
+          markLocalWrite?.();
+          setData(d=>({...d,recipes:d.recipes.filter(x=>x.id!==r.id)}));
+        }}/>);
     })}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>{setSel(null);setView("edit");}}>+</button></div>
   </div>);
@@ -3788,6 +3789,20 @@ function Margins({data}){
 // service du soir qui traverse minuit.
 const isoDate=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 function mondayOf(d){const x=new Date(d);const wd=(x.getDay()+6)%7;x.setDate(x.getDate()-wd);x.setHours(0,0,0,0);return x;}
+// Ligne de créneau planning : tap = modifier (admin), appui long =
+// supprimer (admin). Remplace le swipe pour uniformiser avec le reste de
+// l'app.
+function ShiftRow({s,u,canEdit,onOpen,onDelete}){
+  const lp=useLongPress(()=>{ if(!canEdit)return; haptic.medium(); onDelete(s); });
+  return(
+    <div className="item" {...(canEdit?lp.handlers:{})} style={{marginBottom:0}} onClick={()=>{ if(!lp.didFire()&&canEdit) onOpen(s); }}>
+      <div className="item-icon" style={{background:T.infoBg,fontWeight:700,fontSize:14}}>{u?.initials||"?"}</div>
+      <div className="item-body"><div className="item-title">{u?.name||"Inconnu"}</div><div className="item-sub">{u?.role||""}</div></div>
+      <span className="badge b-info tabular">{s.start} – {s.end}</span>
+    </div>
+  );
+}
+
 function Planning({data,setData,user,db,reload,markLocalWrite,lang}){
   const[weekStart,setWeekStart]=useState(()=>mondayOf(new Date()));
   const[dayIdx,setDayIdx]=useState(()=>((new Date().getDay()+6)%7));
@@ -3893,18 +3908,16 @@ function Planning({data,setData,user,db,reload,markLocalWrite,lang}){
 
         <div className="bucket-label">Créneaux — {DAYS[dayIdx]} {days[dayIdx].getDate()}</div>
         {dayShifts.length===0&&<div className="empty"><div className="empty-icon">📅</div><div className="empty-title">Aucun créneau</div><div className="empty-sub">{isAdmin?"Ajoutez les horaires de l'équipe":"Aucun membre planifié ce jour"}</div></div>}
-        {dayShifts.map(s=>{const u=users.find(x=>x.id===s.userId);const row=(
-          <div className="item" style={{marginBottom:0}} onClick={()=>isAdmin&&openEdit(s)}>
-            <div className="item-icon" style={{background:T.infoBg,fontWeight:700,fontSize:14}}>{u?.initials||"?"}</div>
-            <div className="item-body"><div className="item-title">{u?.name||"Inconnu"}</div><div className="item-sub">{u?.role||""}</div></div>
-            <span className="badge b-info tabular">{s.start} – {s.end}</span>
-          </div>);
-          return(<SwipeToDelete key={s.id} enabled={isAdmin} confirmLabel={`Supprimer le créneau de ${u?.name||"ce membre"} (${s.start}–${s.end}) ?`} onDelete={async()=>{
-            const res=await db.deleteShift(s.id);
-            if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload({force:true});return;}
-            markLocalWrite?.();
-            setData(d=>({...d,shifts:d.shifts.filter(x=>x.id!==s.id)}));
-          }}>{row}</SwipeToDelete>);
+        {dayShifts.map(s=>{const u=users.find(x=>x.id===s.userId);
+          return(<ShiftRow key={s.id} s={s} u={u} canEdit={isAdmin}
+            onOpen={openEdit}
+            onDelete={async(shift)=>{
+              if(!window.confirm(`Supprimer le créneau de ${u?.name||"ce membre"} (${shift.start}–${shift.end}) ?`))return;
+              const res=await db.deleteShift(shift.id);
+              if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload({force:true});return;}
+              markLocalWrite?.();
+              setData(d=>({...d,shifts:d.shifts.filter(x=>x.id!==shift.id)}));
+            }}/>);
         })}
       </>
     )}
@@ -5231,7 +5244,7 @@ export default function App(){
     {!voiceOpen && !profile && <div className="bottomnav">{NAV.map(n=>{
       // Traduction seulement pour les 4 onglets du quotidien (phase 1) ; les
       // autres (ex. Recettes) restent en français pour l'instant.
-      const NAV_KEYS={home:"nav_home",haccp:"nav_haccp",tasks:"nav_tasks",more:"nav_more"};
+      const NAV_KEYS={home:"nav_home",haccp:"nav_haccp",recipes:"nav_recipes",tasks:"nav_tasks",more:"nav_more"};
       const label = NAV_KEYS[n.k] ? t(NAV_KEYS[n.k],lang) : n.l;
       return <button key={n.k} className={`nav-item ${activeTab===n.k?"active":""}`} onClick={()=>go(n.k)}><span className="nav-icon">{n.i}</span><span className="nav-label">{label}</span></button>;
     })}</div>}
