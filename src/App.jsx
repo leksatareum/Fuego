@@ -441,7 +441,7 @@ const DB = {
 const T = {
   bg0:"#090909", bg1:"#111111", bg2:"#1A1A1A", bg3:"#242424",
   border:"#2A2A2A", borderHi:"#3A3A3A",
-  text:"#FFFFFF", textDim:"#A0A0A0", textMute:"#8C8C8C", textGhost:"#383838",
+  text:"#F5F5F5", textDim:"#A0A0A0", textMute:"#8C8C8C", textGhost:"#383838",
   accent:"#E8390A",     // rouge flamme principal
   accentOrange:"#FF6B00", // orange logo (le O)
   accentDk:"#B82D08",
@@ -543,9 +543,9 @@ const S = `
   .greet-name{font-family:'Inter',sans-serif;font-size:28px;font-weight:800;color:${T.text};line-height:1.05;letter-spacing:-.02em;}
   .greet-context{font-size:12px;color:#606060;margin-top:2px;text-transform:capitalize;letter-spacing:.02em;}
 
-  .section-title{font-family:'Inter',sans-serif;font-size:26px;font-weight:800;color:${T.text};margin-bottom:4px;line-height:1.08;letter-spacing:-.02em;}
+  .section-title{font-family:'Inter',sans-serif;font-size:24px;font-weight:800;color:${T.text};margin-bottom:4px;line-height:1.08;letter-spacing:-.02em;}
   .section-sub{font-size:13px;color:#A0A0A0;margin-bottom:20px;letter-spacing:.01em;}
-  .bucket-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:${T.textMute};margin-bottom:8px;margin-left:2px;display:flex;align-items:center;gap:6px;}
+  .bucket-label{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:${T.textMute};margin-bottom:8px;margin-left:2px;display:flex;align-items:center;gap:6px;}
   .bucket-label-dot{width:5px;height:5px;border-radius:50%;}
 
   .card{background:${T.bg2};border-radius:14px;padding:14px;margin-bottom:8px;border:1px solid ${T.border};box-shadow:inset 0 1px 0 rgba(255,255,255,0.025);}
@@ -595,7 +595,7 @@ const S = `
   .item:active{transform:scale(.99);border-color:${T.borderHi};}
   .item-icon{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;}
   .item-body{flex:1;min-width:0;}
-  .item-title{font-size:14px;font-weight:600;color:${T.text};margin-bottom:1px;}
+  .item-title{font-size:15px;font-weight:700;color:${T.text};margin-bottom:1px;}
   .item-sub{font-size:12px;color:${T.textDim};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .item-arrow{color:${T.textMute};font-size:18px;flex-shrink:0;}
 
