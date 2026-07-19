@@ -109,7 +109,7 @@ export default {
   // pour faciliter la relecture par un locuteur natif.
 
   // Réception
-  recv_title: "وصولی",                              // Réception
+  recv_title: "سامان کی وصولی",                      // Réception (précisé : "réception des marchandises")
   recv_subtitle: "ہر ترسیل کی جانچ",                 // Contrôle de chaque livraison
   recv_empty_title: "کوئی وصولی نہیں",                // Aucune réception
   recv_empty_sub: "+ بٹن سے اپنی اگلی ترسیل ریکارڈ کریں", // Enregistre ta prochaine livraison avec le bouton +
@@ -130,7 +130,7 @@ export default {
   recv_save: "محفوظ کریں",                            // Enregistrer
 
   // Cellule
-  cool_title: "کولنگ سیل",                            // Cellule
+  cool_title: "تیزی سے ٹھنڈا کرنا",                    // Cellule (reformulé : "refroidissement rapide", moins littéral)
   cool_subtitle: "ٹھنڈا کرنا اور منجمد کرنا",          // Refroidissement & surgélation
   cool_empty_title: "کوئی کولنگ نہیں",                 // Aucun passage en cellule
   cool_empty_sub: "+ بٹن سے ٹھنڈا کرنا یا منجمد کرنا شروع کریں", // Lance un refroidissement ou une surgélation
@@ -157,7 +157,7 @@ export default {
   oils_polar: "پولر مرکبات",                           // Composés polaires
 
   // Traçabilité
-  trace_title: "ٹریسیبیلیٹی",                          // Traçabilité
+  trace_title: "مصنوعات کا سراغ",                      // Traçabilité (reformulé, plus naturel qu'un simple emprunt)
   trace_all_ok: "سب کچھ ٹھیک ہے",                      // Tout est en ordre
   trace_add_product: "پروڈکٹ شامل کریں",                // Ajouter un produit
   trace_photo: "لیبل کی تصویر",                        // Photo de l'étiquette
@@ -195,6 +195,25 @@ export default {
   train_save: "شامل کریں",                             // Ajouter
   train_update: "اپ ڈیٹ کریں",                          // Mettre à jour
   train_delete: "🗑 یہ فائل حذف کریں",                  // Supprimer cette fiche
+
+  // Mots restés en français, corrigés après relecture
+  recipe_count_dish: "ڈش",                              // plat
+  recipe_count_dishes: "ڈشیں",                           // plats
+  recipe_count_prep: "تیاری",                            // préparation
+  recipe_count_preps: "تیاریاں",                          // préparations
+  reheat_badge_tracked: "نگرانی",                        // Suivi
+  trace_count_products: "پروڈکٹس",                       // produits
+  nav_recipes: "ترکیبیں",                                // Recettes
+
+  // Isolation bidi (sécurité)
+  common_within: "سے کم وقت میں",                        // en moins de
+  oils_legal_threshold: "پولر مرکبات — قانونی حد:",        // Polaires — seuil légal :
+
+  oils_subtitle_label: "پولر مرکبات",                     // Composés polaires
+  reheat_hub_label: "دوبارہ گرم کرنے کا حرارت",            // Remise en température à
+  clean_zones_word: "زونز",                              // zones
+  clean_status_done: "مکمل",                             // Terminé
+  clean_status_ongoing: "جاری",                           // En cours
 
   // ─── Vague 3 : Accueil, menu Plus, Recettes (liste), Planning — BROUILLON,
   // mêmes réserves qu'en haut de fichier.
@@ -350,7 +369,12 @@ export default {
   temp_hub_sub: "صبح اور شام، ہر فریج کے لیے",            // Matin et soir, par frigo
   recv_hub_sub: "ترسیل کی جانچ",                          // Contrôle livraisons
   reheat_hub_sub: "≥ 63°C ایک گھنٹے سے کم میں",           // ≥ 63°C en moins d'1h
-  label_hub_sub: "میعاد اور الرجن پرنٹنگ",                // Impression DLC + allergènes
+  label_hub_sub: "میعاد اور الرجن کی جانچ",             // Contrôle DLC + allergènes (pas "impression", qui prêtait à confusion)
   pest_hub_sub: "وزٹس اور معائنے",                       // Visites et contrôles
   train_hub_sub: "سرٹیفکیٹس",                            // Attestations
+
+  // Pense-bête "à commander"
+  shop_title: "آرڈر کی فہرست",                            // À commander
+  shop_placeholder: "چیز شامل کریں…",                     // Ajouter un article…
+  shop_empty: "فی الحال کچھ آرڈر نہیں کرنا",                // Rien à commander pour l'instant
 };
