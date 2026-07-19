@@ -203,7 +203,7 @@ const DB = {
       // calculé côté base (cf. migration), qui permet d'afficher l'indicateur
       // sans télécharger l'image.
       traceability: trace.map(t=>({id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status,photo:null,hasPhoto:!!t.photo_present,createdAt:t.created_at})),
-      labels: labels.map(l=>({id:l.id,product:l.product,dateProd:l.date_prod,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator,createdAt:l.created_at})),
+      labels: labels.map(l=>({id:l.id,product:l.product,dateProd:l.date_prod,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator,createdAt:l.created_at,dateType:l.date_type||"fabrique"})),
       training: train.map(t=>({id:t.id,name:t.name,role:t.role,haccpExp:t.haccp_exp,visaExp:t.visa_exp})),
       pests: pests.map(p=>({id:p.id,date:p.date,type:p.type,company:p.company,result:p.result,nextVisit:p.next_visit,reportPath:p.report_path||null,reportName:p.report_name||null,createdAt:p.created_at})),
       recipes: recipes.map(r=>({id:r.id,name:r.name,emoji:r.emoji,type:r.type,category:r.category,price:r.price,portions:r.portions,yield:r.yield_qty?{qty:r.yield_qty,unit:r.yield_unit}:undefined,components:r.components||[],steps:r.steps||[],allergens:r.allergens||[]})),
@@ -278,7 +278,7 @@ const DB = {
       cooling: (cool.data||[]).map(c=>({id:c.id,product:c.product,qty:c.qty,startTemp:c.start_temp,endTemp:c.end_temp,duration:c.duration,startedMs:c.started_ms,operator:c.operator,status:c.status,date:c.date,dlc:c.dlc,createdAt:c.created_at})),
       reheating: (reheat.data||[]).map(r=>({id:r.id,product:r.product,endTemp:r.end_temp,duration:r.duration,operator:r.operator,status:r.status,date:r.date,createdAt:r.created_at})),
       oils: (oils.data||[]).map(o=>({id:o.id,name:o.name,type:o.type,dateInstall:o.date_install,lastTest:o.last_test,polaires:o.polaires,operator:o.operator,createdAt:o.created_at})),
-      labels: (labels.data||[]).map(l=>({id:l.id,product:l.product,dateProd:l.date_prod,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator,createdAt:l.created_at})),
+      labels: (labels.data||[]).map(l=>({id:l.id,product:l.product,dateProd:l.date_prod,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator,createdAt:l.created_at,dateType:l.date_type||"fabrique"})),
       pests: (pests.data||[]).map(p=>({id:p.id,date:p.date,type:p.type,company:p.company,result:p.result,nextVisit:p.next_visit,createdAt:p.created_at})),
       fridgeReleves: (fr.data||[]).map(r=>({id:r.id,fridgeId:r.fridge_id,date:r.date,period:r.period,temp:r.temp,time:r.time,operatorId:r.operator_id,createdAt:r.created_at})),
       traceability: (trace.data||[]).map(t=>({id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status,createdAt:t.created_at})),
@@ -302,7 +302,7 @@ const DB = {
     return {photo: data?.[0]?.photo || null, error:null};
   },
   async addTraceability(t){return sbPost("traceability",{product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes,status:t.status,photo:t.photo||null});},
-  async addLabel(l){return sbPost("labels",{product:l.product,date_prod:l.dateProd,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator});},
+  async addLabel(l){return sbPost("labels",{product:l.product,date_prod:l.dateProd,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator,date_type:l.dateType||"fabrique"});},
   // Purge l'historique des étiquettes antérieures à aujourd'hui. On garde
   // volontairement celles du jour : ce sont celles du service en cours, et
   // elles servent au calcul du numéro de lot.
@@ -885,7 +885,14 @@ function GlobalSheetSwipe(){
     let sx=0, sy=0, sheet=null, dragging=false;
     const onStart=(e)=>{
       const t=e.touches?.[0]; if(!t)return;
-      sheet=e.target.closest?.('.sheet'); if(!sheet)return;
+      const found=e.target.closest?.('.sheet'); if(!found)return;
+      // Certaines fenêtres (ex. un chrono de cellule en cours) ne doivent
+      // jamais pouvoir être balayées pour se fermer : le geste ferait
+      // disparaître la fenêtre visuellement (manipulation directe du style,
+      // hors de React) sans jamais réellement fermer l'état React derrière —
+      // ce qui laissait un écran vide et figé, sans plus rien de cliquable.
+      if(found.dataset.swipeLock==='true') return;
+      sheet=found;
       sx=t.clientX; sy=t.clientY; dragging=true;
       sheet.style.transition='none';
     };
@@ -944,7 +951,7 @@ const INIT={
       {id:4,name:"Congélateur",icon:"❄️",target:"-18",type:"negatif"},
       {id:5,name:"Vitrine Desserts",icon:"🍰",target:"0–4",type:"positif"},
     ],
-    coolingMax:120,freezingMax:240,reheatMin:63,reheatMaxTime:60,oilPolarMax:25,testMealDays:3,labelDlcDefault:3,
+    coolingMax:120,reheatMin:63,reheatMaxTime:60,oilPolarMax:25,testMealDays:3,labelDlcDefault:3,
     resetMidi:990, resetSoir:180, // 16h30 et 03h00
   },
   fridgeReleves:[
@@ -1219,7 +1226,7 @@ function Aujourdhui({data,go,user,onVoiceOpen,lang}){
   })();
   const slotTasks=data.tasks.filter(t=>t.date===homeSlot.date&&(t.service||"midi")===homeSlot.service);
   const tasksTotal=slotTasks.length;const tasksDone=slotTasks.filter(t=>t.done).length;
-  const cleanTotal=data.cleaning.length;const cleanDone=data.cleaning.filter(c=>c.done).length;
+  const cleanTotal=data.cleaning.length;const cleanDone=data.cleaning.filter(c=>cleaningIsDoneToday(c,data.cleaningChecks)).length;
 
   // Statut de chaque module pour la pastille d'accès rapide : vert = complet
   // (ou rien à faire), rouge = il reste des actions en attente aujourd'hui.
@@ -1320,6 +1327,23 @@ function Aujourdhui({data,go,user,onVoiceOpen,lang}){
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Convertit "JJ/MM" (format utilisé partout dans l'app) en objet Date de l'année en cours
+// Une zone est-elle faite AUJOURD'HUI ? Fonction partagée, utilisée partout
+// dans l'app (accueil, menu HACCP, pastille de l'icône, écran Nettoyage) —
+// une seule source de vérité, pour ne plus jamais désynchroniser un compteur
+// par rapport à un autre. Pour le quotidien, matin ET soir sont nécessaires
+// (l'ancienne case "done" ne représente plus cet état depuis le passage au
+// double créneau) ; pour les autres fréquences, la case reste la référence.
+function cleaningIsDoneToday(c, cleaningChecks){
+  if(c.freq==="Quotidien"){
+    const today=isoDate(new Date());
+    const checks=cleaningChecks||[];
+    const hasMatin=checks.some(x=>x.cleaningId===c.id&&x.date===today&&x.period==="matin");
+    const hasSoir=checks.some(x=>x.cleaningId===c.id&&x.date===today&&x.period==="soir");
+    return hasMatin&&hasSoir;
+  }
+  return !!c.done;
+}
+
 function parseAppDate(dstr){
   if(!dstr) return null;
   const [d,m]=dstr.split("/").map(Number);
@@ -2006,7 +2030,7 @@ function GbphHelpButton({section,go}){
 function HaccpHub({data,go,lang}){
   const total=data.haccpSettings.fridgeTargets.length;
   const fridgesAlert=data.haccpSettings.fridgeTargets.filter(f=>{const m=getReleve(data,f.id,"matin"),s=getReleve(data,f.id,"soir");return(m&&tempStatus(m.temp,f.target)==="bad")||(s&&tempStatus(s.temp,f.target)==="bad");}).length;
-  const cleanOk=data.cleaning.filter(c=>c.done).length;
+  const cleanOk=data.cleaning.filter(c=>cleaningIsDoneToday(c,data.cleaningChecks)).length;
   const alerts=data.traceability.filter(t=>t.status!=="ok").length;
   const oilAlert=data.oils.filter(o=>o.polaires>=data.haccpSettings.oilPolarMax).length;
   const coolAlert=data.cooling.filter(c=>c.status==="alert").length;
@@ -2168,7 +2192,13 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite,lang}){
   const[startMs,setStartMs]=useState(null);const[elapsed,setElapsed]=useState(0);
   const[activeCoolingId,setActiveCoolingId]=useState(null);
   const M=CELL_MODES[mode];
-  const maxMin=mode==="surgel"?(data.haccpSettings.freezingMax||240):data.haccpSettings.coolingMax;
+  // freezingMax n'a jamais été vraiment câblé (pas de colonne en base, pas de
+  // champ dans les Paramètres) — il n'existait que dans les données de démo,
+  // donc en production la limite retombait toujours sur 240 min en dur, sans
+  // aucun moyen de la changer. coolingMax, lui, est le seul seuil réellement
+  // paramétrable (Paramètres → Seuils critiques) : on l'utilise pour les deux
+  // modes plutôt que de maintenir un réglage fantôme.
+  const maxMin=data.haccpSettings.coolingMax;
   useEffect(()=>{if(step!==2)return;const i=setInterval(()=>setElapsed(Math.floor((Date.now()-startMs)/1000)),1000);return()=>clearInterval(i);},[step,startMs]);
   const fmt=s=>`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
   const limitSec=Math.max(1,safeNum(maxMin,120))*60;const overtime=elapsed>limitSec;const progress=startMs?safePct(elapsed,limitSec):0;
@@ -2197,17 +2227,45 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite,lang}){
     }
     setShow(false);setStep(0);setMode("refroid");setStartMs(null);setElapsed(0);setStartTemp(65);setEndTemp(8);setForm({product:"",qty:""});setActiveCoolingId(null);}
   const coolingDone=data.cooling.filter(c=>c.status!=="active");
+  // Refroidissement en cours quelque part (même si on a quitté l'écran, swipe,
+  // app fermée par iOS...) : on le retrouve depuis la vraie donnée persistée
+  // (statut "active" en base), pas depuis un état local qui, lui, se perd.
+  const activeCooling = data.cooling.find(c=>c.status==="active");
+  function resumeActive(){
+    if(!activeCooling)return;
+    haptic.light();
+    setActiveCoolingId(activeCooling.id);
+    setMode(activeCooling.mode||"refroid");
+    setForm({product:activeCooling.product,qty:activeCooling.qty});
+    setStartTemp(activeCooling.startTemp);
+    setEndTemp(CELL_MODES[activeCooling.mode||"refroid"].endCenter);
+    // startMs vient de la vraie donnée enregistrée au démarrage (started_ms),
+    // pas de Date.now() : le temps écoulé reste exact même après une longue
+    // absence, pile ce qui manquait pour pouvoir vraiment "y retourner".
+    setStartMs(activeCooling.startedMs);
+    setElapsed(Math.floor((Date.now()-activeCooling.startedMs)/1000));
+    setStep(2);
+    setShow(true);
+  }
   return(<div className="page">
     <GbphHelpButton section="temp" go={go}/>
     <div className="section-title">{t("cool_title",lang)}</div><div className="section-sub">{t("cool_subtitle",lang)}</div>
-    {coolingDone.length===0 && <div className="empty"><div className="empty-icon">❄️</div><div className="empty-title">{t("cool_empty_title",lang)}</div><div className="empty-sub">{t("cool_empty_sub",lang)}</div></div>}
+    {activeCooling && (
+      <div className="card mb14" onClick={resumeActive} style={{cursor:"pointer",border:`1.5px solid ${T.warn}`,background:T.warnBg}}>
+        <div className="between">
+          <div><div className="item-title">⏳ {activeCooling.product}</div><div className="item-sub">{CELL_MODES[activeCooling.mode||"refroid"].label} en cours · démarré à {new Date(activeCooling.startedMs).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}</div></div>
+          <span className="item-arrow" style={{color:T.warn}}>↩</span>
+        </div>
+      </div>
+    )}
+    {coolingDone.length===0 && !activeCooling && <div className="empty"><div className="empty-icon">❄️</div><div className="empty-title">{t("cool_empty_title",lang)}</div><div className="empty-sub">{t("cool_empty_sub",lang)}</div></div>}
     {coolingDone.map(c=>{const cm=CELL_MODES[c.mode||"refroid"];const okTemp=(c.mode==="surgel")?c.endTemp<=-18:c.endTemp<=10;return(<div key={c.id} className="card">
       <div className="between mb6"><div><div className="item-title">{cm.icon} {c.product}</div><div className="item-sub">{cm.label} · {c.qty} · {c.date}</div></div><span className={`badge ${c.status==="ok"?"b-good":"b-bad"}`}>{c.status==="ok"?"✓ OK":"⚠"}</span></div>
       <div className="row gap12" style={{flexWrap:"wrap"}}><div><div className="text-xs text-dim">Départ</div><div className="text-sm fw7 tabular">{c.startTemp}°C</div></div><div><div className="text-xs text-dim">Arrivée</div><div className="text-sm fw7 tabular" style={{color:okTemp?T.good:T.bad}}>{c.endTemp}°C</div></div><div><div className="text-xs text-dim">Durée</div><div className="text-sm fw7 tabular" style={{color:c.duration<=maxMin?T.good:T.bad}}>{c.duration} min</div></div></div>
       <div className="text-xs text-dim mt6">DLC : {c.dlc} · {c.operator}</div>
     </div>);})}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>{setStep(0);setMode("refroid");setShow(true);}}>+</button></div>
-    {show&&<div className="overlay" onClick={()=>step<=1&&setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
+    {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div>
       {step===0&&<><div className="sheet-title">{t("cool_new",lang)}</div>
         <div className="text-sm text-dim center mb14">{t("cool_which_operation",lang)}</div>
@@ -2591,7 +2649,7 @@ function Cleaning({data,setData,db,reload,go,markLocalWrite,user,lang}){
   // Pour le quotidien, une zone compte comme "faite" seulement si matin ET
   // soir sont cochés aujourd'hui — dérivé de l'historique réel, pas d'un
   // état qu'on aurait pu oublier de resynchroniser.
-  function dailyDone(zone){ return !!findCheck(zone.id,"matin") && !!findCheck(zone.id,"soir"); }
+  function dailyDone(zone){ return cleaningIsDoneToday(zone,data.cleaningChecks); }
 
   const done = isDaily ? list.filter(dailyDone).length : list.filter(c=>c.done).length;
   const pct = safePct(done, list.length);
@@ -2601,23 +2659,23 @@ function Cleaning({data,setData,db,reload,go,markLocalWrite,user,lang}){
   // Coche d'un coup tout ce qui manque sur la fréquence affichée. Pour le
   // quotidien, complète les créneaux manquants (matin et/ou soir) de chaque
   // zone ; pour les autres fréquences, coche les zones restantes comme avant.
-  async function markAllDone(){
+  async function markAllDone(period){
     if(busy)return;
     if(isDaily){
-      const missing=[];
-      list.forEach(zone=>{
-        if(!findCheck(zone.id,"matin")) missing.push({zone,period:"matin"});
-        if(!findCheck(zone.id,"soir")) missing.push({zone,period:"soir"});
-      });
+      // Séparé matin/soir : cocher "tout fait" pendant le service du matin ne
+      // doit jamais pouvoir marquer le soir comme fait par erreur (et
+      // inversement) — chaque bouton n'agit que sur son propre créneau.
+      const missing=list.filter(zone=>!findCheck(zone.id,period));
       if(!missing.length) return;
-      const ok=window.confirm(`Marquer ${missing.length} créneau${missing.length>1?"x":""} restant${missing.length>1?"s":""} de « Quotidien » comme fait${missing.length>1?"s":""} ?`);
+      const periodLabel = period==="matin"?"Matin":"Soir";
+      const ok=window.confirm(`Marquer ${missing.length} zone${missing.length>1?"s":""} du créneau « ${periodLabel} » comme faite${missing.length>1?"s":""} ?`);
       if(!ok) return;
-      haptic.medium(); setBusy("all");
-      const results=await Promise.all(missing.map(({zone,period})=>db.saveCleaningCheck({cleaningId:zone.id,zone:zone.zone,freq:zone.freq,date:todayISO,period,operator:user?.name})));
+      haptic.medium(); setBusy(`all-${period}`);
+      const results=await Promise.all(missing.map(zone=>db.saveCleaningCheck({cleaningId:zone.id,zone:zone.zone,freq:zone.freq,date:todayISO,period,operator:user?.name})));
       setBusy(null);
       if(results.some(r=>r?.error||!r?.data)){ alert("Certains créneaux n'ont pas été enregistrés. Vérifie la connexion Supabase."); await reload?.({force:true}); return; }
       markLocalWrite?.();
-      setData(d=>({...d,cleaningChecks:[...d.cleaningChecks,...results.map((r,i)=>({id:r.data.id,cleaningId:missing[i].zone.id,zone:missing[i].zone.zone,freq:missing[i].zone.freq,date:todayISO,period:missing[i].period,operator:user?.name,createdAt:r.data.created_at}))]}));
+      setData(d=>({...d,cleaningChecks:[...d.cleaningChecks,...results.map((r,i)=>({id:r.data.id,cleaningId:missing[i].id,zone:missing[i].zone,freq:missing[i].freq,date:todayISO,period,operator:user?.name,createdAt:r.data.created_at}))]}));
       haptic.success();
       return;
     }
@@ -2665,10 +2723,25 @@ function Cleaning({data,setData,db,reload,go,markLocalWrite,user,lang}){
       <div className="card mb14"><div className="pbar"><div className="pfill" style={{width:`${pct}%`,background:T.accent}}></div></div></div>
     )}
 
-    {((isDaily && list.some(z=>!dailyDone(z))) || (!isDaily && list.some(c=>!c.done))) && (
-      <button className="btn mb14" onClick={markAllDone} disabled={busy==="all"} style={{borderColor:T.good,color:T.good,background:T.goodBg}}>
-        {busy==="all" ? t("clean_saving",lang) : `✓ ${t("clean_mark_all",lang)} — ${tab}`}
-      </button>
+    {isDaily ? (
+      <div className="row gap8 mb14">
+        {list.some(z=>!findCheck(z.id,"matin")) && (
+          <button className="btn" style={{flex:1,borderColor:T.good,color:T.good,background:T.goodBg}} onClick={()=>markAllDone("matin")} disabled={busy==="all-matin"}>
+            {busy==="all-matin" ? t("clean_saving",lang) : `☀️ ${t("clean_mark_all",lang)} — Matin`}
+          </button>
+        )}
+        {list.some(z=>!findCheck(z.id,"soir")) && (
+          <button className="btn" style={{flex:1,borderColor:T.good,color:T.good,background:T.goodBg}} onClick={()=>markAllDone("soir")} disabled={busy==="all-soir"}>
+            {busy==="all-soir" ? t("clean_saving",lang) : `🌙 ${t("clean_mark_all",lang)} — Soir`}
+          </button>
+        )}
+      </div>
+    ) : (
+      list.some(c=>!c.done) && (
+        <button className="btn mb14" onClick={()=>markAllDone()} disabled={busy==="all"} style={{borderColor:T.good,color:T.good,background:T.goodBg}}>
+          {busy==="all" ? t("clean_saving",lang) : `✓ ${t("clean_mark_all",lang)} — ${tab}`}
+        </button>
+      )
     )}
 
     {list.length===0
@@ -3055,7 +3128,7 @@ function Labels({data,setData,user,db,reload,go,markLocalWrite,lang}){
     if(res?.data){
       const l=res.data;
       markLocalWrite?.();
-      setData(d=>({...d,labels:[{id:l.id,product:l.product,dateProd:l.date_prod,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator},...d.labels]}));
+      setData(d=>({...d,labels:[{id:l.id,product:l.product,dateProd:l.date_prod,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator,dateType:l.date_type||"fabrique"},...d.labels]}));
     }
     setShow(false); setForm({product:"",allergens:"",qty:""}); setDateType("fabrique"); setStartDate(""); setCustomDlc(null); setCopies(1);
   }
@@ -3281,6 +3354,24 @@ function Pests({data,setData,db,reload,go,markLocalWrite,lang}){
   </div>);
 }
 
+// Ligne d'une fiche de formation, extraite dans son propre composant : un
+// hook (useLongPress) ne peut jamais être appelé à l'intérieur d'un .map(),
+// sinon le nombre d'appels de hooks change dès que la liste change de
+// taille (ex. une suppression) — ce qui casse React de façon violente
+// (écran figé). Un composant par ligne règle ça proprement.
+function TrainingRow({t,isAdmin,onEdit,onDelete}){
+  const hOk=new Date(t.haccpExp.split("/").reverse().join("-"))>=new Date();
+  const vOk=new Date(t.visaExp.split("/").reverse().join("-"))>=new Date();
+  const lp=useLongPress(()=>{ if(isAdmin){ haptic.medium(); onDelete(t); } });
+  return (
+    <div className="card" {...(isAdmin?lp.handlers:{})} onClick={()=>{ if(!lp.didFire()) onEdit(t); }} style={{cursor:"pointer"}}>
+      <div className="item-title mb8">{t.name} <span className="text-xs text-dim">· {t.role}</span></div>
+      <div className="between mb6"><span className="text-sm">🎓 HACCP</span><span className={`badge ${hOk?"b-good":"b-bad"}`}>{hOk?"Valide":"Expirée"} · {t.haccpExp}</span></div>
+      <div className="between"><span className="text-sm">🩺 Visite médicale</span><span className={`badge ${vOk?"b-good":"b-bad"}`}>{vOk?"Valide":"Expirée"} · {t.visaExp}</span></div>
+    </div>
+  );
+}
+
 function Training({data,setData,go,db,reload,markLocalWrite,user,lang}){
   const isAdmin=!!user?.isAdmin;
   const[sheet,setSheet]=useState(null); // {item|null} — null = nouvelle fiche
@@ -3320,20 +3411,7 @@ function Training({data,setData,go,db,reload,markLocalWrite,user,lang}){
     <GbphHelpButton section="hygiene" go={go}/>
     <div className="section-title">{t("train_title",lang)}</div><div className="section-sub">{t("train_subtitle",lang)}</div>
     {data.training.length===0 && <div className="empty"><div className="empty-icon">🎓</div><div className="empty-title">{t("train_empty_title",lang)}</div><div className="empty-sub">{t("train_empty_sub",lang)}</div></div>}
-    {data.training.map(t=>{
-      const hOk=new Date(t.haccpExp.split("/").reverse().join("-"))>=new Date();
-      const vOk=new Date(t.visaExp.split("/").reverse().join("-"))>=new Date();
-      // Appui long pour supprimer (admin seulement), tap pour modifier —
-      // même logique que la Mise en place.
-      const lp=useLongPress(()=>{ if(isAdmin){ haptic.medium(); remove(t); } });
-      return (
-        <div key={t.id} className="card" {...(isAdmin?lp.handlers:{})} onClick={()=>{ if(!lp.didFire()) openEdit(t); }} style={{cursor:"pointer"}}>
-          <div className="item-title mb8">{t.name} <span className="text-xs text-dim">· {t.role}</span></div>
-          <div className="between mb6"><span className="text-sm">🎓 HACCP</span><span className={`badge ${hOk?"b-good":"b-bad"}`}>{hOk?"Valide":"Expirée"} · {t.haccpExp}</span></div>
-          <div className="between"><span className="text-sm">🩺 Visite médicale</span><span className={`badge ${vOk?"b-good":"b-bad"}`}>{vOk?"Valide":"Expirée"} · {t.visaExp}</span></div>
-        </div>
-      );
-    })}
+    {data.training.map(t=><TrainingRow key={t.id} t={t} isAdmin={isAdmin} onEdit={openEdit} onDelete={remove}/>)}
     {isAdmin&&<div className="text-xs text-mute center mt8">Touchez pour modifier · appui long pour supprimer</div>}
     <div className="fab-anchor"><button className="btn-fab" onClick={openAdd}>+</button></div>
 
@@ -3397,8 +3475,10 @@ function RecipeEditor({recipe,allRecipes,products=[],defaultType="plat",onSave,o
   const[steps,setSteps]=useState(recipe?.steps||[]);
   const[allergensStr,setAllergensStr]=useState((recipe?.allergens||[]).join(", "));
   const otherRecipes=allRecipes.filter(r=>r.type==="mere"&&(!recipe||r.id!==recipe.id));
-  function addIngredient(){setComponents([...components,{kind:"ingredient",item:"",qty:"",unit:"g",cost:"",productId:null}]);}
-  function addSubrecipe(){if(!otherRecipes.length)return alert("Créez d'abord une préparation");setComponents([...components,{kind:"subrecipe",subrecipeId:otherRecipes[0].id,qty:"",unit:otherRecipes[0].yield.unit}]);}
+  // Ajout en tête de liste plutôt qu'en fin — sur une grande recette, ça
+  // évite de devoir scroller jusqu'en bas à chaque nouvel ingrédient.
+  function addIngredient(){setComponents([{kind:"ingredient",item:"",qty:"",unit:"g",cost:"",productId:null},...components]);}
+  function addSubrecipe(){if(!otherRecipes.length)return alert("Créez d'abord une préparation");setComponents([{kind:"subrecipe",subrecipeId:otherRecipes[0].id,qty:"",unit:otherRecipes[0].yield.unit},...components]);}
   function updateComp(i,patch){setComponents(components.map((c,idx)=>idx===i?{...c,...patch}:c));}
   function removeComp(i){setComponents(components.filter((_,idx)=>idx!==i));}
   function addStep(){setSteps([...steps,""]);}
@@ -4899,7 +4979,7 @@ export default function App(){
       t.date===slotIso && (t.service||"midi")===slotService && !t.done).length;
 
     // Zones de nettoyage à faire + produits en alerte DLC
-    const nettoyageRestant = (data.cleaning||[]).filter(c=>!c.done).length;
+    const nettoyageRestant = (data.cleaning||[]).filter(c=>!cleaningIsDoneToday(c,data.cleaningChecks)).length;
     const alertesDlc = (data.traceability||[]).filter(t=>t.status!=="ok").length;
 
     const total = relevesManquants + tachesRestantes + nettoyageRestant + alertesDlc;
