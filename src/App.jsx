@@ -534,7 +534,7 @@ const S = `
   .nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;border:none;background:transparent;color:${T.textMute};transition:color var(--dur-fast);position:relative;}
   .nav-item.active{color:#FF6B00;}
   .nav-item.active::before{content:"";position:absolute;top:0;left:50%;transform:translateX(-50%);width:24px;height:2px;background:linear-gradient(90deg,#FF6B00,#E8390A);border-radius:0 0 2px 2px;}
-  .nav-icon{font-size:20px;line-height:1;}
+  .nav-icon{display:flex;align-items:center;justify-content:center;line-height:1;}
   .nav-label{font-size:10px;font-weight:600;color:inherit;}
 
   .greet-block{margin-bottom:16px;}
@@ -4726,7 +4726,24 @@ function Settings({data,setData,user,onLogout,db,reload,markLocalWrite}){
   );
 }
 
-const NAV=[{k:"home",i:"🏠",l:"Aujourd'hui"},{k:"haccp",i:"🛡️",l:"HACCP"},{k:"recipes",i:"📖",l:"Recettes"},{k:"tasks",i:"✅",l:"Mise en place"},{k:"more",i:"⋯",l:"Plus"}];
+// Icônes de navigation — en SVG directement dans le fichier plutôt qu'une
+// dépendance externe (type lucide-react) : ça évite de toucher au
+// package.json et donc tout risque de déploiement supplémentaire. Traits
+// simples, monochromes, cohérents entre eux (contrairement aux émojis
+// précédents, qui n'avaient ni le même style ni la même épaisseur).
+function NavIcon({name}){
+  const common={width:22,height:22,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:2,strokeLinecap:"round",strokeLinejoin:"round"};
+  switch(name){
+    case "home": return(<svg {...common}><path d="M3 11l9-8 9 8"/><path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"/></svg>);
+    case "haccp": return(<svg {...common}><path d="M12 3l7 3v6c0 4.5-3 8-7 9-4-1-7-4.5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>);
+    case "recipes": return(<svg {...common}><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v18H6.5A2.5 2.5 0 0 0 4 22.5v-18z"/><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/></svg>);
+    case "tasks": return(<svg {...common}><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 2h6v3H9z"/><path d="M9 12l2 2 4-4"/></svg>);
+    case "more": return(<svg {...common}><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>);
+    default: return null;
+  }
+}
+
+const NAV=[{k:"home",i:"home",l:"Aujourd'hui"},{k:"haccp",i:"haccp",l:"HACCP"},{k:"recipes",i:"recipes",l:"Recettes"},{k:"tasks",i:"tasks",l:"Mise en place"},{k:"more",i:"more",l:"Plus"}];
 const TITLES={home:"Aujourd'hui",haccp:"HACCP",temps:"Températures",reception:"Réception",cooling:"Cellule",reheating:"Remise en T°",oils:"Huiles friture",trace:"Traçabilité",labels:"Étiquetage",clean:"Nettoyage",pests:"Nuisibles",training:"Formation",registre:"Registre HACCP",gbph:"Guide des bonnes pratiques",manual:"Notice d'utilisation",recipes:"Recettes",margins:"Marges",planning:"Planning",tasks:"Mise en place",more:"Plus",settings:"Paramètres"};
 const ROOT_PAGES=["home","haccp","recipes","tasks","more"];
 const HACCP_PAGES=["temps","reception","cooling","reheating","oils","trace","labels","clean","pests","training","registre","gbph"];
@@ -5246,7 +5263,7 @@ export default function App(){
       // autres (ex. Recettes) restent en français pour l'instant.
       const NAV_KEYS={home:"nav_home",haccp:"nav_haccp",recipes:"nav_recipes",tasks:"nav_tasks",more:"nav_more"};
       const label = NAV_KEYS[n.k] ? t(NAV_KEYS[n.k],lang) : n.l;
-      return <button key={n.k} className={`nav-item ${activeTab===n.k?"active":""}`} onClick={()=>go(n.k)}><span className="nav-icon">{n.i}</span><span className="nav-label">{label}</span></button>;
+      return <button key={n.k} className={`nav-item ${activeTab===n.k?"active":""}`} onClick={()=>go(n.k)}><span className="nav-icon"><NavIcon name={n.i}/></span><span className="nav-label">{label}</span></button>;
     })}</div>}
   </div></>);
 }
