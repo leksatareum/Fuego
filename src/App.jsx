@@ -132,7 +132,6 @@ const DB = {
       // suffit à savoir s'il y en a une, pour afficher la vignette.
       sbGet("traceability",    qs(q.order("created_at",false),q.limit(100),q.select("id,product,emoji,supplier,lot,dlc,qty,allergenes,status,created_at,photo_present"))),
       sbGet("labels",          qs(`created_at=gte.${new Date(Date.now()-7*86400000).toISOString()}`,q.order("created_at",false),q.limit(300),q.select())),
-      sbGet("test_meals",      qs(q.order("created_at",false),q.limit(100),q.select())),
       sbGet("training",        qs(q.order("id"),q.select())),
       sbGet("pests",           qs(q.order("created_at",false),q.limit(50),q.select())),
       sbGet("recipes",         qs(q.order("id"),q.select())),
@@ -206,7 +205,6 @@ const DB = {
       // sans télécharger l'image.
       traceability: trace.map(t=>({id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status,photo:null,hasPhoto:!!t.photo_present,createdAt:t.created_at})),
       labels: labels.map(l=>({id:l.id,product:l.product,dateProd:l.date_prod,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator,createdAt:l.created_at})),
-      testMeals: tm.map(m=>({id:m.id,date:m.date,service:m.service,product:m.product,qty:m.qty,destroyAt:m.destroy_at,operator:m.operator,createdAt:m.created_at})),
       training: train.map(t=>({id:t.id,name:t.name,role:t.role,haccpExp:t.haccp_exp,visaExp:t.visa_exp})),
       pests: pests.map(p=>({id:p.id,date:p.date,type:p.type,company:p.company,result:p.result,nextVisit:p.next_visit,reportPath:p.report_path||null,reportName:p.report_name||null,createdAt:p.created_at})),
       recipes: recipes.map(r=>({id:r.id,name:r.name,emoji:r.emoji,type:r.type,category:r.category,price:r.price,portions:r.portions,yield:r.yield_qty?{qty:r.yield_qty,unit:r.yield_unit}:undefined,components:r.components||[],steps:r.steps||[],allergens:r.allergens||[]})),
@@ -235,6 +233,11 @@ const DB = {
   async addReheating(r){return sbPost("reheating",{product:r.product,end_temp:r.endTemp,duration:r.duration,operator:r.operator,status:r.status,date:r.date});},
   async addOil(o){return sbPost("oils",{name:o.name,type:o.type,date_install:todayStr(),last_test:todayStr(),polaires:0,operator:o.operator});},
   async deleteOil(id){return sbDelete("oils",qs(`id=eq.${id}`));},
+  // Formation HACCP : aucune fonction n'existait ici avant — l'écran ne
+  // faisait qu'afficher les données de démo sans jamais pouvoir les modifier.
+  async addTraining(t){return sbPost("training",{name:t.name,role:t.role,haccp_exp:t.haccpExp,visa_exp:t.visaExp});},
+  async updateTraining(id,t){return sbPatch("training",{name:t.name,role:t.role,haccp_exp:t.haccpExp,visa_exp:t.visaExp},qs(`id=eq.${id}`));},
+  async deleteTraining(id){return sbDelete("training",qs(`id=eq.${id}`));},
   async updateOil(id,{polaires,operator,changed,dateInstall}){
     const body={polaires,operator,last_test:todayStr()};
     if(changed)body.date_install=dateInstall;
@@ -264,7 +267,6 @@ const DB = {
       sbGet("reheating",   `?${range}&${q.select()}`),
       sbGet("oils",        `?${range}&${q.select()}`),
       sbGet("labels",      `?${range}&${q.select()}`),
-      sbGet("test_meals",  `?${range}&${q.select()}`),
       sbGet("pests",       `?${range}&${q.select()}`),
       sbGet("fridge_releves", `?${range}&${q.select()}`),
       sbGet("traceability",`?${range}&${q.select("id,product,emoji,supplier,lot,dlc,qty,allergenes,status,created_at")}`),
@@ -278,7 +280,6 @@ const DB = {
       reheating: (reheat.data||[]).map(r=>({id:r.id,product:r.product,endTemp:r.end_temp,duration:r.duration,operator:r.operator,status:r.status,date:r.date,createdAt:r.created_at})),
       oils: (oils.data||[]).map(o=>({id:o.id,name:o.name,type:o.type,dateInstall:o.date_install,lastTest:o.last_test,polaires:o.polaires,operator:o.operator,createdAt:o.created_at})),
       labels: (labels.data||[]).map(l=>({id:l.id,product:l.product,dateProd:l.date_prod,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator,createdAt:l.created_at})),
-      testMeals: (tm.data||[]).map(m=>({id:m.id,date:m.date,service:m.service,product:m.product,qty:m.qty,destroyAt:m.destroy_at,operator:m.operator,createdAt:m.created_at})),
       pests: (pests.data||[]).map(p=>({id:p.id,date:p.date,type:p.type,company:p.company,result:p.result,nextVisit:p.next_visit,createdAt:p.created_at})),
       fridgeReleves: (fr.data||[]).map(r=>({id:r.id,fridgeId:r.fridge_id,date:r.date,period:r.period,temp:r.temp,time:r.time,operatorId:r.operator_id,createdAt:r.created_at})),
       traceability: (trace.data||[]).map(t=>({id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status,createdAt:t.created_at})),
@@ -310,7 +311,6 @@ const DB = {
     const startOfToday = new Date(); startOfToday.setHours(0,0,0,0);
     return sbDelete("labels", qs(`created_at=lt.${startOfToday.toISOString()}`));
   },
-  async addTestMeal(m){return sbPost("test_meals",{date:m.date,service:m.service,product:m.product,qty:m.qty,destroy_at:m.destroyAt,operator:m.operator});},
   async addPest(p){return sbPost("pests",{date:p.date,type:p.type,company:p.company,result:p.result,next_visit:p.nextVisit,report_path:p.reportPath||null,report_name:p.reportName||null});},
   // Envoie le PDF dans le Storage. Le nom est rendu unique pour éviter
   // d'écraser un rapport existant portant le même nom de fichier.
@@ -988,7 +988,6 @@ const INIT={
     {id:4,product:"Burrata",emoji:"🧀",supplier:"Fromager Italien",lot:"BU990",dlc:"09/05",qty:"800 g",allergenes:["Lait"],status:"expired"},
   ],
   labels:[{id:1,product:"Ratatouille maison",dateProd:"10/05",dlc:"13/05",lot:"L260510-1",allergens:"Aucun",operator:"Marie Dubois"}],
-  testMeals:[{id:1,date:"10/05",service:"Midi",product:"Bœuf bourguignon",qty:"100 g",destroyAt:"13/05",operator:"Lucas Martin"}],
   training:[
     {id:1,name:"Lucas Martin",role:"Chef de cuisine",haccpExp:"15/03/2027",visaExp:"02/01/2027"},
     {id:2,name:"Marie Dubois",role:"Chef de partie",haccpExp:"20/01/2027",visaExp:"05/02/2027"},
@@ -1237,7 +1236,6 @@ function Aujourdhui({data,go,user,onVoiceOpen}){
     if(tasksDone<tasksTotal)nowItems.push({icon:"✅",title:"Mise en place",done:tasksDone,total:tasksTotal,color:T.accent,goto:"tasks"});
     upcomingItems.push({icon:"🚚",title:"Réception fournisseurs",sub:"Avant 11h",goto:"reception"});
   }else if(win.id==="lunch"||win.id==="dinner"){
-    nowItems.push({icon:"🧪",title:"Plats témoins",sub:"Service en cours",color:T.info,goto:"testmeals"});
     upcomingItems.push({icon:"🧹",title:"Nettoyage de fin",sub:`${cleanDone}/${cleanTotal} fait`,goto:"clean"});
   }else if(win.id==="prep_pm"){
     if(tasksDone<tasksTotal)nowItems.push({icon:"✅",title:"Mise en place",done:tasksDone,total:tasksTotal,color:T.accent,goto:"tasks"});
@@ -1368,10 +1366,6 @@ function buildRegistreEvents(data){
 
   data.labels.forEach(l=>{
     ev.push({date:l.dateProd,time:"—",ts:eventTs(l.createdAt,l.dateProd),type:"label",icon:"🏷️",title:`Étiquette · ${l.product}`,detail:`DLC ${l.dlc} · Lot ${l.lot}`,status:"good",module:"Étiquetage",operator:l.operator||"—"});
-  });
-
-  data.testMeals.forEach(m=>{
-    ev.push({date:m.date,time:"—",ts:eventTs(m.createdAt,m.date),type:"testmeal",icon:"🧪",title:`Plat témoin · ${m.product}`,detail:`${m.service} · Conservation jusqu'au ${m.destroyAt}`,status:"good",module:"Plats témoins",operator:m.operator||"—"});
   });
 
   data.pests.forEach(p=>{
@@ -1540,22 +1534,25 @@ function Registre({data,db}){
 
       <button className="btn btn-ghost mt14 mb14" onClick={()=>setShowExport(true)}>📄 Exporter en PDF</button>
 
-      {/* Timeline groupée par jour */}
+      {/* Timeline groupée par jour — chaque jour est un sous-menu repliable,
+          le plus récent ouvert par défaut pour ne pas devoir tout déplier
+          juste pour voir ce qui vient de se passer. */}
       {dateKeys.length===0
         ? <div className="empty"><div className="empty-icon">📋</div><div className="empty-title">Aucun événement</div><div className="empty-sub">Ajustez les filtres pour voir l'historique</div></div>
-        : dateKeys.map(dateKey=>(
-          <div key={dateKey} style={{marginBottom:18}}>
-            <div className="bucket-label">{dateKey}</div>
-            {grouped[dateKey].map((e,i)=>(
-              <div key={i} className="item" style={{marginBottom:5}}>
-                <div className="item-icon" style={{background:e.status==="bad"?T.badBg:T.infoBg,fontSize:18}}>{e.icon}</div>
-                <div className="item-body">
-                  <div className="item-title">{e.title}</div>
-                  <div className="item-sub">{e.detail} · {e.operator}</div>
+        : dateKeys.map((dateKey,idx)=>(
+          <div key={dateKey} style={{marginBottom:10}}>
+            <CollapsibleSection title={dateKey} icon="📅" count={grouped[dateKey].length} defaultOpen={idx===0}>
+              {grouped[dateKey].map((e,i)=>(
+                <div key={i} className="item" style={{marginBottom:5}}>
+                  <div className="item-icon" style={{background:e.status==="bad"?T.badBg:T.infoBg,fontSize:18}}>{e.icon}</div>
+                  <div className="item-body">
+                    <div className="item-title">{e.title}</div>
+                    <div className="item-sub">{e.detail} · {e.operator}</div>
+                  </div>
+                  <span className={`badge ${e.status==="bad"?"b-bad":"b-good"}`}>{e.status==="bad"?"⚠":"✓"}</span>
                 </div>
-                <span className={`badge ${e.status==="bad"?"b-bad":"b-good"}`}>{e.status==="bad"?"⚠":"✓"}</span>
-              </div>
-            ))}
+              ))}
+            </CollapsibleSection>
           </div>
         ))
       }
@@ -1813,7 +1810,6 @@ const GBPH_SECTIONS = [
       {q:"Préparation maison", a:"3 jours à compter de la fabrication, sauf indication contraire du fournisseur pour les matières premières utilisées.", tag:"Bonnes pratiques"},
       {q:"Produit entamé / ouvert", a:"3 jours après ouverture, à conserver au froid, quelle que soit la DLC d'origine si elle est plus longue.", tag:"Bonnes pratiques"},
       {q:"Congélation maison", a:"6 mois recommandés pour la plupart des produits (variable selon la nature : viande, poisson, légumes).", tag:"Bonnes pratiques"},
-      {q:"Plats témoins", a:"Conserver un échantillon de chaque plat servi pendant au moins 5 jours après le service, dans un contenant identifié et daté.", tag:"Réglementaire"},
       {q:"Conservation au sel (type gravlax)", a:"DLC courte (3 à 5 jours) sauf process de salaison plus poussé. Ne dispense pas du froid pendant et après le salage.", tag:"Bonnes pratiques"},
     ],
   },
@@ -2027,7 +2023,6 @@ function HaccpHub({data,go}){
     {title:"Traçabilité",items:[
       {key:"trace",icon:"📦",bg:T.warnBg,title:"Traçabilité produits",sub:`${data.traceability.length} produits`,badge:alerts>0?{l:`${alerts} alerte`,c:"b-bad"}:{l:"OK",c:"b-good"}},
       {key:"labels",icon:"🏷️",bg:T.goodBg,title:"Étiquetage Brother",sub:"Impression DLC + allergènes",badge:{l:`${data.labels.length}`,c:"b-info"}},
-      {key:"testmeals",icon:"🧪",bg:T.infoBg,title:"Plats témoins",sub:`Conservation ${data.haccpSettings.testMealDays}j`,badge:{l:`${data.testMeals.length}`,c:"b-mute"}},
     ]},
     {title:"Hygiène et personnel",items:[
       {key:"clean",icon:"🧹",bg:T.goodBg,title:"Nettoyage",sub:`${cleanOk}/${data.cleaning.length} zones`,badge:cleanOk===data.cleaning.length?{l:"Terminé",c:"b-good"}:{l:"En cours",c:"b-warn"}},
@@ -2116,7 +2111,7 @@ function Temperatures({data,setData,user,db,reload,go,markLocalWrite,lang}){
   </div>);
 }
 
-function Reception({data,setData,user,db,reload,go,markLocalWrite}){
+function Reception({data,setData,user,db,reload,go,markLocalWrite,lang}){
   const[show,setShow]=useState(false);const[temp,setTemp]=useState(3);const[aspect,setAspect]=useState("OK");const[emb,setEmb]=useState("OK");
   const[form,setForm]=useState({supplier:"",product:"",qty:"",dlc:"",lot:""});
   async function save(){
@@ -2134,12 +2129,12 @@ function Reception({data,setData,user,db,reload,go,markLocalWrite}){
   }
   return(<div className="page">
     <GbphHelpButton section="trace" go={go}/>
-    <div className="section-title">Réception</div><div className="section-sub">Contrôle de chaque livraison</div>
+    <div className="section-title">{t("recv_title",lang)}</div><div className="section-sub">{t("recv_subtitle",lang)}</div>
     {data.reception.length===0 && (
       <div className="empty">
         <div className="empty-icon">🚚</div>
-        <div className="empty-title">Aucune réception</div>
-        <div className="empty-sub">Enregistre ta prochaine livraison avec le bouton +</div>
+        <div className="empty-title">{t("recv_empty_title",lang)}</div>
+        <div className="empty-sub">{t("recv_empty_sub",lang)}</div>
       </div>
     )}
     {data.reception.map(r=><div key={r.id} className="card">
@@ -2149,15 +2144,15 @@ function Reception({data,setData,user,db,reload,go,markLocalWrite}){
     </div>)}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
-      <div className="sheet-handle"></div><div className="sheet-title">Nouvelle réception</div>
-      <div className="field"><label className="label">Produit</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})} placeholder="ex : Saumon frais"/></div>
-      <div className="field"><label className="label">Fournisseur</label><input className="input" value={form.supplier} onChange={e=>setForm({...form,supplier:e.target.value})}/></div>
-      <div className="row gap8 mb14"><div style={{flex:1}}><label className="label">Quantité</label><input className="input input-sm" value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})}/></div><div style={{flex:1}}><label className="label">N° lot</label><input className="input input-sm" value={form.lot} onChange={e=>setForm({...form,lot:e.target.value})}/></div></div>
-      <div className="field"><label className="label">DLC</label><input className="input" type="date" value={form.dlc} onChange={e=>setForm({...form,dlc:e.target.value})}/></div>
-      <div className="field"><label className="label">Température à réception</label><TapDial value={temp} onChange={setTemp} center={3} colorFn={v=>v<=4?"good":v<=6?"warn":"bad"}/>{temp>4&&<div className="text-xs mt6" style={{color:T.bad}}>⚠ Hors norme</div>}</div>
-      <div className="field"><label className="label">Aspect</label><BinaryChoice value={aspect} onChange={setAspect} options={[{value:"OK",label:"Conforme",icon:"✓",style:"good"},{value:"NON CONFORME",label:"Non conforme",icon:"✗",style:"bad"}]}/></div>
-      <div className="field"><label className="label">Emballage</label><BinaryChoice value={emb} onChange={setEmb} options={[{value:"OK",label:"Intact",icon:"✓",style:"good"},{value:"ENDOMMAGÉ",label:"Endommagé",icon:"✗",style:"bad"}]}/></div>
-      <button className="btn btn-primary mt8" onClick={save} disabled={!form.product}>Enregistrer</button>
+      <div className="sheet-handle"></div><div className="sheet-title">{t("recv_new",lang)}</div>
+      <div className="field"><label className="label">{t("recv_product",lang)}</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})} placeholder="ex : Saumon frais"/></div>
+      <div className="field"><label className="label">{t("recv_supplier",lang)}</label><input className="input" value={form.supplier} onChange={e=>setForm({...form,supplier:e.target.value})}/></div>
+      <div className="row gap8 mb14"><div style={{flex:1}}><label className="label">{t("recv_qty",lang)}</label><input className="input input-sm" value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})}/></div><div style={{flex:1}}><label className="label">{t("recv_lot",lang)}</label><input className="input input-sm" value={form.lot} onChange={e=>setForm({...form,lot:e.target.value})}/></div></div>
+      <div className="field"><label className="label">{t("recv_dlc",lang)}</label><input className="input" type="date" value={form.dlc} onChange={e=>setForm({...form,dlc:e.target.value})}/></div>
+      <div className="field"><label className="label">{t("recv_temp_at_arrival",lang)}</label><TapDial value={temp} onChange={setTemp} center={3} colorFn={v=>v<=4?"good":v<=6?"warn":"bad"}/>{temp>4&&<div className="text-xs mt6" style={{color:T.bad}}>⚠ {t("recv_out_of_range",lang)}</div>}</div>
+      <div className="field"><label className="label">{t("recv_aspect",lang)}</label><BinaryChoice value={aspect} onChange={setAspect} options={[{value:"OK",label:t("recv_conform",lang),icon:"✓",style:"good"},{value:"NON CONFORME",label:t("recv_not_conform",lang),icon:"✗",style:"bad"}]}/></div>
+      <div className="field"><label className="label">{t("recv_packaging",lang)}</label><BinaryChoice value={emb} onChange={setEmb} options={[{value:"OK",label:t("recv_intact",lang),icon:"✓",style:"good"},{value:"ENDOMMAGÉ",label:t("recv_damaged",lang),icon:"✗",style:"bad"}]}/></div>
+      <button className="btn btn-primary mt8" onClick={save} disabled={!form.product}>{t("recv_save",lang)}</button>
     </div></div>}
   </div>);
 }
@@ -2167,7 +2162,7 @@ const CELL_MODES = {
   refroid: { key:"refroid", label:"Refroidissement", icon:"❄️", sub:"63°C → 10°C à cœur", targetEnd:10, startCenter:65, endCenter:8, dlcMonths:0 },
   surgel:  { key:"surgel",  label:"Surgélation",     icon:"🧊", sub:"jusqu'à −18°C à cœur", targetEnd:-18, startCenter:65, endCenter:-18, dlcMonths:6 },
 };
-function Cooling({data,setData,user,db,reload,go,markLocalWrite}){
+function Cooling({data,setData,user,db,reload,go,markLocalWrite,lang}){
   const[show,setShow]=useState(false);const[step,setStep]=useState(0);
   const[mode,setMode]=useState("refroid");
   const[form,setForm]=useState({product:"",qty:""});const[startTemp,setStartTemp]=useState(65);const[endTemp,setEndTemp]=useState(8);
@@ -2205,8 +2200,8 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite}){
   const coolingDone=data.cooling.filter(c=>c.status!=="active");
   return(<div className="page">
     <GbphHelpButton section="temp" go={go}/>
-    <div className="section-title">Cellule</div><div className="section-sub">Refroidissement & surgélation</div>
-    {coolingDone.length===0 && <div className="empty"><div className="empty-icon">❄️</div><div className="empty-title">Aucun passage en cellule</div><div className="empty-sub">Lance un refroidissement ou une surgélation avec le bouton +</div></div>}
+    <div className="section-title">{t("cool_title",lang)}</div><div className="section-sub">{t("cool_subtitle",lang)}</div>
+    {coolingDone.length===0 && <div className="empty"><div className="empty-icon">❄️</div><div className="empty-title">{t("cool_empty_title",lang)}</div><div className="empty-sub">{t("cool_empty_sub",lang)}</div></div>}
     {coolingDone.map(c=>{const cm=CELL_MODES[c.mode||"refroid"];const okTemp=(c.mode==="surgel")?c.endTemp<=-18:c.endTemp<=10;return(<div key={c.id} className="card">
       <div className="between mb6"><div><div className="item-title">{cm.icon} {c.product}</div><div className="item-sub">{cm.label} · {c.qty} · {c.date}</div></div><span className={`badge ${c.status==="ok"?"b-good":"b-bad"}`}>{c.status==="ok"?"✓ OK":"⚠"}</span></div>
       <div className="row gap12" style={{flexWrap:"wrap"}}><div><div className="text-xs text-dim">Départ</div><div className="text-sm fw7 tabular">{c.startTemp}°C</div></div><div><div className="text-xs text-dim">Arrivée</div><div className="text-sm fw7 tabular" style={{color:okTemp?T.good:T.bad}}>{c.endTemp}°C</div></div><div><div className="text-xs text-dim">Durée</div><div className="text-sm fw7 tabular" style={{color:c.duration<=maxMin?T.good:T.bad}}>{c.duration} min</div></div></div>
@@ -2215,8 +2210,8 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite}){
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>{setStep(0);setMode("refroid");setShow(true);}}>+</button></div>
     {show&&<div className="overlay" onClick={()=>step<=1&&setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div>
-      {step===0&&<><div className="sheet-title">Passage en cellule</div>
-        <div className="text-sm text-dim center mb14">Quel type d'opération ?</div>
+      {step===0&&<><div className="sheet-title">{t("cool_new",lang)}</div>
+        <div className="text-sm text-dim center mb14">{t("cool_which_operation",lang)}</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:8}}>
           {Object.values(CELL_MODES).map(cm=>(
             <button key={cm.key} onClick={()=>{haptic.light();setMode(cm.key);setEndTemp(cm.endCenter);setStep(1);}}
@@ -2229,17 +2224,17 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite}){
         </div></>}
       {step===1&&<><div className="sheet-title">{M.icon} {M.label}</div>
         <div className="text-xs text-dim center mb12">{M.sub}{M.dlcMonths?` · DLC +${M.dlcMonths} mois`:""}</div>
-        <div className="field"><label className="label">Produit</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})}/></div>
-        <div className="field"><label className="label">Quantité</label><input className="input" value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})}/></div>
-        <div className="field"><label className="label">Température de départ</label><TapDial value={startTemp} onChange={setStartTemp} center={65} step={2} colorFn={v=>v>=63?"good":"warn"}/></div>
-        <div className="row gap8"><button className="btn btn-ghost" style={{flex:"0 0 auto",width:52}} onClick={()=>setStep(0)}>←</button><button className="btn btn-primary" style={{flex:1}} onClick={start} disabled={!form.product}>▶ Lancer le chronomètre</button></div></>}
+        <div className="field"><label className="label">{t("cool_product",lang)}</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})}/></div>
+        <div className="field"><label className="label">{t("cool_qty",lang)}</label><input className="input" value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})}/></div>
+        <div className="field"><label className="label">{t("cool_start_temp",lang)}</label><TapDial value={startTemp} onChange={setStartTemp} center={65} step={2} colorFn={v=>v>=63?"good":"warn"}/></div>
+        <div className="row gap8"><button className="btn btn-ghost" style={{flex:"0 0 auto",width:52}} onClick={()=>setStep(0)}>←</button><button className="btn btn-primary" style={{flex:1}} onClick={start} disabled={!form.product}>{t("cool_start_timer",lang)}</button></div></>}
       {step===2&&<><div className="sheet-title center">{form.product}</div>
         <div className="text-sm text-dim center mb6">Départ : {startTemp}°C · Limite : {maxMin} min</div>
         <div className="timer-display tabular" style={{color:overtime?T.bad:elapsed>maxMin*60*.75?T.warn:T.text}}>{fmt(elapsed)}</div>
         <div className="center mb12"><span style={{fontSize:12,fontWeight:600,color:overtime?T.bad:elapsed>maxMin*60*.75?T.warn:T.good}}>{overtime?"⚠ Limite dépassée":elapsed>maxMin*60*.75?"⚠ Bientôt la limite":"✓ Dans les temps"}</span></div>
         <div className="pbar mb12"><div className="pfill" style={{width:`${progress}%`,background:overtime?T.bad:elapsed>maxMin*60*.75?T.warn:T.good}}></div></div>
-        <button className="btn btn-primary" onClick={()=>setStep(3)}>⏹ Relever la T° finale</button></>}
-      {step===3&&<><div className="sheet-title">Température finale</div>
+        <button className="btn btn-primary" onClick={()=>setStep(3)}>{t("cool_read_final",lang)}</button></>}
+      {step===3&&<><div className="sheet-title">{t("cool_final_temp",lang)}</div>
         <div className="text-sm text-dim mb12">Durée : <b style={{color:T.text}}>{Math.floor(elapsed/60)} min</b></div>
         {mode==="surgel"
           ? <div className="field"><label className="label">T° à cœur — cible ≤ −18°C</label><TapDial value={endTemp} onChange={setEndTemp} center={-18} step={2} colorFn={v=>v<=-18?"good":"bad"}/></div>
@@ -2285,7 +2280,7 @@ function Reheating({data,setData,user,db,reload,go,markLocalWrite}){
   </div>);
 }
 
-function Oils({data,setData,user,db,reload,go,markLocalWrite}){
+function Oils({data,setData,user,db,reload,go,markLocalWrite,lang}){
   const[selOil,setSelOil]=useState(null);const[polaires,setPolaires]=useState(15);const[action,setAction]=useState("filtered");
   const[showAdd,setShowAdd]=useState(false);const[newOil,setNewOil]=useState({name:"",type:"Tournesol"});
   const max=data.haccpSettings.oilPolarMax;
@@ -2320,15 +2315,15 @@ function Oils({data,setData,user,db,reload,go,markLocalWrite}){
 
   return(<div className="page">
     <GbphHelpButton section="oils" go={go}/>
-    <div className="section-title">Huiles de friture</div>
+    <div className="section-title">{t("oils_title",lang)}</div>
     <div className="section-sub">Polaires — seuil légal : {max}%</div>
 
     {data.oils.length===0 ? (
       <div className="empty">
         <div className="empty-icon">🍟</div>
-        <div className="empty-title">Aucune friteuse suivie</div>
-        <div className="empty-sub">Ajoute tes friteuses pour commencer le suivi des huiles</div>
-        <button className="btn btn-primary mt14" onClick={()=>setShowAdd(true)} style={{maxWidth:220,marginLeft:"auto",marginRight:"auto",display:"block"}}>+ Ajouter une friteuse</button>
+        <div className="empty-title">{t("oils_empty_title",lang)}</div>
+        <div className="empty-sub">{t("oils_empty_sub",lang)}</div>
+        <button className="btn btn-primary mt14" onClick={()=>setShowAdd(true)} style={{maxWidth:220,marginLeft:"auto",marginRight:"auto",display:"block"}}>{t("oils_add",lang)}</button>
       </div>
     ) : (
       <>
@@ -2366,20 +2361,20 @@ function Oils({data,setData,user,db,reload,go,markLocalWrite}){
             <div className="row gap6 mt8"><button className="btn btn-ghost btn-sm" style={{flex:1}} onClick={()=>setSelOil(null)}>Annuler</button><button className="btn btn-primary btn-sm" style={{flex:2}} onClick={save}>Enregistrer</button></div>
           </>:(
             <div className="row gap6">
-              <button className="btn btn-primary btn-sm" style={{flex:1}} onClick={()=>{setSelOil(o);setPolaires(15);setAction("filtered");}}>+ Nouveau test</button>
+              <button className="btn btn-primary btn-sm" style={{flex:1}} onClick={()=>{setSelOil(o);setPolaires(15);setAction("filtered");}}>{t("oils_new_test",lang)}</button>
               <button className="btn btn-ghost btn-sm" style={{flex:"0 0 auto",width:40,color:T.bad}} onClick={()=>removeOil(o)}>🗑</button>
             </div>
           )}
         </div>);})}
-        <button className="btn btn-ghost mt8" onClick={()=>setShowAdd(true)}>+ Ajouter une autre friteuse</button>
+        <button className="btn btn-ghost mt8" onClick={()=>setShowAdd(true)}>{t("oils_add_another",lang)}</button>
       </>
     )}
 
     {showAdd&&<div className="overlay" onClick={()=>setShowAdd(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div>
-      <div className="sheet-title">Nouvelle friteuse</div>
-      <div className="field"><label className="label">Nom</label><input className="input" value={newOil.name} onChange={e=>setNewOil({...newOil,name:e.target.value})} placeholder="ex : Friteuse 1 — Frites"/></div>
-      <div className="field"><label className="label">Type d'huile</label>
+      <div className="sheet-title">{t("oils_new_fryer",lang)}</div>
+      <div className="field"><label className="label">{t("oils_name",lang)}</label><input className="input" value={newOil.name} onChange={e=>setNewOil({...newOil,name:e.target.value})} placeholder="ex : Friteuse 1 — Frites"/></div>
+      <div className="field"><label className="label">{t("oils_type",lang)}</label>
         <QuickPick value={newOil.type} onChange={v=>setNewOil({...newOil,type:v})} options={[
           {value:"Tournesol",label:"Tournesol"},{value:"Arachide",label:"Arachide"},{value:"Colza",label:"Colza"},{value:"Spéciale friture",label:"Spéciale friture"},
         ]}/>
@@ -2389,7 +2384,24 @@ function Oils({data,setData,user,db,reload,go,markLocalWrite}){
   </div>);
 }
 
-function Traceability({data,setData,db,reload,go,markLocalWrite}){
+// Ligne d'une fiche de traçabilité, réutilisée qu'on soit en liste plate
+// (filtre précis) ou groupée par statut (vue "Tous").
+function TraceRow({t,onOpen}){
+  return (
+    <div className="item" onClick={()=>t.hasPhoto&&onOpen(t)} style={{cursor:t.hasPhoto?"pointer":"default"}}>
+      <div className="item-icon" style={{background:t.status==="expired"?T.badBg:t.status==="warn"?T.warnBg:T.infoBg,position:"relative"}}>
+        {t.emoji}
+        {/* Pastille photo : indique qu'une image existe, sans avoir à la
+            télécharger (les vignettes de 200 photos plombaient le démarrage). */}
+        {t.hasPhoto&&<span style={{position:"absolute",bottom:-2,right:-2,fontSize:10,background:T.bg2,borderRadius:"50%",width:15,height:15,display:"flex",alignItems:"center",justifyContent:"center"}}>📷</span>}
+      </div>
+      <div className="item-body"><div className="item-title">{t.product}</div><div className="item-sub">{t.supplier} · DLC {t.dlc}</div></div>
+      <span className={`badge ${t.status==="ok"?"b-good":t.status==="warn"?"b-warn":"b-bad"}`}>{t.status==="ok"?"OK":t.status==="warn"?"Proche":"Expiré"}</span>
+    </div>
+  );
+}
+
+function Traceability({data,setData,db,reload,go,markLocalWrite,lang}){
   const[show,setShow]=useState(false);const[photo,setPhoto]=useState(null); // base64 de la photo capturée, en attente d'enregistrement
   const[filter,setFilter]=useState("all");
   const[detail,setDetail]=useState(null); // fiche sélectionnée pour voir sa photo en grand
@@ -2425,19 +2437,37 @@ function Traceability({data,setData,db,reload,go,markLocalWrite}){
   const filtered=filter==="all"?data.traceability:filter==="alerts"?data.traceability.filter(t=>t.status!=="ok"):data.traceability.filter(t=>t.status==="ok");
   return(<div className="page">
     <GbphHelpButton section="trace" go={go}/>
-    <div className="section-title">Traçabilité</div><div className="section-sub">{data.traceability.length} produits</div>
+    <div className="section-title">{t("trace_title",lang)}</div><div className="section-sub">{data.traceability.length} produits</div>
     <SegmentedControl value={filter} onChange={setFilter} options={[{value:"all",label:"Tous"},{value:"alerts",label:"⚠ Alertes"},{value:"ok",label:"✓ OK"}]}/>
     <div style={{height:14}}></div>
-    {filtered.length===0?<div className="empty"><div className="empty-icon">✓</div><div className="empty-title">Tout est en ordre</div></div>:filtered.map(t=><div key={t.id} className="item" onClick={()=>t.hasPhoto&&openDetail(t)} style={{cursor:t.hasPhoto?"pointer":"default"}}>
-      <div className="item-icon" style={{background:t.status==="expired"?T.badBg:t.status==="warn"?T.warnBg:T.infoBg,position:"relative"}}>
-        {t.emoji}
-        {/* Pastille photo : indique qu'une image existe, sans avoir à la
-            télécharger (les vignettes de 200 photos plombaient le démarrage). */}
-        {t.hasPhoto&&<span style={{position:"absolute",bottom:-2,right:-2,fontSize:10,background:T.bg2,borderRadius:"50%",width:15,height:15,display:"flex",alignItems:"center",justifyContent:"center"}}>📷</span>}
-      </div>
-      <div className="item-body"><div className="item-title">{t.product}</div><div className="item-sub">{t.supplier} · DLC {t.dlc}</div></div>
-      <span className={`badge ${t.status==="ok"?"b-good":t.status==="warn"?"b-warn":"b-bad"}`}>{t.status==="ok"?"OK":t.status==="warn"?"Proche":"Expiré"}</span>
-    </div>)}
+    {filtered.length===0?<div className="empty"><div className="empty-icon">✓</div><div className="empty-title">{t("trace_all_ok",lang)}</div></div>:(
+      filter!=="all" ? (
+        // Un filtre précis est déjà actif (Alertes ou OK) : liste plate,
+        // pas besoin d'un sous-menu supplémentaire au-dessus.
+        filtered.map(t=><TraceRow key={t.id} t={t} onOpen={openDetail}/>)
+      ) : (() => {
+        // Vue "Tous" : regroupée par statut, alertes ouvertes par défaut —
+        // c'est ce qui a besoin d'attention immédiate. Les produits
+        // conformes restent disponibles, repliés, plutôt que de noyer
+        // les alertes dans une liste qui peut vite s'allonger.
+        const alerts=filtered.filter(t=>t.status!=="ok");
+        const oks=filtered.filter(t=>t.status==="ok");
+        return (<>
+          {alerts.length>0 && (
+            <CollapsibleSection title="Alertes" icon="⚠️" count={alerts.length} defaultOpen={true}>
+              {alerts.map(t=><TraceRow key={t.id} t={t} onOpen={openDetail}/>)}
+            </CollapsibleSection>
+          )}
+          {oks.length>0 && (
+            <div style={{marginTop:alerts.length>0?10:0}}>
+              <CollapsibleSection title="Conformes" icon="✓" count={oks.length} defaultOpen={alerts.length===0}>
+                {oks.map(t=><TraceRow key={t.id} t={t} onOpen={openDetail}/>)}
+              </CollapsibleSection>
+            </div>
+          )}
+        </>);
+      })()
+    )}
     {detail&&<div className="overlay" onClick={()=>setDetail(null)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">{detail.product}</div>
       {loadingPhoto&&!detail.photo&&<div style={{width:"100%",height:180,borderRadius:14,marginBottom:12,background:T.bg3,display:"flex",alignItems:"center",justifyContent:"center",color:T.textDim,fontSize:12}}>Chargement de la photo…</div>}
@@ -2447,14 +2477,14 @@ function Traceability({data,setData,db,reload,go,markLocalWrite}){
     </div></div>}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
-      <div className="sheet-handle"></div><div className="sheet-title">Ajouter un produit</div>
+      <div className="sheet-handle"></div><div className="sheet-title">{t("trace_add_product",lang)}</div>
       {photo
         ? <div style={{position:"relative",marginBottom:14}}><img src={photo} alt="" style={{width:"100%",borderRadius:14}}/><button onClick={()=>setPhoto(null)} style={{position:"absolute",top:8,right:8,width:32,height:32,borderRadius:"50%",background:"rgba(0,0,0,.6)",border:"none",color:"#fff",fontSize:16}}>✕</button></div>
-        : <label className="scan" style={{cursor:"pointer",display:"block"}}><div className="scan-icon">📸</div><div className="scan-title">Photo de l'étiquette</div><div className="scan-sub">Conservée avec la fiche</div><input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handlePhoto}/></label>
+        : <label className="scan" style={{cursor:"pointer",display:"block"}}><div className="scan-icon">📸</div><div className="scan-title">{t("trace_photo",lang)}</div><div className="scan-sub">{t("trace_photo_sub",lang)}</div><input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handlePhoto}/></label>
       }
-      <div className="field"><label className="label">Produit</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})}/></div>
-      <div className="field"><label className="label">Fournisseur</label><input className="input" value={form.supplier} onChange={e=>setForm({...form,supplier:e.target.value})}/></div>
-      <div className="row gap8 mb14"><div style={{flex:1}}><label className="label">Lot</label><input className="input input-sm" value={form.lot} onChange={e=>setForm({...form,lot:e.target.value})}/></div><div style={{flex:1}}><label className="label">Qté</label><input className="input input-sm" value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})}/></div></div>
+      <div className="field"><label className="label">{t("trace_product",lang)}</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})}/></div>
+      <div className="field"><label className="label">{t("trace_supplier",lang)}</label><input className="input" value={form.supplier} onChange={e=>setForm({...form,supplier:e.target.value})}/></div>
+      <div className="row gap8 mb14"><div style={{flex:1}}><label className="label">{t("trace_lot",lang)}</label><input className="input input-sm" value={form.lot} onChange={e=>setForm({...form,lot:e.target.value})}/></div><div style={{flex:1}}><label className="label">{t("trace_qty",lang)}</label><input className="input input-sm" value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})}/></div></div>
       <div className="field"><label className="label">DLC</label><input className="input" type="date" value={form.dlc} onChange={e=>setForm({...form,dlc:e.target.value})}/></div>
       <div className="field"><label className="label">Allergènes</label><input className="input" value={form.allergenes} onChange={e=>setForm({...form,allergenes:e.target.value})} placeholder="Gluten, Lait..."/></div>
       <button className="btn btn-primary mt8" onClick={save} disabled={!form.product}>Enregistrer</button>
@@ -2968,7 +2998,7 @@ async function printBrotherLabel(labelData){
   return {ok:true};
 }
 
-function Labels({data,setData,user,db,reload,go,markLocalWrite}){
+function Labels({data,setData,user,db,reload,go,markLocalWrite,lang}){
   const[show,setShow]=useState(false);
   const[form,setForm]=useState({product:"",allergens:"",qty:""});
   const[dateType,setDateType]=useState("fabrique");           // clé DATE_TYPES
@@ -3031,15 +3061,15 @@ function Labels({data,setData,user,db,reload,go,markLocalWrite}){
 
   return(<div className="page">
     <GbphHelpButton section="trace" go={go}/>
-    <div className="section-title">Étiquetage</div>
+    <div className="section-title">{t("label_title",lang)}</div>
     <div className="section-sub">Brother · 57,15 × 50,8 mm</div>
 
-    <button className="btn btn-primary mb14" onClick={()=>setShow(true)}>🏷️ Nouvelle étiquette</button>
+    <button className="btn btn-primary mb14" onClick={()=>setShow(true)}>{t("label_new",lang)}</button>
 
     <div className="between" style={{marginBottom:8}}>
-      <div className="bucket-label" style={{margin:0}}>Historique · 7 derniers jours</div>
+      <div className="bucket-label" style={{margin:0}}>{t("label_history",lang)}</div>
       {user?.isAdmin && data.labels.length>0 && (
-        <button onClick={purgeHistory} style={{background:"none",border:"none",color:T.textDim,fontSize:12,fontWeight:600,padding:"4px 8px"}}>🗑 Purger</button>
+        <button onClick={purgeHistory} style={{background:"none",border:"none",color:T.textDim,fontSize:12,fontWeight:600,padding:"4px 8px"}}>{t("label_purge",lang)}</button>
       )}
     </div>
     {data.labels.length===0
@@ -3139,32 +3169,7 @@ function Labels({data,setData,user,db,reload,go,markLocalWrite}){
   </div>);
 }
 
-function TestMeals({data,setData,user,db,reload,go,markLocalWrite}){
-  const[show,setShow]=useState(false);const[form,setForm]=useState({product:"",service:"Midi",qty:"100 g"});
-  const days=data.haccpSettings.testMealDays;
-  async function save(){
-    const destroy=new Date(Date.now()+days*86400000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
-    const res=await db.addTestMeal({date:todayStr(),product:form.product,service:form.service,qty:form.qty,destroyAt:destroy,operator:user.name});
-    if(res?.error){alert("Le plat témoin n'a pas été enregistré. Vérifie la connexion Supabase.");await reload({force:true});return;}
-    if(res?.data){const m=res.data;markLocalWrite?.();setData(d=>({...d,testMeals:[{id:m.id,date:m.date,service:m.service,product:m.product,qty:m.qty,destroyAt:m.destroy_at,operator:m.operator},...d.testMeals]}));}
-    setShow(false);setForm({product:"",service:"Midi",qty:"100 g"});
-  }
-  return(<div className="page">
-    <GbphHelpButton section="dlc" go={go}/>
-    <div className="section-title">Plats témoins</div><div className="section-sub">Conservation {days} jours à ≤ 3°C</div>
-    {data.testMeals.length===0 && <div className="empty"><div className="empty-icon">🧪</div><div className="empty-title">Aucun plat témoin</div><div className="empty-sub">Prélève un échantillon avec le bouton +</div></div>}
-    {data.testMeals.map(m=>{const expired=new Date(m.destroyAt.split("/").reverse().join("-"))<new Date();return(<div key={m.id} className="card"><div className="between mb6"><div><div className="item-title">{m.product}</div><div className="item-sub">{m.service} · {m.qty}</div></div><span className={`badge ${expired?"b-bad":"b-good"}`}>{expired?"À jeter":"OK"}</span></div><div className="text-xs text-dim">Prélevé {m.date} · Détruire le <b style={{color:T.text}}>{m.destroyAt}</b></div></div>);})}
-    <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
-    {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
-      <div className="sheet-handle"></div><div className="sheet-title">Nouveau plat témoin</div>
-      <div className="field"><label className="label">Plat</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})}/></div>
-      <div className="field"><label className="label">Service</label><SegmentedControl value={form.service} onChange={v=>setForm({...form,service:v})} options={[{value:"Midi",label:"☀️ Midi"},{value:"Soir",label:"🌙 Soir"}]}/></div>
-      <button className="btn btn-primary mt8" onClick={save} disabled={!form.product}>Enregistrer</button>
-    </div></div>}
-  </div>);
-}
-
-function Pests({data,setData,db,reload,go,markLocalWrite}){
+function Pests({data,setData,db,reload,go,markLocalWrite,lang}){
   const[show,setShow]=useState(false);
   const[form,setForm]=useState({type:"Visite contrat",company:"",result:"RAS",nextVisit:""});
   const[reportFile,setReportFile]=useState(null); // PDF sélectionné, pas encore envoyé
@@ -3209,23 +3214,43 @@ function Pests({data,setData,db,reload,go,markLocalWrite}){
 
   return(<div className="page">
     <GbphHelpButton section="pest" go={go}/>
-    <div className="section-title">Nuisibles</div><div className="section-sub">Plan de lutte 3D</div>
-    {data.pests.length===0 && <div className="empty"><div className="empty-icon">🐀</div><div className="empty-title">Aucune intervention</div><div className="empty-sub">Enregistre une visite ou une observation avec le bouton +</div></div>}
-    {data.pests.map(p=><div key={p.id} className="card">
-      <div className="between mb6"><div><div className="item-title">{p.type}</div><div className="item-sub">{p.company}</div></div><span className={`badge ${p.result==="RAS"?"b-good":"b-warn"}`}>{p.result}</span></div>
-      <div className="text-xs text-dim">Visite : {p.date} · Prochaine : {p.nextVisit}</div>
-      {p.reportPath && (
-        <a href={db.pestReportUrl(p.reportPath)} target="_blank" rel="noopener noreferrer"
-           style={{display:"flex",alignItems:"center",gap:8,marginTop:10,padding:"9px 12px",background:T.bg3,border:`1px solid ${T.border}`,borderRadius:10,textDecoration:"none"}}>
-          <span style={{fontSize:16}}>📄</span>
-          <span style={{flex:1,fontSize:12,fontWeight:600,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.reportName||"Rapport de passage"}</span>
-          <span style={{color:T.textDim,fontSize:12}}>Ouvrir ›</span>
-        </a>
-      )}
-    </div>)}
+    <div className="section-title">{t("pest_title",lang)}</div><div className="section-sub">{t("pest_subtitle",lang)}</div>
+    {data.pests.length===0 && <div className="empty"><div className="empty-icon">🐀</div><div className="empty-title">{t("pest_empty_title",lang)}</div><div className="empty-sub">{t("pest_empty_sub",lang)}</div></div>}
+    {(() => {
+      // Groupé par mois — createdAt (vrai timestamp avec année) plutôt que la
+      // date affichée "JJ/MM", qui deviendrait ambiguë au-delà d'un an.
+      const MONTH_NAMES=["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+      const groups={};
+      data.pests.forEach(p=>{
+        const d = p.createdAt ? new Date(p.createdAt) : null;
+        const key = d && !isNaN(d) ? `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}` : "Date inconnue";
+        (groups[key]=groups[key]||[]).push(p);
+      });
+      const keys=Object.keys(groups); // déjà dans l'ordre d'arrivée (plus récent d'abord, data.pests est trié ainsi)
+      return keys.map((key,idx)=>(
+        <div key={key} style={{marginBottom:10}}>
+          <CollapsibleSection title={key} icon="📅" count={groups[key].length} defaultOpen={idx===0}>
+            {groups[key].map(p=>(
+              <div key={p.id} className="card" style={{marginBottom:8}}>
+                <div className="between mb6"><div><div className="item-title">{p.type}</div><div className="item-sub">{p.company}</div></div><span className={`badge ${p.result==="RAS"?"b-good":"b-warn"}`}>{p.result}</span></div>
+                <div className="text-xs text-dim">Visite : {p.date} · Prochaine : {p.nextVisit}</div>
+                {p.reportPath && (
+                  <a href={db.pestReportUrl(p.reportPath)} target="_blank" rel="noopener noreferrer"
+                     style={{display:"flex",alignItems:"center",gap:8,marginTop:10,padding:"9px 12px",background:T.bg3,border:`1px solid ${T.border}`,borderRadius:10,textDecoration:"none"}}>
+                    <span style={{fontSize:16}}>📄</span>
+                    <span style={{flex:1,fontSize:12,fontWeight:600,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.reportName||"Rapport de passage"}</span>
+                    <span style={{color:T.textDim,fontSize:12}}>Ouvrir ›</span>
+                  </a>
+                )}
+              </div>
+            ))}
+          </CollapsibleSection>
+        </div>
+      ));
+    })()}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
     {show&&<div className="overlay" onClick={()=>!busy&&setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
-      <div className="sheet-handle"></div><div className="sheet-title">Nouvelle intervention</div>
+      <div className="sheet-handle"></div><div className="sheet-title">{t("pest_new",lang)}</div>
       <div className="field"><label className="label">Type</label><select className="input" value={form.type} onChange={e=>setForm({...form,type:e.target.value})}><option>Visite contrat</option><option>Intervention urgente</option><option>Observation interne</option></select></div>
       <div className="field"><label className="label">Société</label><input className="input" value={form.company} onChange={e=>setForm({...form,company:e.target.value})}/></div>
       <div className="field"><label className="label">Résultat</label><BinaryChoice value={form.result} onChange={v=>setForm({...form,result:v})} options={[{value:"RAS",label:"RAS",icon:"✓",style:"good"},{value:"Présence détectée",label:"Alerte",icon:"⚠",style:"bad"}]}/></div>
@@ -3239,7 +3264,7 @@ function Pests({data,setData,db,reload,go,markLocalWrite}){
               <button onClick={()=>setReportFile(null)} style={{background:"none",border:"none",color:T.textDim,fontSize:15,padding:"0 4px"}}>✕</button>
             </div>
           : <label style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"12px",background:T.bg3,border:`1px dashed ${T.border}`,borderRadius:10,cursor:"pointer",color:T.textDim,fontSize:13,fontWeight:600}}>
-              📎 Joindre le PDF de l'entreprise
+              {t("pest_join_pdf",lang)}
               <input type="file" accept="application/pdf,.pdf" style={{display:"none"}} onChange={pickReport}/>
             </label>
         }
@@ -3251,11 +3276,74 @@ function Pests({data,setData,db,reload,go,markLocalWrite}){
   </div>);
 }
 
-function Training({data,go}){
+function Training({data,setData,go,db,reload,markLocalWrite,user,lang}){
+  const isAdmin=!!user?.isAdmin;
+  const[sheet,setSheet]=useState(null); // {item|null} — null = nouvelle fiche
+  const[form,setForm]=useState({name:"",role:"",haccpExp:"",visaExp:""});
+  const[busy,setBusy]=useState(false);
+
+  function openAdd(){ setForm({name:"",role:"",haccpExp:"",visaExp:""}); setSheet({item:null}); }
+  function openEdit(t){ setForm({name:t.name,role:t.role,haccpExp:t.haccpExp,visaExp:t.visaExp}); setSheet({item:t}); }
+
+  async function save(){
+    if(!form.name.trim()||busy)return;
+    setBusy(true);
+    const payload={name:form.name.trim(),role:form.role.trim(),haccpExp:form.haccpExp,visaExp:form.visaExp};
+    const res = sheet.item ? await db.updateTraining(sheet.item.id,payload) : await db.addTraining(payload);
+    setBusy(false);
+    if(res?.error){alert("La fiche n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload?.({force:true});return;}
+    markLocalWrite?.();
+    if(sheet.item){
+      setData(d=>({...d,training:d.training.map(t=>t.id===sheet.item.id?{...t,...payload}:t)}));
+    }else if(res?.data){
+      const r=res.data;
+      setData(d=>({...d,training:[...d.training,{id:r.id,name:r.name,role:r.role,haccpExp:r.haccp_exp,visaExp:r.visa_exp}]}));
+    }
+    setSheet(null);
+  }
+
+  async function remove(t){
+    if(!isAdmin)return;
+    if(!window.confirm(`Supprimer la fiche de ${t.name} ?`))return;
+    const res=await db.deleteTraining(t.id);
+    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload?.({force:true});return;}
+    markLocalWrite?.();
+    setData(d=>({...d,training:d.training.filter(x=>x.id!==t.id)}));
+  }
+
   return(<div className="page">
     <GbphHelpButton section="hygiene" go={go}/>
-    <div className="section-title">Formation HACCP</div><div className="section-sub">Attestations et visas</div>
-    {data.training.map(t=>{const hOk=new Date(t.haccpExp.split("/").reverse().join("-"))>=new Date();const vOk=new Date(t.visaExp.split("/").reverse().join("-"))>=new Date();return(<div key={t.id} className="card"><div className="item-title mb8">{t.name} <span className="text-xs text-dim">· {t.role}</span></div><div className="between mb6"><span className="text-sm">🎓 HACCP</span><span className={`badge ${hOk?"b-good":"b-bad"}`}>{hOk?"Valide":"Expirée"} · {t.haccpExp}</span></div><div className="between"><span className="text-sm">🩺 Visite médicale</span><span className={`badge ${vOk?"b-good":"b-bad"}`}>{vOk?"Valide":"Expirée"} · {t.visaExp}</span></div></div>);})}
+    <div className="section-title">{t("train_title",lang)}</div><div className="section-sub">{t("train_subtitle",lang)}</div>
+    {data.training.length===0 && <div className="empty"><div className="empty-icon">🎓</div><div className="empty-title">{t("train_empty_title",lang)}</div><div className="empty-sub">{t("train_empty_sub",lang)}</div></div>}
+    {data.training.map(t=>{
+      const hOk=new Date(t.haccpExp.split("/").reverse().join("-"))>=new Date();
+      const vOk=new Date(t.visaExp.split("/").reverse().join("-"))>=new Date();
+      // Appui long pour supprimer (admin seulement), tap pour modifier —
+      // même logique que la Mise en place.
+      const lp=useLongPress(()=>{ if(isAdmin){ haptic.medium(); remove(t); } });
+      return (
+        <div key={t.id} className="card" {...(isAdmin?lp.handlers:{})} onClick={()=>{ if(!lp.didFire()) openEdit(t); }} style={{cursor:"pointer"}}>
+          <div className="item-title mb8">{t.name} <span className="text-xs text-dim">· {t.role}</span></div>
+          <div className="between mb6"><span className="text-sm">🎓 HACCP</span><span className={`badge ${hOk?"b-good":"b-bad"}`}>{hOk?"Valide":"Expirée"} · {t.haccpExp}</span></div>
+          <div className="between"><span className="text-sm">🩺 Visite médicale</span><span className={`badge ${vOk?"b-good":"b-bad"}`}>{vOk?"Valide":"Expirée"} · {t.visaExp}</span></div>
+        </div>
+      );
+    })}
+    {isAdmin&&<div className="text-xs text-mute center mt8">Touchez pour modifier · appui long pour supprimer</div>}
+    <div className="fab-anchor"><button className="btn-fab" onClick={openAdd}>+</button></div>
+
+    {sheet&&<div className="overlay" onClick={()=>setSheet(null)}><div className="sheet" onClick={e=>e.stopPropagation()}>
+      <div className="sheet-handle"></div>
+      <div className="sheet-title">{sheet.item?t("train_edit",lang):t("train_new",lang)}</div>
+      <div className="field"><label className="label">{t("train_name",lang)}</label><input className="input" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="ex : Lucas Martin"/></div>
+      <div className="field"><label className="label">{t("train_role",lang)}</label><input className="input" value={form.role} onChange={e=>setForm({...form,role:e.target.value})} placeholder="ex : Chef de cuisine"/></div>
+      <div className="row gap8 mb14">
+        <div style={{flex:1}}><label className="label">{t("train_haccp_until",lang)}</label><input className="input input-sm" type="text" value={form.haccpExp} onChange={e=>setForm({...form,haccpExp:e.target.value})} placeholder="JJ/MM"/></div>
+        <div style={{flex:1}}><label className="label">{t("train_visa_until",lang)}</label><input className="input input-sm" type="text" value={form.visaExp} onChange={e=>setForm({...form,visaExp:e.target.value})} placeholder="JJ/MM"/></div>
+      </div>
+      <button className="btn btn-primary mb8" onClick={save} disabled={!form.name.trim()||busy}>{busy?"Enregistrement…":sheet.item?t("train_update",lang):t("train_save",lang)}</button>
+      {sheet.item&&isAdmin&&<button className="btn btn-ghost" style={{color:T.bad}} onClick={()=>{setSheet(null);remove(sheet.item);}}>{t("train_delete",lang)}</button>}
+    </div></div>}
   </div>);
 }
 
@@ -4079,7 +4167,6 @@ function SettingsHaccp({data,setData,db,reload}){
       ["Remise en T° minimum","reheatMin","°C","Légal : 63"],
       ["Remise en T° durée max","reheatMaxTime","min","Légal : 60"],
       ["Huile — polaires max","oilPolarMax","%","Décret : 25"],
-      ["Plats témoins","testMealDays","j","Comm. 3 / Coll. 5"],
       ["DLC étiquettes défaut","labelDlcDefault","j","Max 3 sans analyse"],
     ].map(([l,k,u,hint])=>(
       <div key={k} className="card" style={{padding:"10px 14px",marginBottom:6}}>
@@ -4156,16 +4243,18 @@ function SettingsHaccp({data,setData,db,reload}){
         const orderedKeys = [...order.filter(k=>groups[k]), ...(groups["__autre__"]?["__autre__"]:[])];
         return orderedKeys.map(key=>{
           const freqMeta = CLEAN_FREQS.find(f=>f.key===key);
-          const label = freqMeta ? `${freqMeta.icon} ${freqMeta.label}` : "📦 Autre";
+          const label = freqMeta ? freqMeta.label : "Autre";
+          const icon = freqMeta ? freqMeta.icon : "📦";
           return (
-            <div key={key} style={{marginBottom:10}}>
-              <div className="text-xs" style={{fontWeight:700,color:T.textDim,marginBottom:4,marginLeft:2}}>{label} · {groups[key].length}</div>
-              {groups[key].map(c=>(
-                <EditableRow key={c.id} icon={c.icon} iconBg={T.goodBg} onOpen={()=>openClean(c)} onDelete={()=>{if(window.confirm(`Supprimer ${c.zone} ?`))delClean(c);}}>
-                  <div className="item-title">{c.zone}</div>
-                  <div className="item-sub">{c.freq} · {c.produit}{c.dilution?` · ${c.dilution}`:""}</div>
-                </EditableRow>
-              ))}
+            <div key={key} style={{marginBottom:8,marginLeft:8}}>
+              <CollapsibleSection title={label} icon={icon} count={groups[key].length}>
+                {groups[key].map(c=>(
+                  <EditableRow key={c.id} icon={c.icon} iconBg={T.goodBg} onOpen={()=>openClean(c)} onDelete={()=>{if(window.confirm(`Supprimer ${c.zone} ?`))delClean(c);}}>
+                    <div className="item-title">{c.zone}</div>
+                    <div className="item-sub">{c.freq} · {c.produit}{c.dilution?` · ${c.dilution}`:""}</div>
+                  </EditableRow>
+                ))}
+              </CollapsibleSection>
             </div>
           );
         });
@@ -4540,9 +4629,9 @@ function Settings({data,setData,user,onLogout,db,reload,markLocalWrite}){
 }
 
 const NAV=[{k:"home",i:"🏠",l:"Aujourd'hui"},{k:"haccp",i:"🛡️",l:"HACCP"},{k:"recipes",i:"📖",l:"Recettes"},{k:"tasks",i:"✅",l:"Mise en place"},{k:"more",i:"⋯",l:"Plus"}];
-const TITLES={home:"Aujourd'hui",haccp:"HACCP",temps:"Températures",reception:"Réception",cooling:"Cellule",reheating:"Remise en T°",oils:"Huiles friture",trace:"Traçabilité",labels:"Étiquetage",testmeals:"Plats témoins",clean:"Nettoyage",pests:"Nuisibles",training:"Formation",registre:"Registre HACCP",gbph:"Guide des bonnes pratiques",manual:"Notice d'utilisation",recipes:"Recettes",margins:"Marges",planning:"Planning",tasks:"Mise en place",more:"Plus",settings:"Paramètres"};
+const TITLES={home:"Aujourd'hui",haccp:"HACCP",temps:"Températures",reception:"Réception",cooling:"Cellule",reheating:"Remise en T°",oils:"Huiles friture",trace:"Traçabilité",labels:"Étiquetage",clean:"Nettoyage",pests:"Nuisibles",training:"Formation",registre:"Registre HACCP",gbph:"Guide des bonnes pratiques",manual:"Notice d'utilisation",recipes:"Recettes",margins:"Marges",planning:"Planning",tasks:"Mise en place",more:"Plus",settings:"Paramètres"};
 const ROOT_PAGES=["home","haccp","recipes","tasks","more"];
-const HACCP_PAGES=["temps","reception","cooling","reheating","oils","trace","labels","testmeals","clean","pests","training","registre","gbph"];
+const HACCP_PAGES=["temps","reception","cooling","reheating","oils","trace","labels","clean","pests","training","registre","gbph"];
 const MORE_PAGES=["margins","planning","settings"];
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -5004,9 +5093,9 @@ export default function App(){
     temps:<Temperatures {...props}/>,reception:<Reception {...props}/>,
     cooling:<Cooling {...props}/>,reheating:<Reheating {...props}/>,
     oils:<Oils {...props}/>,trace:<Traceability {...props}/>,
-    labels:<Labels {...props}/>,testmeals:<TestMeals {...props}/>,
+    labels:<Labels {...props}/>,
     clean:<Cleaning {...props}/>,pests:<Pests {...props}/>,
-    training:<Training data={data} go={go}/>,registre:<Registre data={data} db={DB}/>,gbph:<GbphGuide initialSection={gbphSection}/>,manual:<ManualGuide user={user}/>,
+    training:<Training data={data} go={go} setData={setData} db={DB} reload={reload} markLocalWrite={markLocalWrite} user={user} lang={lang}/>,registre:<Registre data={data} db={DB}/>,gbph:<GbphGuide initialSection={gbphSection}/>,manual:<ManualGuide user={user}/>,
     recipes:<Recipes data={data} setData={setData} db={DB} reload={reload} user={user} markLocalWrite={markLocalWrite}/>,
     margins:<Margins data={data}/>,planning:<Planning {...props}/>,
     tasks:<Tasks data={data} setData={setData} db={DB} reload={reload} user={user} lang={lang}/>,
