@@ -373,4 +373,5 @@ export default {
   shop_title: "À commander",
   shop_placeholder: "Ajouter un article…",
   shop_empty: "Rien à commander pour l'instant",
+  shop_menu_sub: "Pense-bête achats",
 };
