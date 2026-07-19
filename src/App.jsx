@@ -1165,41 +1165,89 @@ const VOICE_FEATURE_ENABLED = false;
 function ShoppingRow({it,onToggle,onDelete}){
   const lp=useLongPress(()=>{ haptic.medium(); onDelete(it); });
   return(
-    <div className="item" {...lp.handlers} onClick={()=>{ if(!lp.didFire()) onToggle(it); }} style={{opacity:it.done?.5:1}}>
+    <div className="row-line" {...lp.handlers} onClick={()=>{ if(!lp.didFire()) onToggle(it); }} style={{cursor:"pointer",opacity:it.done?.5:1}}>
       <div className={`check ${it.done?"on":""}`}>{it.done?"✓":""}</div>
-      <div className="item-body"><div className="item-title" style={{textDecoration:it.done?"line-through":"none"}}>{it.item}</div></div>
+      <div className="item-body"><div className="item-title" style={{textDecoration:it.done?"line-through":"none"}}>{it.item}</div>{it.operator&&<div className="item-sub">{it.operator}</div>}</div>
     </div>
   );
 }
 
-function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWrite}){
-  const[,setTick]=useState(0);
-  useEffect(()=>{const i=setInterval(()=>setTick(t=>t+1),30000);return()=>clearInterval(i);},[]);
-  const[shopText,setShopText]=useState("");
-  async function addShopItem(){
-    const text=shopText.trim();
-    if(!text)return;
-    setShopText("");
-    const res=await db.addShoppingItem(text,user?.name);
+// Écran dédié plutôt qu'un bloc coincé sur l'accueil — ajout via une fenêtre
+// dédiée (même geste que le reste de l'app : Nuisibles, Réception...) plutôt
+// qu'un champ texte en permanence à l'écran.
+function ShoppingList({data,setData,db,reload,markLocalWrite,user,go,lang}){
+  const[show,setShow]=useState(false);
+  const[text,setText]=useState("");
+  const[busy,setBusy]=useState(false);
+
+  async function addItem(){
+    const clean=text.trim();
+    if(!clean||busy)return;
+    setBusy(true);
+    const res=await db.addShoppingItem(clean,user?.name);
+    setBusy(false);
     if(res?.error||!res?.data){alert("Impossible d'ajouter. Vérifie la connexion Supabase.");await reload?.({force:true});return;}
     markLocalWrite?.();
     const r=res.data;
     setData(d=>({...d,shoppingList:[{id:r.id,item:r.item,done:r.done,operator:r.operator,createdAt:r.created_at},...(d.shoppingList||[])]}));
+    setText("");setShow(false);
+    haptic.success();
   }
-  async function toggleShopItem(it){
+  async function toggleItem(it){
     const next=!it.done;
+    haptic.light();
     markLocalWrite?.();
     setData(d=>({...d,shoppingList:d.shoppingList.map(x=>x.id===it.id?{...x,done:next}:x)}));
     const res=await db.toggleShoppingItem(it.id,next);
     if(res?.error){alert("Impossible d'enregistrer. Vérifie la connexion Supabase.");await reload?.({force:true});}
   }
-  async function removeShopItem(it){
+  async function removeItem(it){
     if(!window.confirm(`Retirer "${it.item}" de la liste ?`))return;
     const res=await db.deleteShoppingItem(it.id);
     if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload?.({force:true});return;}
     markLocalWrite?.();
     setData(d=>({...d,shoppingList:d.shoppingList.filter(x=>x.id!==it.id)}));
   }
+
+  const list=data.shoppingList||[];
+  const pending=list.filter(it=>!it.done);
+  const done=list.filter(it=>it.done);
+
+  return(<div className="page">
+    <div className="section-title">{t("shop_title",lang)}</div>
+    <div className="section-sub">{pending.length} article{pending.length>1?"s":""} à commander</div>
+
+    {list.length===0
+      ? <div className="empty"><div className="empty-icon">🛒</div><div className="empty-title">{t("shop_empty",lang)}</div><div className="empty-sub">Ajoute ton premier article avec le bouton +</div></div>
+      : <>
+        {pending.map(it=><ShoppingRow key={it.id} it={it} onToggle={toggleItem} onDelete={removeItem}/>)}
+        {done.length>0 && (
+          <div style={{marginTop:pending.length?18:0}}>
+            <CollapsibleSection title="Déjà commandé" icon="✓" count={done.length}>
+              {done.map(it=><ShoppingRow key={it.id} it={it} onToggle={toggleItem} onDelete={removeItem}/>)}
+            </CollapsibleSection>
+          </div>
+        )}
+      </>
+    }
+
+    <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
+
+    {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
+      <div className="sheet-handle"></div>
+      <div className="sheet-title">Nouvel article</div>
+      <div className="field"><label className="label">Quoi ?</label>
+        <input className="input" autoFocus value={text} onChange={e=>setText(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&addItem()} placeholder={t("shop_placeholder",lang)}/>
+      </div>
+      <button className="btn btn-primary mt8" onClick={addItem} disabled={!text.trim()||busy}>{busy?"Ajout…":"Ajouter"}</button>
+    </div></div>}
+  </div>);
+}
+
+function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWrite}){
+  const[,setTick]=useState(0);
+  useEffect(()=>{const i=setInterval(()=>setTick(t=>t+1),30000);return()=>clearInterval(i);},[]);
   const h=new Date().getHours();const greeting=h<12?t("home_greeting_morning",lang):h<18?t("home_greeting_afternoon",lang):t("home_greeting_evening",lang);
   const today=new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"});
   const win=getServiceWindow();
@@ -1261,8 +1309,12 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
   // devoir recomposer mentalement l'état du service à partir de plusieurs
   // listes séparées plus bas. Regroupe températures + tâches + nettoyage —
   // les trois seules choses qui ont un total/fait mesurable dans la journée.
-  const globalDone = matinDone+soirDone+tasksDone+cleanDone;
-  const globalTotal = totalFridges*2+tasksTotal+cleanTotal;
+  // Mise en place volontairement exclue : ce n'est pas une obligation
+  // réglementaire comme les températures ou le nettoyage, juste de
+  // l'organisation interne. La mélanger aurait fait baisser artificiellement
+  // le pourcentage sur des tâches qui n'ont rien d'obligatoire à finir.
+  const globalDone = matinDone+soirDone+cleanDone;
+  const globalTotal = totalFridges*2+cleanTotal;
   const globalPct = safePct(globalDone, globalTotal);
   const anomalyCount = criticalAlerts.length;
 
@@ -1356,22 +1408,15 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
       <div className="tile" onClick={()=>go("clean")}><span className="tile-dot" style={{background:cleanComplete?T.good:T.bad}}></span><div className="tile-icon">🧹</div><div className="tile-label">{t("home_cleaning",lang)}</div><div className="tile-value tabular">{cleanDone}/{cleanTotal}</div></div>
     </div>
 
-    {/* Pense-bête "à commander" — repliée par défaut, comme le reste des
-        écrans secondaires : ce n'est pas une urgence du service, juste un
-        aide-mémoire consultable en un tap. */}
-    <div style={{marginTop:18}}>
-      <CollapsibleSection title={t("shop_title",lang)} icon="🛒" count={(data.shoppingList||[]).length}>
-        <div className="row gap8 mb10">
-          <input className="input input-sm" style={{flex:1}} value={shopText} onChange={e=>setShopText(e.target.value)}
-            onKeyDown={e=>e.key==="Enter"&&addShopItem()} placeholder={t("shop_placeholder",lang)}/>
-          <button className="btn btn-primary btn-sm" style={{width:"auto",padding:"0 16px"}} onClick={addShopItem} disabled={!shopText.trim()}>+</button>
-        </div>
-        {(data.shoppingList||[]).length===0
-          ? <div className="text-xs text-dim center" style={{padding:"6px 0"}}>{t("shop_empty",lang)}</div>
-          : (data.shoppingList||[]).map(it=><ShoppingRow key={it.id} it={it} onToggle={toggleShopItem} onDelete={removeShopItem}/>)
-        }
-      </CollapsibleSection>
-    </div>
+    {/* Petite carte compacte plutôt qu'un bloc entier — l'écran complet vit
+        ailleurs (menu Plus), accessible d'un tap depuis ici. */}
+    {(()=>{const pendingCount=(data.shoppingList||[]).filter(it=>!it.done).length;return(
+      <div className="row-line" onClick={()=>go("shopping")} style={{cursor:"pointer",marginTop:18}}>
+        <div className="item-icon" style={{background:T.bg3}}>🛒</div>
+        <div className="item-body"><div className="item-title">{t("shop_title",lang)}</div><div className="item-sub">{pendingCount>0?`${pendingCount} article${pendingCount>1?"s":""}`:"Rien à commander"}</div></div>
+        <div className="item-arrow">›</div>
+      </div>
+    );})()}
   </div>);
 }
 
@@ -1949,7 +1994,7 @@ const GBPH_SECTIONS = [
 function GbphCard({card}){
   const[open,setOpen]=useState(false);
   return(
-    <div className="card" style={{marginBottom:8,cursor:"pointer"}} onClick={()=>setOpen(!open)}>
+    <div className="row-line" style={{cursor:"pointer",flexDirection:"column",alignItems:"stretch",gap:0}} onClick={()=>setOpen(!open)}>
       <div className="between">
         <div style={{fontWeight:700,fontSize:14}}>{card.q}</div>
         <span className={`badge ${card.tag==="Réglementaire"||card.tag==="Obligatoire"?"b-bad":"b-info"}`} style={{flexShrink:0,marginLeft:8}}>{card.tag}</span>
@@ -3385,7 +3430,7 @@ function Pests({data,setData,db,reload,go,markLocalWrite,lang}){
         <div key={key} style={{marginBottom:10}}>
           <CollapsibleSection title={key} icon="📅" count={groups[key].length} defaultOpen={idx===0}>
             {groups[key].map(p=>(
-              <div key={p.id} className="card" style={{marginBottom:8}}>
+              <div key={p.id} className="row-line" style={{flexDirection:"column",alignItems:"stretch",gap:4}}>
                 <div className="between mb6"><div><div className="item-title">{p.type}</div><div className="item-sub">{p.company}</div></div><span className={`badge ${p.result==="RAS"?"b-good":"b-warn"}`}>{p.result}</span></div>
                 <div className="text-xs text-dim">Visite : {p.date} · Prochaine : {p.nextVisit}</div>
                 {p.reportPath && (
@@ -4187,7 +4232,7 @@ function TaskCategoriesEditor({data,setData,db,reload,markLocalWrite}){
 }
 
 function More({go,user,lang}){
-  const items=[{key:"margins",icon:"📊",bg:T.goodBg,title:t("more_margins",lang),sub:t("more_margins_sub",lang)},{key:"planning",icon:"📅",bg:T.warnBg,title:t("more_team_planning",lang),sub:t("more_team_planning_sub",lang)}];
+  const items=[{key:"shopping",icon:"🛒",bg:T.warnBg,title:t("shop_title",lang),sub:t("shop_menu_sub",lang)},{key:"margins",icon:"📊",bg:T.goodBg,title:t("more_margins",lang),sub:t("more_margins_sub",lang)},{key:"planning",icon:"📅",bg:T.warnBg,title:t("more_team_planning",lang),sub:t("more_team_planning_sub",lang)}];
   return(<div className="page"><div className="section-title">{t("more_title",lang)}</div><div className="section-sub">{t("more_subtitle",lang)}</div>
     {items.map(it=><div key={it.key} className="row-line" onClick={()=>go(it.key)} style={{cursor:"pointer"}}><div className="item-icon" style={{background:it.bg}}>{it.icon}</div><div className="item-body"><div className="item-title">{it.title}</div><div className="item-sub">{it.sub}</div></div><div className="item-arrow">›</div></div>)}
     <div className="bucket-label mt14">{t("more_help",lang)}</div>
@@ -4212,7 +4257,7 @@ function SettingsRestaurant({data,setData,db}){
     <div className="group-label">Établissement</div>
     <div className="text-xs text-dim mb12" style={{lineHeight:1.5}}>Touchez un champ pour le modifier. Les changements s'enregistrent automatiquement.</div>
     {[["Nom du restaurant","name","ex : Ô Grain de Sable"],["Adresse complète","address","Rue, code postal, ville"],["Téléphone","phone","04 ..."],["N° SIRET","siret","123 456 789 00012"]].map(([l,k,ph])=>(
-      <div key={k} className="card" style={{padding:"12px 14px",marginBottom:8}}>
+      <div key={k} className="row-line" style={{flexDirection:"column",alignItems:"stretch",gap:4}}>
         <label className="label" style={{marginBottom:4}}>{l}</label>
         <input className="ed-field" style={{fontSize:15}} value={form[k]||""} placeholder={ph}
           onChange={e=>setForm({...form,[k]:e.target.value})}
@@ -4247,7 +4292,7 @@ function CollapsibleSection({title, icon, count, defaultOpen=false, children}){
 function EditableRow({icon,iconBg,onDelete,children,onOpen}){
   const lp=useLongPress(()=>{ if(navigator.vibrate)navigator.vibrate(20); onDelete(); });
   return(
-    <div className={`item ed-row ${lp.pressing?"pressing":""}`} style={{marginBottom:6}} {...lp.handlers}
+    <div className={`row-line ed-row ${lp.pressing?"pressing":""}`} style={{cursor:"pointer"}} {...lp.handlers}
       onClick={()=>{ if(!lp.didFire()&&onOpen)onOpen(); }}>
       <div className="item-icon" style={{background:iconBg,fontSize:20}}>{icon}</div>
       <div className="item-body">{children}</div>
@@ -4383,7 +4428,7 @@ function SettingsHaccp({data,setData,db,reload}){
       ["Huile — polaires max","oilPolarMax","%","Décret : 25"],
       ["DLC étiquettes défaut","labelDlcDefault","j","Max 3 sans analyse"],
     ].map(([l,k,u,hint])=>(
-      <div key={k} className="card" style={{padding:"10px 14px",marginBottom:6}}>
+      <div key={k} className="row-line">
         <div className="between">
           <div><div className="item-title" style={{fontSize:13}}>{l}</div><div className="text-xs text-mute">{hint}</div></div>
           <div className="row gap6" style={{flexShrink:0}}>
@@ -4515,7 +4560,7 @@ function SettingsHaccp({data,setData,db,reload}){
 function UserRow({u,isSelf,onOpen,onDelete}){
   const lp=useLongPress(()=>{ if(isSelf)return; if(navigator.vibrate)navigator.vibrate(20); onDelete(); });
   return(
-    <div className={`item ed-row ${lp.pressing?"pressing":""}`} style={{marginBottom:6}} {...lp.handlers}
+    <div className={`row-line ed-row ${lp.pressing?"pressing":""}`} style={{cursor:"pointer"}} {...lp.handlers}
       onClick={()=>{ if(!lp.didFire())onOpen(); }}>
       <div style={{width:40,height:40,borderRadius:"50%",background:u.color,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:14,color:"white",flexShrink:0}}>{u.initials}</div>
       <div className="item-body"><div className="item-title">{u.name}</div><div className="item-sub">{u.role}</div></div>
@@ -4860,7 +4905,7 @@ function NavIcon({name}){
 }
 
 const NAV=[{k:"home",i:"home",l:"Aujourd'hui"},{k:"haccp",i:"haccp",l:"HACCP"},{k:"recipes",i:"recipes",l:"Recettes"},{k:"tasks",i:"tasks",l:"Mise en place"},{k:"more",i:"more",l:"Plus"}];
-const TITLES={home:"Aujourd'hui",haccp:"HACCP",temps:"Températures",reception:"Réception",cooling:"Cellule",reheating:"Remise en T°",oils:"Huiles friture",trace:"Traçabilité",labels:"Étiquetage",clean:"Nettoyage",pests:"Nuisibles",training:"Formation",registre:"Registre HACCP",gbph:"Guide des bonnes pratiques",manual:"Notice d'utilisation",recipes:"Recettes",margins:"Marges",planning:"Planning",tasks:"Mise en place",more:"Plus",settings:"Paramètres"};
+const TITLES={home:"Aujourd'hui",haccp:"HACCP",temps:"Températures",reception:"Réception",cooling:"Cellule",reheating:"Remise en T°",oils:"Huiles friture",trace:"Traçabilité",labels:"Étiquetage",clean:"Nettoyage",pests:"Nuisibles",training:"Formation",registre:"Registre HACCP",gbph:"Guide des bonnes pratiques",manual:"Notice d'utilisation",recipes:"Recettes",shopping:"À commander",margins:"Marges",planning:"Planning",tasks:"Mise en place",more:"Plus",settings:"Paramètres"};
 const ROOT_PAGES=["home","haccp","recipes","tasks","more"];
 const HACCP_PAGES=["temps","reception","cooling","reheating","oils","trace","labels","clean","pests","training","registre","gbph"];
 const MORE_PAGES=["margins","planning","settings"];
@@ -5328,6 +5373,7 @@ export default function App(){
     clean:<Cleaning {...props}/>,pests:<Pests {...props}/>,
     training:<Training data={data} go={go} setData={setData} db={DB} reload={reload} markLocalWrite={markLocalWrite} user={user} lang={lang}/>,registre:<Registre data={data} db={DB}/>,gbph:<GbphGuide initialSection={gbphSection}/>,manual:<ManualGuide user={user}/>,
     recipes:<Recipes data={data} setData={setData} db={DB} reload={reload} user={user} markLocalWrite={markLocalWrite} lang={lang}/>,
+    shopping:<ShoppingList data={data} setData={setData} db={DB} reload={reload} markLocalWrite={markLocalWrite} user={user} go={go} lang={lang}/>,
     margins:<Margins data={data}/>,planning:<Planning {...props}/>,
     tasks:<Tasks data={data} setData={setData} db={DB} reload={reload} user={user} lang={lang}/>,
     more:<More go={go} user={user} lang={lang}/>,
