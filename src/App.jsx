@@ -987,6 +987,19 @@ haptic.light=()=>haptic(8);      // sélection, tap sur un élément
 haptic.medium=()=>haptic(15);    // validation d'une action
 haptic.success=()=>haptic(25);   // succès (enregistrement, clôture)
 haptic.error=()=>{try{if(navigator.vibrate)navigator.vibrate([30,40,30]);}catch{}}; // motif d'erreur distinct
+// Même principe que serviceISODate, mais au format "JJ/MM" (todayStr()) —
+// c'est celui qu'utilisent les relevés de température, pas le format ISO.
+// Sans ça, un relevé du soir pris juste avant minuit redevenait "d'hier" à
+// minuit pile, faisant croire que le frigo n'avait pas été contrôlé alors
+// que le service du soir n'était pas terminé.
+function serviceDateStr(resetSoir){
+  const RESET_SOIR = Math.min(resetSoir ?? (3*60), 9*60);
+  const n=new Date(); const mins=n.getHours()*60+n.getMinutes();
+  const d=new Date(n);
+  if(mins<RESET_SOIR) d.setDate(d.getDate()-1);
+  return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
+}
+
 const todayStr=()=>new Date().toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
 const nowTime=()=>new Date().toTimeString().slice(0,5);
 const fmtDateTime=(iso)=>{if(!iso)return "";try{return new Date(iso).toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});}catch{return "";}};
@@ -994,7 +1007,12 @@ const DAYS=["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
 
 function tempStatus(v,target){if(target==="-18")return v<=-15?"good":v>-12?"bad":"warn";const[lo,hi]=target.split("–").map(Number);return v>=lo&&v<=hi?"good":v>hi+2?"bad":"warn";}
 function tempCenter(target){if(target==="-18")return -18;const[lo,hi]=target.split("–").map(Number);return Math.round((lo+hi)/2);}
-function getReleve(data,fridgeId,period,date){return data.fridgeReleves.find(r=>r.fridgeId===fridgeId&&r.period===period&&r.date===(date||todayStr()));}
+// date par défaut = date de service (voir serviceDateStr), pas la date
+// calendaire brute — sinon un relevé du soir pris juste avant minuit
+// semblait "manquant" dès minuit passé, alors que le service n'était pas
+// terminé. data contient déjà haccpSettings.resetSoir : aucun appelant n'a
+// besoin d'être modifié pour bénéficier de la correction.
+function getReleve(data,fridgeId,period,date){return data.fridgeReleves.find(r=>r.fridgeId===fridgeId&&r.period===period&&r.date===(date||serviceDateStr(data?.haccpSettings?.resetSoir)));}
 const clamp=(n,min=0,max=100)=>Math.max(min,Math.min(max,Number.isFinite(n)?n:min));
 const safePct=(done,total)=>total>0?clamp((done/total)*100):0;
 const safeNum=(v,fallback=0)=>{const n=Number(v);return Number.isFinite(n)?n:fallback;};
@@ -1188,7 +1206,7 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
   // place, qui lui ne montre qu'un créneau à la fois.
   const homeSlot=(()=>{
     const RESET_MIDI = data?.haccpSettings?.resetMidi ?? (16*60+30);
-    const RESET_SOIR = data?.haccpSettings?.resetSoir ?? (3*60);
+    const RESET_SOIR = Math.min(data?.haccpSettings?.resetSoir ?? (3*60), 9*60); // plafonné, voir Paramètres → Horaires
     const n=new Date(); const mins=n.getHours()*60+n.getMinutes();
     const d=new Date();
     if(mins < RESET_SOIR){ d.setDate(d.getDate()-1); return {date:isoDate(d), service:"soir"}; }
@@ -1320,7 +1338,10 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
 // vraie fin de service — même logique que celle déjà utilisée pour calculer
 // le créneau en cours dans Mise en place.
 function serviceISODate(resetSoir){
-  const RESET_SOIR = resetSoir ?? (3*60);
+  // Filet de sécurité : si une valeur incorrecte (ex. proche de minuit)
+  // existait déjà quelque part, on la ramène dans une plage sensée plutôt
+  // que de laisser le calcul du jour se casser silencieusement.
+  const RESET_SOIR = Math.min(resetSoir ?? (3*60), 9*60);
   const n=new Date(); const mins=n.getHours()*60+n.getMinutes();
   const d=new Date(n);
   if(mins<RESET_SOIR) d.setDate(d.getDate()-1);
@@ -2075,7 +2096,7 @@ function Temperatures({data,setData,user,db,reload,go,markLocalWrite,lang}){
   function openSlot(f,p){const e=getReleve(data,f.id,p);setEditing({fridge:f,period:p});setPickedTemp(e?e.temp:tempCenter(f.target));}
   async function save(){
     if(!editing||pickedTemp===null)return;
-    const date=todayStr();
+    const date=serviceDateStr(data?.haccpSettings?.resetSoir);
     const fridgeId=editing.fridge.id, period=editing.period, time=nowTime();
     // On connaît déjà le relevé existant côté local : on passe son id pour
     // éviter une requête de lecture supplémentaire avant l'écriture.
@@ -3650,7 +3671,7 @@ function Tasks({data,setData,db,reload,user,lang}){
   // Entre minuit et resetSoir, on est encore sur le service du soir de la veille.
   const currentSlot=(()=>{
     const RESET_MIDI = data?.haccpSettings?.resetMidi ?? (16*60+30);
-    const RESET_SOIR = data?.haccpSettings?.resetSoir ?? (3*60);
+    const RESET_SOIR = Math.min(data?.haccpSettings?.resetSoir ?? (3*60), 9*60); // plafonné, voir Paramètres → Horaires
     const n=new Date(); const mins=n.getHours()*60+n.getMinutes();
     if(mins < RESET_SOIR)  return {offset:-1, service:"soir"}; // nuit → service de la veille
     if(mins < RESET_MIDI)  return {offset:0,  service:"midi"};
@@ -3658,18 +3679,23 @@ function Tasks({data,setData,db,reload,user,lang}){
   })();
 
   // Créneau sélectionné : décalage en jours (0=aujourd'hui) + service (midi/soir)
-  const[dayOffset,setDayOffset]=useState(Math.max(currentSlot.offset,0));
+  // Pas de Math.max(...,0) ici : un décalage de -1 (encore le service d'hier
+  // soir, entre minuit et l'horaire de bascule) est une valeur légitime, pas
+  // une erreur à corriger. L'écraser à 0 faisait apparaître une liste vide
+  // "d'aujourd'hui" à la place des tâches d'hier soir encore en cours —
+  // exactement la confusion remontée.
+  const[dayOffset,setDayOffset]=useState(currentSlot.offset);
   const[service,setService]=useState(currentSlot.service);
   const categories=data.taskCategories||[];
 
   // Sommes-nous sur le créneau du service en cours ? Sert de repère visuel :
   // toute la carte d'en-tête change de couleur si on prépare un autre créneau.
-  const isCurrentSlot = dayOffset===Math.max(currentSlot.offset,0) && service===currentSlot.service;
-  function goToCurrentSlot(){ haptic.light(); setDayOffset(Math.max(currentSlot.offset,0)); setService(currentSlot.service); }
+  const isCurrentSlot = dayOffset===currentSlot.offset && service===currentSlot.service;
+  function goToCurrentSlot(){ haptic.light(); setDayOffset(currentSlot.offset); setService(currentSlot.service); }
 
   const crenauDate=new Date();crenauDate.setDate(crenauDate.getDate()+dayOffset);
   const crenauDateStr=isoDate(crenauDate);
-  const dayLabel=dayOffset===0?"Aujourd'hui":dayOffset===1?"Demain":crenauDate.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"short"});
+  const dayLabel=dayOffset===0?"Aujourd'hui":dayOffset===1?"Demain":dayOffset===-1?"Hier":crenauDate.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"short"});
 
   // Ne garde que les tâches du créneau affiché.
   const crenauTasks=data.tasks.filter(t=>t.date===crenauDateStr&&(t.service||"midi")===service);
@@ -3725,7 +3751,7 @@ function Tasks({data,setData,db,reload,user,lang}){
       border: `1px solid ${isCurrentSlot ? T.border : T.warn+"66"}`,
     }}>
       <div className="between">
-        <button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={()=>setDayOffset(o=>Math.max(o-1,0))} disabled={dayOffset===0}>‹</button>
+        <button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={()=>setDayOffset(o=>Math.max(o-1,currentSlot.offset))} disabled={dayOffset<=currentSlot.offset}>‹</button>
         <div style={{textAlign:"center",flex:1}}>
           <div style={{fontWeight:800,fontSize:16,textTransform:"capitalize",lineHeight:1.2}}>
             {service==="midi"?"☀️":"🌙"} {dayLabel} · {service==="midi"?t("tasks_slot_midi",lang):t("tasks_slot_soir",lang)}
@@ -4216,7 +4242,19 @@ function SettingsHaccp({data,setData,db,reload}){
   async function commitHoraire(field){
     const hhmm = horaires[field];
     if(!hhmm) return;
-    const mins = hhmmToMins(hhmm);
+    let mins = hhmmToMins(hhmm);
+    // Ce réglage représente "jusqu'où, après minuit, on considère qu'on est
+    // encore sur le service de la veille" — un concept de petit matin, pas
+    // une heure de fermeture. Un réglage proche de minuit (ex. 23h59) ferait
+    // que TOUTE la journée soit interprétée comme "encore hier soir" (23h59
+    // > presque n'importe quelle heure), bloquant l'app en permanence sur la
+    // veille. On plafonne donc à 9h — largement suffisant pour couvrir même
+    // un service de nuit tardif, sans jamais pouvoir casser le calcul.
+    if(field==="resetSoir" && mins>540){
+      mins=540;
+      setHoraires(h=>({...h,resetSoir:"09:00"}));
+      alert("L'heure de bascule du soir doit rester dans la nuit (avant 9h) — sinon l'application resterait bloquée sur la veille toute la journée. Réglée sur 9h00.");
+    }
     if(mins === data.haccpSettings[field]) return; // rien n'a changé
     const s = {...data.haccpSettings, [field]: mins};
     setData(d=>({...d,haccpSettings:{...d.haccpSettings,[field]:mins}}));
@@ -4318,16 +4356,16 @@ function SettingsHaccp({data,setData,db,reload}){
       <div className="item">
         <div className="item-icon" style={{background:T.infoBg}}>🌙</div>
         <div className="item-body">
-          <div className="item-title">Fin du service du soir</div>
-          <div className="item-sub">Purge la liste du soir · la nuit, pour un matin propre</div>
+          <div className="item-title">Bascule après minuit</div>
+          <div className="item-sub">Jusqu'à cette heure, la nuit, on est encore "hier soir"</div>
         </div>
-        <input className="input input-sm" type="time" style={{width:104,flexShrink:0}}
+        <input className="input input-sm" type="time" max="09:00" style={{width:104,flexShrink:0}}
           value={horaires.resetSoir}
           onChange={e=>setHoraires(h=>({...h,resetSoir:e.target.value}))}
           onBlur={()=>commitHoraire("resetSoir")}/>
       </div>
       <div className="banner banner-info mt10"><span>ℹ️</span><div style={{fontSize:11,lineHeight:1.5}}>
-        Le service du soir traverse minuit : entre minuit et l'heure ci-dessus, l'app considère qu'on est toujours sur le service de la veille — les listes ne s'effacent pas en plein travail.
+        Le service du soir traverse minuit : entre minuit et l'heure ci-dessus, l'app considère qu'on est toujours sur le service de la veille — les listes ne s'effacent pas en plein travail. Cette heure doit rester dans la nuit (avant 9h) : ce n'est pas une heure de fermeture, mais jusqu'où on remonte après minuit.
       </div></div>
     </CollapsibleSection>
 
@@ -5088,7 +5126,7 @@ export default function App(){
     // rattaché au service de la VEILLE. Sans ça, le changement de date à minuit
     // provoquerait une remise à zéro parasite en plein service.
     const RESET_MIDI = data?.haccpSettings?.resetMidi ?? (16*60+30);
-    const RESET_SOIR = data?.haccpSettings?.resetSoir ?? (3*60);
+    const RESET_SOIR = Math.min(data?.haccpSettings?.resetSoir ?? (3*60), 9*60); // plafonné, voir Paramètres → Horaires
     const serviceKey=()=>{
       const n=new Date();
       const mins=n.getHours()*60+n.getMinutes();
