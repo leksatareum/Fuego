@@ -103,4 +103,96 @@ export default {
   common_cancel: "منسوخ کریں", // Annuler
   common_yes: "ہاں",           // Oui
   common_no: "نہیں",           // Non
+
+  // ─── Vague 2 : écrans HACCP — BROUILLON, non relu, mêmes réserves qu'en
+  // haut de fichier. Le français est en commentaire à côté de chaque ligne
+  // pour faciliter la relecture par un locuteur natif.
+
+  // Réception
+  recv_title: "وصولی",                              // Réception
+  recv_subtitle: "ہر ترسیل کی جانچ",                 // Contrôle de chaque livraison
+  recv_empty_title: "کوئی وصولی نہیں",                // Aucune réception
+  recv_empty_sub: "+ بٹن سے اپنی اگلی ترسیل ریکارڈ کریں", // Enregistre ta prochaine livraison avec le bouton +
+  recv_new: "نئی وصولی",                             // Nouvelle réception
+  recv_product: "پروڈکٹ",                            // Produit
+  recv_supplier: "سپلائر",                           // Fournisseur
+  recv_qty: "مقدار",                                 // Quantité
+  recv_lot: "لاٹ نمبر",                              // N° lot
+  recv_dlc: "میعاد ختم ہونے کی تاریخ",                // DLC
+  recv_temp_at_arrival: "وصولی پر درجہ حرارت",        // Température à réception
+  recv_out_of_range: "معیار سے باہر",                 // Hors norme
+  recv_aspect: "ظاہری حالت",                          // Aspect
+  recv_packaging: "پیکنگ",                            // Emballage
+  recv_conform: "درست",                               // Conforme
+  recv_not_conform: "غیر درست",                       // Non conforme
+  recv_intact: "برقرار",                              // Intact
+  recv_damaged: "خراب",                               // Endommagé
+  recv_save: "محفوظ کریں",                            // Enregistrer
+
+  // Cellule
+  cool_title: "کولنگ سیل",                            // Cellule
+  cool_subtitle: "ٹھنڈا کرنا اور منجمد کرنا",          // Refroidissement & surgélation
+  cool_empty_title: "کوئی کولنگ نہیں",                 // Aucun passage en cellule
+  cool_empty_sub: "+ بٹن سے ٹھنڈا کرنا یا منجمد کرنا شروع کریں", // Lance un refroidissement ou une surgélation
+  cool_new: "کولنگ سیل میں داخلہ",                     // Passage en cellule
+  cool_which_operation: "کس قسم کا عمل؟",              // Quel type d'opération ?
+  cool_product: "پروڈکٹ",                             // Produit
+  cool_qty: "مقدار",                                  // Quantité
+  cool_start_temp: "ابتدائی درجہ حرارت",               // Température de départ
+  cool_start_timer: "▶ ٹائمر شروع کریں",               // Lancer le chronomètre
+  cool_final_temp: "حتمی درجہ حرارت",                  // Température finale
+  cool_read_final: "⏹ حتمی درجہ حرارت ریکارڈ کریں",    // Relever la T° finale
+
+  // Huiles de friture
+  oils_title: "فرائینگ آئل",                          // Huiles de friture
+  oils_subtitle: "پولر مرکبات < 25%",                  // Composés polaires < 25%
+  oils_empty_title: "کوئی فرائر ٹریک نہیں",             // Aucune friteuse suivie
+  oils_empty_sub: "آئل ٹریکنگ شروع کرنے کے لیے اپنے فرائرز شامل کریں", // Ajoute tes friteuses
+  oils_add: "+ فرائر شامل کریں",                       // + Ajouter une friteuse
+  oils_add_another: "+ ایک اور فرائر شامل کریں",        // + Ajouter une autre friteuse
+  oils_new_fryer: "نیا فرائر",                         // Nouvelle friteuse
+  oils_new_test: "+ نیا ٹیسٹ",                         // + Nouveau test
+  oils_name: "نام",                                   // Nom
+  oils_type: "تیل کی قسم",                             // Type d'huile
+  oils_polar: "پولر مرکبات",                           // Composés polaires
+
+  // Traçabilité
+  trace_title: "ٹریسیبیلیٹی",                          // Traçabilité
+  trace_all_ok: "سب کچھ ٹھیک ہے",                      // Tout est en ordre
+  trace_add_product: "پروڈکٹ شامل کریں",                // Ajouter un produit
+  trace_photo: "لیبل کی تصویر",                        // Photo de l'étiquette
+  trace_photo_sub: "فائل کے ساتھ محفوظ",                // Conservée avec la fiche
+  trace_product: "پروڈکٹ",                             // Produit
+  trace_supplier: "سپلائر",                            // Fournisseur
+  trace_lot: "لاٹ",                                    // Lot
+  trace_qty: "مقدار",                                  // Quantité
+
+  // Étiquetage
+  label_title: "لیبلنگ",                               // Étiquetage
+  label_new: "🏷️ نیا لیبل",                            // Nouvelle étiquette
+  label_history: "تاریخچہ · پچھلے 7 دن",                // Historique · 7 derniers jours
+  label_purge: "🗑 صاف کریں",                           // Purger
+
+  // Nuisibles
+  pest_title: "پیسٹ کنٹرول",                           // Nuisibles
+  pest_subtitle: "3D کنٹرول پلان",                     // Plan de lutte 3D
+  pest_empty_title: "کوئی مداخلت نہیں",                 // Aucune intervention
+  pest_empty_sub: "+ بٹن سے وزٹ یا مشاہدہ ریکارڈ کریں", // Enregistre une visite ou une observation
+  pest_new: "نئی مداخلت",                              // Nouvelle intervention
+  pest_join_pdf: "📎 کمپنی کی PDF منسلک کریں",          // Joindre le PDF de l'entreprise
+
+  // Formation HACCP
+  train_title: "HACCP تربیت",                          // Formation HACCP
+  train_subtitle: "سرٹیفکیٹس اور طبی معائنہ",           // Attestations et visas
+  train_empty_title: "کوئی فائل نہیں",                  // Aucune fiche
+  train_empty_sub: "+ بٹن سے اپنی ٹیم کے سرٹیفکیٹس شامل کریں", // Ajoute les attestations
+  train_new: "نئی فائل",                               // Nouvelle fiche
+  train_edit: "فائل میں ترمیم کریں",                    // Modifier la fiche
+  train_name: "نام",                                   // Nom
+  train_role: "عہدہ",                                  // Poste
+  train_haccp_until: "HACCP سرٹیفکیٹ کب تک درست ہے",    // Attestation HACCP valide jusqu'au
+  train_visa_until: "طبی معائنہ کب تک درست ہے",         // Visite médicale valide jusqu'au
+  train_save: "شامل کریں",                             // Ajouter
+  train_update: "اپ ڈیٹ کریں",                          // Mettre à jour
+  train_delete: "🗑 یہ فائل حذف کریں",                  // Supprimer cette fiche
 };
