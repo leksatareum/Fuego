@@ -377,4 +377,5 @@ export default {
   shop_title: "آرڈر کی فہرست",                            // À commander
   shop_placeholder: "چیز شامل کریں…",                     // Ajouter un article…
   shop_empty: "فی الحال کچھ آرڈر نہیں کرنا",                // Rien à commander pour l'instant
+  shop_menu_sub: "خریداری کی یاد دہانی",                    // Pense-bête achats
 };
