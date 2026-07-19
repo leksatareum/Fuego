@@ -1237,7 +1237,11 @@ function ShoppingList({data,setData,db,reload,markLocalWrite,user,go,lang}){
       <div className="sheet-handle"></div>
       <div className="sheet-title">Nouvel article</div>
       <div className="field"><label className="label">Quoi ?</label>
-        <input className="input" autoFocus value={text} onChange={e=>setText(e.target.value)}
+        {/* Pas d'autoFocus ici : sur iPhone, ouvrir le clavier pile au moment
+            où la fenêtre glisse à l'écran peut faire "sauter" son affichage
+            hors de l'écran — un conflit connu entre l'animation et le
+            clavier. On laisse la personne toucher le champ elle-même. */}
+        <input className="input" value={text} onChange={e=>setText(e.target.value)}
           onKeyDown={e=>e.key==="Enter"&&addItem()} placeholder={t("shop_placeholder",lang)}/>
       </div>
       <button className="btn btn-primary mt8" onClick={addItem} disabled={!text.trim()||busy}>{busy?"Ajout…":"Ajouter"}</button>
@@ -1248,6 +1252,10 @@ function ShoppingList({data,setData,db,reload,markLocalWrite,user,go,lang}){
 function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWrite}){
   const[,setTick]=useState(0);
   useEffect(()=>{const i=setInterval(()=>setTick(t=>t+1),30000);return()=>clearInterval(i);},[]);
+  // Anneau : part de 0 et rejoint le vrai pourcentage juste après le montage
+  // — un petit effet d'ouverture (~500ms) plutôt qu'un cercle qui apparaît
+  // déjà rempli, sans en faire trop.
+  const[ringPct,setRingPct]=useState(0);
   const h=new Date().getHours();const greeting=h<12?t("home_greeting_morning",lang):h<18?t("home_greeting_afternoon",lang):t("home_greeting_evening",lang);
   const today=new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"});
   const win=getServiceWindow();
@@ -1318,6 +1326,14 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
   const globalPct = safePct(globalDone, globalTotal);
   const anomalyCount = criticalAlerts.length;
 
+  // Déclenche l'animation une fois la vraie valeur connue — un setTimeout(0)
+  // plutôt qu'une mise à jour synchrone, sinon React risque de regrouper les
+  // deux rendus (0 puis la vraie valeur) en un seul et sauter la transition.
+  useEffect(()=>{
+    const timer=setTimeout(()=>setRingPct(globalPct),50);
+    return ()=>clearTimeout(timer);
+  },[globalPct]);
+
   return(<div className="page">
     <div className="greet-block">
       <div className="between" style={{alignItems:"flex-start"}}>
@@ -1333,13 +1349,19 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
     {/* Carte de service — la seule vraie "carte importante" de l'accueil,
         avec les alertes. Tout le reste en dessous redevient plus léger. */}
     {globalTotal>0 && (
-      <div className="card mb14" style={{background:`linear-gradient(135deg,${T.bg2},${T.bg3})`,border:`1px solid ${anomalyCount>0?T.bad+"55":T.border}`}}>
+      <div className="card mb14" style={{background:`linear-gradient(135deg,${T.bg2},${T.bg3})`,border:`1px solid ${T.border}`,borderLeft:"3px solid #FF6B00",position:"relative",overflow:"hidden"}}>
         <div className="row" style={{alignItems:"center",gap:16}}>
           <div style={{position:"relative",width:64,height:64,flexShrink:0}}>
             <svg width="64" height="64" viewBox="0 0 64 64" style={{transform:"rotate(-90deg)"}}>
               <circle cx="32" cy="32" r="27" fill="none" stroke={T.bg3} strokeWidth="6"/>
-              <circle cx="32" cy="32" r="27" fill="none" stroke={anomalyCount>0?T.bad:globalPct>=100?T.good:T.accent} strokeWidth="6" strokeLinecap="round"
-                strokeDasharray={2*Math.PI*27} strokeDashoffset={2*Math.PI*27*(1-globalPct/100)} style={{transition:"stroke-dashoffset .4s"}}/>
+              {/* Couleur de l'anneau = seulement l'avancement (vert si
+                  complet, orange sinon) — jamais rouge. Le rouge est
+                  réservé à la conformité, affichée séparément ci-dessous :
+                  un anneau complet à 100% avec une anomalie en cours ne
+                  doit pas donner l'impression trompeuse que l'avancement
+                  lui-même est mauvais. */}
+              <circle cx="32" cy="32" r="27" fill="none" stroke={globalPct>=100?T.good:T.accent} strokeWidth="6" strokeLinecap="round"
+                strokeDasharray={2*Math.PI*27} strokeDashoffset={2*Math.PI*27*(1-ringPct/100)} style={{transition:"stroke-dashoffset .5s ease-out"}}/>
             </svg>
             <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:800,color:T.text}} className="tabular">{Math.round(globalPct)}%</div>
           </div>
@@ -1347,7 +1369,7 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
             <div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:2}}>{win.label}</div>
             <div className="tabular" style={{fontSize:13,color:T.textDim}}>{globalDone} actions terminées sur {globalTotal}</div>
             {anomalyCount>0
-              ? <div style={{fontSize:13,color:T.bad,fontWeight:600,marginTop:2}}>⚠ {anomalyCount} anomalie{anomalyCount>1?"s":""} à traiter</div>
+              ? <span style={{display:"inline-flex",alignItems:"center",gap:5,fontSize:12,fontWeight:700,color:T.bad,background:T.badBg,padding:"3px 9px",borderRadius:999,marginTop:6}}>🔴 {anomalyCount} anomalie{anomalyCount>1?"s":""} à corriger</span>
               : <div style={{fontSize:13,color:T.good,fontWeight:600,marginTop:2}}>✓ Rien à signaler</div>}
           </div>
         </div>
