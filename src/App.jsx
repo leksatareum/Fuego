@@ -1197,7 +1197,7 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
   })();
   const slotTasks=data.tasks.filter(t=>t.date===homeSlot.date&&(t.service||"midi")===homeSlot.service);
   const tasksTotal=slotTasks.length;const tasksDone=slotTasks.filter(t=>t.done).length;
-  const cleanTotal=data.cleaning.length;const cleanDone=data.cleaning.filter(c=>cleaningIsDoneToday(c,data.cleaningChecks)).length;
+  const cleanTotal=data.cleaning.length;const cleanDone=data.cleaning.filter(c=>cleaningIsDoneToday(c,data.cleaningChecks,data.haccpSettings?.resetSoir)).length;
 
   // Statut de chaque module pour la pastille d'accès rapide : vert = complet
   // (ou rien à faire), rouge = il reste des actions en attente aujourd'hui.
@@ -1313,15 +1313,30 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Convertit "JJ/MM" (format utilisé partout dans l'app) en objet Date de l'année en cours
-// Une zone est-elle faite AUJOURD'HUI ? Fonction partagée, utilisée partout
-// dans l'app (accueil, menu HACCP, pastille de l'icône, écran Nettoyage) —
-// une seule source de vérité, pour ne plus jamais désynchroniser un compteur
-// par rapport à un autre. Pour le quotidien, matin ET soir sont nécessaires
-// (l'ancienne case "done" ne représente plus cet état depuis le passage au
-// double créneau) ; pour les autres fréquences, la case reste la référence.
-function cleaningIsDoneToday(c, cleaningChecks){
+// Date "de service" plutôt que date calendaire brute : entre minuit et
+// l'horaire réel de bascule (Paramètres → Horaires de service), on est
+// encore sur le service du soir de la veille. Sans ça, minuit faisait
+// réapparaître le nettoyage du soir comme "à faire" des heures avant la
+// vraie fin de service — même logique que celle déjà utilisée pour calculer
+// le créneau en cours dans Mise en place.
+function serviceISODate(resetSoir){
+  const RESET_SOIR = resetSoir ?? (3*60);
+  const n=new Date(); const mins=n.getHours()*60+n.getMinutes();
+  const d=new Date(n);
+  if(mins<RESET_SOIR) d.setDate(d.getDate()-1);
+  return isoDate(d);
+}
+
+// Une zone est-elle faite AUJOURD'HUI (au sens du service, pas du calendrier) ?
+// Fonction partagée, utilisée partout dans l'app (accueil, menu HACCP,
+// pastille de l'icône, écran Nettoyage) — une seule source de vérité, pour
+// ne plus jamais désynchroniser un compteur par rapport à un autre. Pour le
+// quotidien, matin ET soir sont nécessaires (l'ancienne case "done" ne
+// représente plus cet état depuis le passage au double créneau) ; pour les
+// autres fréquences, la case reste la référence.
+function cleaningIsDoneToday(c, cleaningChecks, resetSoir){
   if(c.freq==="Quotidien"){
-    const today=isoDate(new Date());
+    const today=serviceISODate(resetSoir);
     const checks=cleaningChecks||[];
     const hasMatin=checks.some(x=>x.cleaningId===c.id&&x.date===today&&x.period==="matin");
     const hasSoir=checks.some(x=>x.cleaningId===c.id&&x.date===today&&x.period==="soir");
@@ -2016,7 +2031,7 @@ function GbphHelpButton({section,go}){
 function HaccpHub({data,go,lang}){
   const total=data.haccpSettings.fridgeTargets.length;
   const fridgesAlert=data.haccpSettings.fridgeTargets.filter(f=>{const m=getReleve(data,f.id,"matin"),s=getReleve(data,f.id,"soir");return(m&&tempStatus(m.temp,f.target)==="bad")||(s&&tempStatus(s.temp,f.target)==="bad");}).length;
-  const cleanOk=data.cleaning.filter(c=>cleaningIsDoneToday(c,data.cleaningChecks)).length;
+  const cleanOk=data.cleaning.filter(c=>cleaningIsDoneToday(c,data.cleaningChecks,data.haccpSettings?.resetSoir)).length;
   const alerts=data.traceability.filter(t=>t.status!=="ok").length;
   const oilAlert=data.oils.filter(o=>o.polaires>=data.haccpSettings.oilPolarMax).length;
   const coolAlert=data.cooling.filter(c=>c.status==="alert").length;
@@ -2555,7 +2570,12 @@ const CLEAN_FREQS = [
 function Cleaning({data,setData,db,reload,go,markLocalWrite,user,lang}){
   const[busy,setBusy]=useState(null);
   const[tab,setTab]=useState("Quotidien");
-  const todayISO=isoDate(new Date());
+  // Même logique que Mise en place : entre minuit et l'horaire réel de
+  // bascule (Paramètres → Horaires de service, 3h par défaut), on est encore
+  // sur le service du soir de la veille. Utiliser la date calendaire brute
+  // faisait réapparaître le nettoyage du soir comme "à faire" à minuit pile,
+  // des heures avant la vraie fin de service.
+  const todayISO=serviceISODate(data?.haccpSettings?.resetSoir);
 
   // Retrouve un passage du jour pour une zone/période donnée, dans
   // l'historique permanent — c'est CETTE présence (pas cleaning.done) qui
@@ -2635,7 +2655,7 @@ function Cleaning({data,setData,db,reload,go,markLocalWrite,user,lang}){
   // Pour le quotidien, une zone compte comme "faite" seulement si matin ET
   // soir sont cochés aujourd'hui — dérivé de l'historique réel, pas d'un
   // état qu'on aurait pu oublier de resynchroniser.
-  function dailyDone(zone){ return cleaningIsDoneToday(zone,data.cleaningChecks); }
+  function dailyDone(zone){ return cleaningIsDoneToday(zone,data.cleaningChecks,data.haccpSettings?.resetSoir); }
 
   const done = isDaily ? list.filter(dailyDone).length : list.filter(c=>c.done).length;
   const pct = safePct(done, list.length);
@@ -5009,7 +5029,7 @@ export default function App(){
       t.date===slotIso && (t.service||"midi")===slotService && !t.done).length;
 
     // Zones de nettoyage à faire + produits en alerte DLC
-    const nettoyageRestant = (data.cleaning||[]).filter(c=>!cleaningIsDoneToday(c,data.cleaningChecks)).length;
+    const nettoyageRestant = (data.cleaning||[]).filter(c=>!cleaningIsDoneToday(c,data.cleaningChecks,data.haccpSettings?.resetSoir)).length;
     const alertesDlc = (data.traceability||[]).filter(t=>t.status!=="ok").length;
 
     const total = relevesManquants + tachesRestantes + nettoyageRestant + alertesDlc;
