@@ -359,8 +359,14 @@ const DB = {
     if(c.id)return sbPatch("task_categories",{name:c.name,icon:c.icon,color:c.color},qs(`id=eq.${c.id}`));
     return sbPost("task_categories",{name:c.name,icon:c.icon,color:c.color});
   },
+  // La réaffectation doit réussir AVANT de supprimer la catégorie — sinon
+  // les tâches qui pointaient vers elle deviennent orphelines (comptées
+  // mais invisibles dans Mise en place, sans qu'on comprenne pourquoi).
   async deleteTaskCategory(id,fallbackId){
-    if(fallbackId)await sbPatch("tasks",{category_id:fallbackId},qs(`category_id=eq.${id}`));
+    if(fallbackId){
+      const reassign=await sbPatch("tasks",{category_id:fallbackId},qs(`category_id=eq.${id}`));
+      if(reassign?.error) return reassign; // on n'efface pas la catégorie si la réaffectation a échoué
+    }
     return sbDelete("task_categories",qs(`id=eq.${id}`));
   },
   async addShift(s){return sbPost("shifts",{user_id:s.userId,date:s.date,start:s.start,end:s.end});},
@@ -1251,6 +1257,15 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
 
   const allClear=criticalAlerts.length===0&&activeCoolings.length===0&&nowItems.length===0;
 
+  // Carte de service : une vue d'ensemble en un coup d'œil plutôt que de
+  // devoir recomposer mentalement l'état du service à partir de plusieurs
+  // listes séparées plus bas. Regroupe températures + tâches + nettoyage —
+  // les trois seules choses qui ont un total/fait mesurable dans la journée.
+  const globalDone = matinDone+soirDone+tasksDone+cleanDone;
+  const globalTotal = totalFridges*2+tasksTotal+cleanTotal;
+  const globalPct = safePct(globalDone, globalTotal);
+  const anomalyCount = criticalAlerts.length;
+
   return(<div className="page">
     <div className="greet-block">
       <div className="between" style={{alignItems:"flex-start"}}>
@@ -1262,6 +1277,30 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
         {VOICE_FEATURE_ENABLED&&onVoiceOpen&&<button onClick={onVoiceOpen} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 14px",borderRadius:20,background:T.bg2,border:`1px solid ${T.border}`,color:T.text,fontSize:13,fontWeight:600,flexShrink:0,marginTop:2}}><span style={{color:"#FF6B00"}}>🎤</span> Dicter</button>}
       </div>
     </div>
+
+    {/* Carte de service — la seule vraie "carte importante" de l'accueil,
+        avec les alertes. Tout le reste en dessous redevient plus léger. */}
+    {globalTotal>0 && (
+      <div className="card mb14" style={{background:`linear-gradient(135deg,${T.bg2},${T.bg3})`,border:`1px solid ${anomalyCount>0?T.bad+"55":T.border}`}}>
+        <div className="row" style={{alignItems:"center",gap:16}}>
+          <div style={{position:"relative",width:64,height:64,flexShrink:0}}>
+            <svg width="64" height="64" viewBox="0 0 64 64" style={{transform:"rotate(-90deg)"}}>
+              <circle cx="32" cy="32" r="27" fill="none" stroke={T.bg3} strokeWidth="6"/>
+              <circle cx="32" cy="32" r="27" fill="none" stroke={anomalyCount>0?T.bad:globalPct>=100?T.good:T.accent} strokeWidth="6" strokeLinecap="round"
+                strokeDasharray={2*Math.PI*27} strokeDashoffset={2*Math.PI*27*(1-globalPct/100)} style={{transition:"stroke-dashoffset .4s"}}/>
+            </svg>
+            <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:800,color:T.text}} className="tabular">{Math.round(globalPct)}%</div>
+          </div>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:2}}>{win.label}</div>
+            <div className="tabular" style={{fontSize:13,color:T.textDim}}>{globalDone} actions terminées sur {globalTotal}</div>
+            {anomalyCount>0
+              ? <div style={{fontSize:13,color:T.bad,fontWeight:600,marginTop:2}}>⚠ {anomalyCount} anomalie{anomalyCount>1?"s":""} à traiter</div>
+              : <div style={{fontSize:13,color:T.good,fontWeight:600,marginTop:2}}>✓ Rien à signaler</div>}
+          </div>
+        </div>
+      </div>
+    )}
 
     {criticalAlerts.length>0&&<div className="urgent-card pulse">
       <div className="urgent-label"><span style={{fontSize:14}}>🚨</span>{criticalAlerts.length===1?"ALERTE CRITIQUE":`${criticalAlerts.length} ALERTES CRITIQUES`}</div>
@@ -1317,19 +1356,21 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
       <div className="tile" onClick={()=>go("clean")}><span className="tile-dot" style={{background:cleanComplete?T.good:T.bad}}></span><div className="tile-icon">🧹</div><div className="tile-label">{t("home_cleaning",lang)}</div><div className="tile-value tabular">{cleanDone}/{cleanTotal}</div></div>
     </div>
 
-    {/* Pense-bête "à commander" — volontairement simple : texte libre, tap
-        pour cocher, appui long pour supprimer. Ouvert à toute l'équipe. */}
-    <div className="bucket-label" style={{marginTop:18}}><span className="bucket-label-dot" style={{background:T.textMute}}></span>{t("shop_title",lang)}</div>
-    <div className="card">
-      <div className="row gap8 mb10">
-        <input className="input input-sm" style={{flex:1}} value={shopText} onChange={e=>setShopText(e.target.value)}
-          onKeyDown={e=>e.key==="Enter"&&addShopItem()} placeholder={t("shop_placeholder",lang)}/>
-        <button className="btn btn-primary btn-sm" style={{width:"auto",padding:"0 16px"}} onClick={addShopItem} disabled={!shopText.trim()}>+</button>
-      </div>
-      {(data.shoppingList||[]).length===0
-        ? <div className="text-xs text-dim center" style={{padding:"6px 0"}}>{t("shop_empty",lang)}</div>
-        : (data.shoppingList||[]).map(it=><ShoppingRow key={it.id} it={it} onToggle={toggleShopItem} onDelete={removeShopItem}/>)
-      }
+    {/* Pense-bête "à commander" — repliée par défaut, comme le reste des
+        écrans secondaires : ce n'est pas une urgence du service, juste un
+        aide-mémoire consultable en un tap. */}
+    <div style={{marginTop:18}}>
+      <CollapsibleSection title={t("shop_title",lang)} icon="🛒" count={(data.shoppingList||[]).length}>
+        <div className="row gap8 mb10">
+          <input className="input input-sm" style={{flex:1}} value={shopText} onChange={e=>setShopText(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&addShopItem()} placeholder={t("shop_placeholder",lang)}/>
+          <button className="btn btn-primary btn-sm" style={{width:"auto",padding:"0 16px"}} onClick={addShopItem} disabled={!shopText.trim()}>+</button>
+        </div>
+        {(data.shoppingList||[]).length===0
+          ? <div className="text-xs text-dim center" style={{padding:"6px 0"}}>{t("shop_empty",lang)}</div>
+          : (data.shoppingList||[]).map(it=><ShoppingRow key={it.id} it={it} onToggle={toggleShopItem} onDelete={removeShopItem}/>)
+        }
+      </CollapsibleSection>
     </div>
   </div>);
 }
@@ -1596,7 +1637,7 @@ function Registre({data,db}){
           <div key={dateKey} style={{marginBottom:10}}>
             <CollapsibleSection title={dateKey} icon="📅" count={grouped[dateKey].length} defaultOpen={idx===0}>
               {grouped[dateKey].map((e,i)=>(
-                <div key={i} className="item" style={{marginBottom:5}}>
+                <div key={i} className="row-line">
                   <div className="item-icon" style={{background:e.status==="bad"?T.badBg:T.infoBg,fontSize:18}}>{e.icon}</div>
                   <div className="item-body">
                     <div className="item-title">{e.title}</div>
@@ -1638,7 +1679,7 @@ function Registre({data,db}){
                         ? <div className="text-xs text-dim center" style={{padding:"12px 0"}}>Chargement…</div>
                         : (monthEvents && monthEvents.length>0
                           ? monthEvents.map((e,i)=>(
-                            <div key={i} className="item" style={{marginBottom:5}}>
+                            <div key={i} className="row-line">
                               <div className="item-icon" style={{background:e.status==="bad"?T.badBg:T.infoBg,fontSize:16}}>{e.icon}</div>
                               <div className="item-body">
                                 <div className="item-title">{e.title}</div>
@@ -2481,7 +2522,7 @@ function Oils({data,setData,user,db,reload,go,markLocalWrite,lang}){
 // (filtre précis) ou groupée par statut (vue "Tous").
 function TraceRow({t,onOpen}){
   return (
-    <div className="item" onClick={()=>t.hasPhoto&&onOpen(t)} style={{cursor:t.hasPhoto?"pointer":"default"}}>
+    <div className="row-line" onClick={()=>t.hasPhoto&&onOpen(t)} style={{cursor:t.hasPhoto?"pointer":"default"}}>
       <div className="item-icon" style={{background:t.status==="expired"?T.badBg:t.status==="warn"?T.warnBg:T.infoBg,position:"relative"}}>
         {t.emoji}
         {/* Pastille photo : indique qu'une image existe, sans avoir à la
@@ -3188,7 +3229,7 @@ function Labels({data,setData,user,db,reload,go,markLocalWrite,lang}){
     {data.labels.length===0
       ? <div className="empty"><div className="empty-icon">🏷️</div><div className="empty-title">Aucune étiquette</div><div className="empty-sub">Créez votre première étiquette</div></div>
       : data.labels.map(l=>{const lt=dateTypeByKey(l.dateType||"fabrique");return(
-        <div key={l.id} className="item">
+        <div key={l.id} className="row-line">
           <div className="item-icon" style={{background:T.infoBg}}>{lt.icon}</div>
           <div className="item-body"><div className="item-title">{l.product}</div><div className="item-sub">{lt.verb} {l.dateProd} · DLC {l.dlc} · {l.operator||""}</div></div>
           <button onClick={()=>reprint(l)} style={{background:T.bg3,border:`1px solid ${T.border}`,color:T.text,borderRadius:9,padding:"7px 11px",fontSize:13,flexShrink:0}}>🖨️</button>
@@ -3602,7 +3643,7 @@ function RecipeEditor({recipe,allRecipes,products=[],defaultType="plat",onSave,o
 function RecipeRow({rec,cost,m,canDelete,onOpen,onDelete}){
   const lp=useLongPress(()=>{ if(!canDelete)return; haptic.medium(); onDelete(rec); });
   return(
-    <div className="item" {...(canDelete?lp.handlers:{})} style={{marginBottom:0}} onClick={()=>{ if(!lp.didFire()) onOpen(rec); }}>
+    <div className="row-line" {...(canDelete?lp.handlers:{})} style={{marginBottom:0}} onClick={()=>{ if(!lp.didFire()) onOpen(rec); }}>
       <div className="item-icon" style={{background:rec.type==="mere"?T.warnBg:T.infoBg}}>{rec.emoji}</div>
       <div className="item-body"><div className="item-title">{rec.name}</div><div className="item-sub">{rec.type==="mere"?<>{rec.yield?.qty||0} {rec.yield?.unit||"u"} · {cost.toFixed(2)} €/{rec.yield?.unit||"u"}</>:<>{rec.category} · {rec.price} €</>}</div></div>
       {rec.type==="plat"?<span className={`badge ${m>=70?"b-good":m>=50?"b-info":"b-bad"}`}>{m}%</span>:<span className="badge b-warn tabular">{cost.toFixed(2)} €</span>}
@@ -3746,7 +3787,16 @@ function Tasks({data,setData,db,reload,user,lang}){
   const done=visibleTasks.filter(t=>t.done).length;const total=visibleTasks.length;const pct=safePct(done,total);
   const urgentLeft=visibleTasks.filter(t=>t.prio==="high"&&!t.done).length;
   const filterOptions=[{value:"all",label:`Tous (${crenauTasks.length})`},...categories.map(c=>({value:c.id,label:`${c.icon} ${c.name.replace("Mise en place ","")} (${crenauTasks.filter(t=>t.categoryId===c.id).length})`}))];
-  const grouped=filter==="all"?categories.map(cat=>({cat,tasks:crenauTasks.filter(t=>t.categoryId===cat.id)})).filter(g=>g.tasks.length>0):[{cat:categories.find(c=>c.id===filter),tasks:visibleTasks}];
+  // Si une tâche pointe vers une catégorie qui n'existe plus (catégorie
+  // supprimée sans réaffectation réussie), elle ne doit jamais disparaître
+  // silencieusement — comptée dans le total mais invisible dans la liste.
+  // On la range dans un groupe "Autre" plutôt que de la perdre de vue.
+  const knownCatIds=new Set(categories.map(c=>c.id));
+  const orphanTasks=crenauTasks.filter(t=>!knownCatIds.has(t.categoryId));
+  const grouped=filter==="all"
+    ?[...categories.map(cat=>({cat,tasks:crenauTasks.filter(t=>t.categoryId===cat.id)})).filter(g=>g.tasks.length>0),
+      ...(orphanTasks.length?[{cat:{id:"__orphan__",icon:"❓",name:"Autre"},tasks:orphanTasks}]:[])]
+    :[{cat:categories.find(c=>c.id===filter),tasks:visibleTasks}];
   const prios=[{k:"high",l:"⚡ Urgent",c:T.bad},{k:"med",l:"Normal",c:T.warn},{k:"low",l:"Quand possible",c:T.textDim}];
   const suggestions=["Pain burger","Sauce du jour","Tailler tomates","Bacs de frites","Vinaigrette","Préparer garnitures"];
   return(<div className="page"><div className="section-title">Mise en place</div><div className="section-sub">{done} / {total} · {Math.round(pct)}%</div>
@@ -3849,7 +3899,7 @@ function mondayOf(d){const x=new Date(d);const wd=(x.getDay()+6)%7;x.setDate(x.g
 function ShiftRow({s,u,canEdit,onOpen,onDelete}){
   const lp=useLongPress(()=>{ if(!canEdit)return; haptic.medium(); onDelete(s); });
   return(
-    <div className="item" {...(canEdit?lp.handlers:{})} style={{marginBottom:0}} onClick={()=>{ if(!lp.didFire()&&canEdit) onOpen(s); }}>
+    <div className="row-line" {...(canEdit?lp.handlers:{})} style={{marginBottom:0}} onClick={()=>{ if(!lp.didFire()&&canEdit) onOpen(s); }}>
       <div className="item-icon" style={{background:T.infoBg,fontWeight:700,fontSize:14}}>{u?.initials||"?"}</div>
       <div className="item-body"><div className="item-title">{u?.name||"Inconnu"}</div><div className="item-sub">{u?.role||""}</div></div>
       <span className="badge b-info tabular">{s.start} – {s.end}</span>
@@ -3978,7 +4028,7 @@ function Planning({data,setData,user,db,reload,markLocalWrite,lang}){
 
     <div className="bucket-label mt14">Heures de la semaine</div>
     {users.map(u=>{const h=totalWeekH(u.id);if(h==="0")return null;return(
-      <div key={u.id} className="item"><div className="item-icon" style={{background:T.bg3,fontWeight:700,fontSize:14}}>{u.initials}</div>
+      <div key={u.id} className="row-line"><div className="item-icon" style={{background:T.bg3,fontWeight:700,fontSize:14}}>{u.initials}</div>
       <div className="item-body"><div className="item-title">{u.name}</div></div>
       <span className="fw7 tabular">{h} h</span></div>);})}
 
@@ -4062,7 +4112,7 @@ function ProductsEditor({data,setData,db,reload,markLocalWrite}){
       const items=all.filter(p=>(p.category||"Épicerie")===cat).sort((a,b)=>a.name.localeCompare(b.name));
       return(
         <CollapsibleSection key={cat} title={cat} icon={CATEGORY_ICONS[cat]||"📦"} count={items.length}>
-          {items.map(p=><div key={p.id} className="item">
+          {items.map(p=><div key={p.id} className="row-line">
             <div className="item-icon" style={{background:T.infoBg}}>{CATEGORY_ICONS[cat]||"🧾"}</div>
             <div className="item-body"><div className="item-title">{p.name}</div><div className="item-sub">{p.price.toFixed(2)} € / {p.unit}</div></div>
             <div className="row gap6"><button onClick={()=>openEdit(p)} style={{background:"transparent",border:"none",color:T.textDim,fontSize:16,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>✏️</button><button onClick={()=>remove(p)} style={{background:"transparent",border:"none",color:T.bad,fontSize:16,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>🗑</button></div>
@@ -4123,7 +4173,7 @@ function TaskCategoriesEditor({data,setData,db,reload,markLocalWrite}){
   }
   async function remove(catId){const tasksInCat=data.tasks.filter(t=>t.categoryId===catId).length;const msg=tasksInCat>0?`${tasksInCat} tâche(s) seront déplacées. Supprimer ?`:"Supprimer cette catégorie ?";if(!window.confirm(msg))return;const remaining=data.taskCategories.filter(c=>c.id!==catId);const fallbackId=remaining[0]?.id;await db.deleteTaskCategory(catId,fallbackId);await reload({force:true});}
   return(<><div className="text-xs text-dim mb12" style={{lineHeight:1.5}}>Organisez votre mise en place par zones de production.</div>
-    {data.taskCategories.map(cat=>{const count=data.tasks.filter(t=>t.categoryId===cat.id).length;return(<div key={cat.id} className="item" style={{borderLeft:`3px solid ${cat.color}`}}><div className="item-icon" style={{background:`${cat.color}22`}}>{cat.icon}</div><div className="item-body"><div className="item-title">{cat.name}</div><div className="item-sub">{count} tâche{count>1?"s":""}</div></div><div className="row gap6"><button onClick={()=>openEdit(cat)} style={{background:"transparent",border:"none",color:T.textDim,fontSize:16,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>✏️</button><button onClick={()=>remove(cat.id)} style={{background:"transparent",border:"none",color:T.bad,fontSize:16,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>🗑</button></div></div>);})}
+    {data.taskCategories.map(cat=>{const count=data.tasks.filter(t=>t.categoryId===cat.id).length;return(<div key={cat.id} className="row-line" style={{borderLeft:`3px solid ${cat.color}`}}><div className="item-icon" style={{background:`${cat.color}22`}}>{cat.icon}</div><div className="item-body"><div className="item-title">{cat.name}</div><div className="item-sub">{count} tâche{count>1?"s":""}</div></div><div className="row gap6"><button onClick={()=>openEdit(cat)} style={{background:"transparent",border:"none",color:T.textDim,fontSize:16,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>✏️</button><button onClick={()=>remove(cat.id)} style={{background:"transparent",border:"none",color:T.bad,fontSize:16,minWidth:44,minHeight:44,display:"flex",alignItems:"center",justifyContent:"center"}}>🗑</button></div></div>);})}
     <button className="btn btn-primary mt8" onClick={openAdd}>+ Nouvelle catégorie</button>
     {showAdd&&<div className="overlay" onClick={()=>setShowAdd(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">{editing?"Modifier":"Nouvelle catégorie"}</div>
@@ -4350,7 +4400,7 @@ function SettingsHaccp({data,setData,db,reload}){
       <div className="text-xs text-dim mb12" style={{lineHeight:1.5,marginLeft:2}}>
         Moments où la mise en place et le nettoyage quotidien repartent à zéro pour toute l'équipe.
       </div>
-      <div className="item" style={{marginBottom:8}}>
+      <div className="row-line">
         <div className="item-icon" style={{background:T.warnBg}}>☀️</div>
         <div className="item-body">
           <div className="item-title">Fin du service du midi</div>
@@ -4361,7 +4411,7 @@ function SettingsHaccp({data,setData,db,reload}){
           onChange={e=>setHoraires(h=>({...h,resetMidi:e.target.value}))}
           onBlur={()=>commitHoraire("resetMidi")}/>
       </div>
-      <div className="item">
+      <div className="row-line">
         <div className="item-icon" style={{background:T.infoBg}}>🌙</div>
         <div className="item-body">
           <div className="item-title">Bascule après minuit</div>
@@ -4749,7 +4799,7 @@ function SettingsPrinter({user}){
       ["3","Noter l'adresse affichée","Termux affiche une adresse du type http://192.168.x.x:9191 — c'est celle à coller ci-dessus."],
       ["4","Laisser tourner","Termux doit rester ouvert en arrière-plan sur l'Android en permanence."],
     ].map(([n,t,d])=>(
-      <div key={n} className="item" style={{marginBottom:6}}>
+      <div key={n} className="row-line">
         <div className="item-icon" style={{background:"linear-gradient(135deg,#FF6B00,#E8390A)",color:"white",fontWeight:800,fontSize:15}}>{n}</div>
         <div className="item-body"><div className="item-title">{t}</div><div className="item-sub" style={{whiteSpace:"normal"}}>{d}</div></div>
       </div>
