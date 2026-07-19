@@ -195,4 +195,162 @@ export default {
   train_save: "شامل کریں",                             // Ajouter
   train_update: "اپ ڈیٹ کریں",                          // Mettre à jour
   train_delete: "🗑 یہ فائل حذف کریں",                  // Supprimer cette fiche
+
+  // ─── Vague 3 : Accueil, menu Plus, Recettes (liste), Planning — BROUILLON,
+  // mêmes réserves qu'en haut de fichier.
+
+  // Accueil
+  home_greeting_morning: "السلام علیکم",              // Bonjour
+  home_greeting_afternoon: "دن بخیر",                 // Bon après-midi
+  home_greeting_evening: "شام بخیر",                  // Bonsoir
+  home_all_clear_title: "سب کچھ قابو میں ہے",          // Tout est sous contrôle
+  home_all_clear_sub: "سکون کا لمحہ لیں",              // Profitez d'un moment de calme
+  home_now: "ابھی",                                    // Maintenant
+  home_upcoming: "آنے والا",                           // À venir
+  home_ongoing: "جاری",                                // En cours
+  home_quick_access: "فوری رسائی",                     // Accès rapide
+  home_handle_now: "ابھی حل کریں →",                    // Traiter maintenant →
+  home_morning_readings: "صبح کی ریڈنگ",                // Relevés matin
+  home_evening_readings: "شام کی ریڈنگ",                // Relevés soir
+  home_tasks: "تیاری",                                 // Mise en place
+  home_cleaning: "صفائی",                               // Nettoyage
+  home_end_cleaning: "اختتامی صفائی",                    // Nettoyage de fin
+  home_supplier_reception: "سپلائرز کی وصولی",           // Réception fournisseurs
+  home_product_labeling: "پروڈکٹ لیبلنگ",               // Étiquetage produits
+  home_tile_labeling: "لیبلنگ",                         // Étiquetage
+  home_tile_temps: "درجہ حرارت",                        // Températures
+  home_tile_trace: "ٹریسیبیلیٹی",                       // Traçabilité
+
+  // Menu Plus
+  more_title: "ٹولز",                                  // Outils
+  more_subtitle: "تمام فنکشنز",                        // Toutes les fonctions
+  more_margins: "منافع",                               // Marges
+  more_margins_sub: "منافع بخشی",                       // Rentabilité
+  more_team_planning: "ٹیم پلاننگ",                    // Planning équipe
+  more_team_planning_sub: "اوقاتِ کار",                 // Horaires
+  more_help: "مدد",                                    // Aide
+  more_manual: "استعمال کی ہدایات",                     // Notice d'utilisation
+  more_manual_sub: "Fuego کیسے استعمال کریں",           // Comment se servir de Fuego
+  more_gbph: "اچھے طریقوں کی رہنمائی",                  // Guide des bonnes pratiques
+  more_gbph_sub: "HACCP حفظان صحت کے اصول",             // Règles d'hygiène HACCP
+  more_settings_group_staff: "ترتیبات",                 // Réglages
+  more_settings: "ترتیبات",                             // Paramètres
+  more_settings_printer_sub: "لیبل پرنٹر",              // Imprimante d'étiquettes
+
+  // Recettes
+  recipe_title: "تکنیکی شیٹس",                          // Fiches techniques
+  recipe_tab_dishes: "کھانے",                           // Plats
+  recipe_tab_preps: "تیاریاں",                          // Préparations
+  recipe_empty_prep: "کوئی تیاری نہیں",                  // Aucune préparation
+  recipe_empty_dish: "کوئی ڈش نہیں",                    // Aucun plat
+  recipe_empty_prep_sub: "+ بٹن سے اپنی بنیادی تیاریاں شامل کریں", // Crée tes bases avec le bouton +
+  recipe_empty_dish_sub: "+ بٹن سے اپنی پہلی ڈش بنائیں", // Crée ton premier plat avec le bouton +
+
+  // Planning
+  planning_title: "پلاننگ",                            // Planning
+  planning_view_table: "جدول",                         // Tableau
+  planning_view_day: "دن کے حساب سے",                   // Par jour
+  planning_team: "ٹیم",                                // Équipe
+
+  // ─── Vague finale : Cellule (bannières), Remise en température, éditeur
+  // et détail de fiche technique — BROUILLON, mêmes réserves.
+
+  // Cellule
+  cool_mode_refroid: "ٹھنڈا کرنا",                      // Refroidissement
+  cool_mode_refroid_sub: "63°C → 10°C دل تک",           // 63°C → 10°C à cœur
+  cool_mode_surgel: "منجمد کرنا",                        // Surgélation
+  cool_mode_surgel_sub: "−18°C دل تک",                  // jusqu'à −18°C à cœur
+  cool_departure: "شروع",                               // Départ
+  cool_limit: "حد",                                     // Limite
+  cool_over_limit: "⚠ حد سے تجاوز",                      // ⚠ Limite dépassée
+  cool_near_limit: "⚠ حد قریب ہے",                       // ⚠ Bientôt la limite
+  cool_on_time: "✓ وقت پر",                             // ✓ Dans les temps
+  cool_duration: "دورانیہ",                             // Durée
+  cool_core_temp_surgel: "دل کا درجہ حرارت — ہدف ≤ −18°C", // T° à cœur — cible ≤ −18°C
+  cool_core_temp_refroid: "دل کا درجہ حرارت — ہدف ≤ 10°C", // T° à cœur — cible ≤ 10°C
+  cool_nonconform: "غیر درست۔",                          // Non conforme.
+  cool_continue_freezing: "منجمد کرنا جاری رکھیں۔",        // Poursuivre la surgélation.
+  cool_conform: "درست۔",                                // Conforme.
+  cool_frozen_dlc: "منجمد · میعاد +6 ماہ۔",              // Surgelé · DLC +6 mois.
+  cool_recook_discard: "دوبارہ پکائیں یا پھینک دیں۔",      // Remettre en cuisson ou jeter.
+  cool_dlc_j: "میعاد J+",                               // DLC J+
+  cool_save: "محفوظ کریں",                              // Enregistrer
+
+  // Remise en température
+  reheat_title: "دوبارہ گرم کرنا",                       // Remise en T°
+  reheat_empty_title: "کوئی ریکارڈ نہیں",                // Aucune remise en température
+  reheat_empty_sub: "+ بٹن سے اگلا ریکارڈ درج کریں",     // Enregistre ta prochaine remise en T°
+  reheat_final_temp: "حتمی درجہ حرارت",                  // T° finale
+  reheat_duration: "دورانیہ",                           // Durée
+  reheat_new: "دوبارہ گرم کرنا",                         // Remise en température
+  reheat_product: "پروڈکٹ",                             // Produit
+  reheat_core_temp: "دل کا حتمی درجہ حرارت",             // T° finale à cœur
+  reheat_duration_min: "دورانیہ (منٹ)",                  // Durée (minutes)
+  reheat_conform: "درست۔",                              // Conforme.
+  reheat_save: "محفوظ کریں",                            // Enregistrer
+
+  // Éditeur de fiche technique
+  redit_cancel: "← منسوخ کریں",                          // Annuler
+  redit_update: "اپ ڈیٹ کریں",                          // Mettre à jour
+  redit_create: "بنائیں",                               // Créer
+  redit_title_new: "نئی ترکیب",                         // Nouvelle recette
+  redit_title_edit: "ترمیم کریں",                        // Modifier
+  redit_subtitle: "لاگت خودکار طور پر شمار",             // Coûts calculés automatiquement
+  redit_type: "قسم",                                    // Type
+  redit_type_dish: "🍽️ ڈش",                            // Plat
+  redit_type_prep: "🧪 تیاری",                          // Préparation
+  redit_icon: "آئیکن",                                  // Icône
+  redit_name: "نام",                                    // Nom
+  redit_category: "زمرہ",                                // Catégorie
+  redit_price: "قیمت (€)",                              // Prix (€)
+  redit_portions: "پورشنز",                             // Portions
+  redit_yield: "پیداوار",                               // Rendement
+  redit_unit: "اکائی",                                  // Unité
+  redit_cost_preview: "لاگت کا جائزہ",                   // Aperçu coûts
+  redit_cost_per_portion: "لاگت/پورشن",                  // Coût/portion
+  redit_margin: "منافع",                                // Marge
+  redit_total_cost: "کل لاگت",                          // Coût total
+  redit_ingredients: "اجزاء",                            // Ingrédients
+  redit_add_ingredient: "+ جزو",                        // + Ingrédient
+  redit_add_prep: "+ 🧪 تیاری",                          // + Prépa
+  redit_no_ingredient: "کوئی جزو نہیں",                   // Aucun ingrédient
+  redit_free_entry: "— آزاد اندراج —",                   // — Saisie libre —
+  redit_ingredient_name: "جزو کا نام",                    // Nom de l'ingrédient
+  redit_qty: "مقدار",                                   // Qté
+  redit_steps: "مراحل",                                 // Étapes
+  redit_add_step: "+ مرحلہ",                             // + Étape
+  redit_no_step: "کوئی مرحلہ نہیں",                       // Aucune étape
+  redit_describe: "تفصیل بیان کریں…",                    // Décrire…
+  redit_allergens: "الرجن",                              // Allergènes
+
+  // Détail de fiche technique
+  rdet_back: "← واپس",                                  // Retour
+  rdet_prep: "تیاری",                                   // Préparation
+  rdet_yield: "پیداوار",                                // Rendement
+  rdet_price: "قیمت",                                   // PRIX
+  rdet_cost_total: "کل لاگت",                           // COÛT TOTAL
+  rdet_cost_portion: "لاگت / پورشن",                     // COÛT / PORTION
+  rdet_margin: "منافع",                                 // MARGE
+  rdet_production_mode: "پیداواری موڈ",                  // Mode production
+  rdet_multiply: "ضرب ×",                               // Multiplier ×
+  rdet_ingredients: "اجزاء",                             // Ingrédients
+  rdet_recipe_tag: "(ترکیب)",                            // (recette)
+  rdet_preparation: "تیاری",                             // Préparation
+  rdet_allergens: "الرجن",                              // Allergènes
+  rdet_none: "کوئی نہیں",                                // Aucun
+  rdet_used_in: "استعمال ہوتا ہے",                       // Utilisée dans
+  rdet_edit: "✏️ ترمیم کریں",                            // Modifier
+
+  // Menu HACCP
+  haccp_hub_title: "HACCP",                             // HACCP
+  haccp_hub_subtitle: "حفاظتی نگرانی کا منصوبہ",          // Plan de Maîtrise Sanitaire
+  haccp_group_daily: "روزانہ کے معائنے",                  // Contrôles quotidiens
+  haccp_group_trace: "ٹریسیبیلیٹی",                      // Traçabilité
+  haccp_group_hygiene: "حفظان صحت اور عملہ",              // Hygiène et personnel
+  temp_hub_sub: "صبح اور شام، ہر فریج کے لیے",            // Matin et soir, par frigo
+  recv_hub_sub: "ترسیل کی جانچ",                          // Contrôle livraisons
+  reheat_hub_sub: "≥ 63°C ایک گھنٹے سے کم میں",           // ≥ 63°C en moins d'1h
+  label_hub_sub: "میعاد اور الرجن پرنٹنگ",                // Impression DLC + allergènes
+  pest_hub_sub: "وزٹس اور معائنے",                       // Visites et contrôles
+  train_hub_sub: "سرٹیفکیٹس",                            // Attestations
 };
