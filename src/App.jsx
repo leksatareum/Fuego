@@ -629,12 +629,12 @@ const S = `
 
   .seg{display:flex;background:${T.bg1};border-radius:10px;padding:3px;border:1px solid ${T.border};}
   .seg-btn{flex:1;height:32px;border:none;background:transparent;border-radius:7px;color:${T.textDim};font-size:12px;font-weight:600;transition:all var(--dur-fast);}
-  .seg-btn.sel{background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;}
+  .seg-btn.sel{background:#2D1208;color:#FF6B00;}
 
   .chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;}
   .chips::-webkit-scrollbar{display:none;}
   .chip{flex-shrink:0;padding:7px 14px;border-radius:999px;background:${T.bg2};color:${T.textDim};border:1px solid ${T.border};font-size:13px;font-weight:600;white-space:nowrap;transition:all var(--dur-fast);}
-  .chip.sel{background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;border-color:#E8390A;}
+  .chip.sel{background:#2D1208;color:#FF6B00;border-color:#5A2810;}
   .dial.swipeable::after{content:"Glisser pour faire défiler";display:block;position:absolute;left:50%;transform:translateX(-50%);bottom:-17px;font-size:10px;color:${T.textMute};white-space:nowrap;}
   .dial{position:relative;}
 
@@ -704,7 +704,7 @@ const S = `
   .tabs{display:flex;gap:6px;margin-bottom:14px;overflow-x:auto;padding-bottom:2px;}
   .tabs::-webkit-scrollbar{display:none;}
   .tab{padding:8px 14px;border-radius:999px;background:${T.bg2};color:${T.textDim};border:1px solid ${T.border};font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0;}
-  .tab.active{background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;border-color:#E8390A;}
+  .tab.active{background:#2D1208;color:#FF6B00;border-color:#5A2810;}
 
   .mult-row{display:flex;align-items:center;gap:10px;background:${T.bg1};border-radius:12px;padding:10px;margin-bottom:12px;border:1px solid ${T.border};}
   .mult-label{font-size:11px;color:${T.textDim};font-weight:600;text-transform:uppercase;letter-spacing:.06em;flex-shrink:0;}
