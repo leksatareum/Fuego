@@ -294,12 +294,11 @@ const DB = {
   // horodatage), pas sur la date affichée qui n'a pas d'année.
   async fetchRegistrePeriod(fromISO,toISO){
     const range=`created_at=gte.${fromISO}&created_at=lt.${toISO}`;
-    const [rec,cool,reheat,oils,labels,tm,pests,fr,trace,cleanChecks]=await Promise.all([
+    const [rec,cool,reheat,oils,pests,fr,trace,cleanChecks]=await Promise.all([
       sbGet("reception",   `?${range}&${q.select()}`),
       sbGet("cooling",     `?${range}&${q.select()}`),
       sbGet("reheating",   `?${range}&${q.select()}`),
       sbGet("oils",        `?${range}&${q.select()}`),
-      sbGet("labels",      `?${range}&${q.select()}`),
       sbGet("pests",       `?${range}&${q.select()}`),
       sbGet("fridge_releves", `?${range}&${q.select()}`),
       sbGet("traceability",`?${range}&${q.select("id,product,emoji,supplier,lot,dlc,qty,allergenes,status,created_at")}`),
@@ -312,7 +311,6 @@ const DB = {
       cooling: (cool.data||[]).map(c=>({id:c.id,product:c.product,qty:c.qty,startTemp:c.start_temp,endTemp:c.end_temp,duration:c.duration,startedMs:c.started_ms,operator:c.operator,status:c.status,date:c.date,dlc:c.dlc,createdAt:c.created_at})),
       reheating: (reheat.data||[]).map(r=>({id:r.id,product:r.product,endTemp:r.end_temp,duration:r.duration,operator:r.operator,status:r.status,date:r.date,createdAt:r.created_at})),
       oils: (oils.data||[]).map(o=>({id:o.id,name:o.name,type:o.type,dateInstall:o.date_install,lastTest:o.last_test,polaires:o.polaires,operator:o.operator,createdAt:o.created_at})),
-      labels: (labels.data||[]).map(l=>({id:l.id,product:l.product,dateProd:l.date_prod,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator,createdAt:l.created_at,dateType:l.date_type||"fabrique"})),
       pests: (pests.data||[]).map(p=>({id:p.id,date:p.date,type:p.type,company:p.company,result:p.result,nextVisit:p.next_visit,createdAt:p.created_at})),
       fridgeReleves: (fr.data||[]).map(r=>({id:r.id,fridgeId:r.fridge_id,date:r.date,period:r.period,temp:r.temp,time:r.time,operatorId:r.operator_id,createdAt:r.created_at})),
       traceability: (trace.data||[]).map(t=>({id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status,createdAt:t.created_at})),
@@ -321,14 +319,6 @@ const DB = {
       // état "maintenant", écrasé à chaque service).
       cleaningChecks: (cleanChecks.data||[]).map(c=>({id:c.id,cleaningId:c.cleaning_id,zone:c.zone,freq:c.freq,date:c.date,period:c.period,operator:c.operator,createdAt:c.created_at})),
     };
-  },
-  // Les étiquettes ne sont chargées que sur 7 jours au démarrage de l'app
-  // (pour ne pas alourdir l'écran Étiquetage) — mais le Registre a besoin de
-  // voir plus loin (30 jours, mois en cours). Requête ciblée, indépendante
-  // de cette limite.
-  async fetchLabelsSince(fromISO){
-    const res=await sbGet("labels", qs(`created_at=gte.${fromISO}`,q.order("created_at",false),q.select()));
-    return (res.data||[]).map(l=>({id:l.id,product:l.product,dateProd:l.date_prod,dlc:l.dlc,lot:l.lot,allergens:l.allergens,operator:l.operator,createdAt:l.created_at}));
   },
   async getTraceabilityPhoto(id){
     const {data,error}=await sbGet("traceability", qs(q.eq("id",id),q.limit(1),q.select("photo")));
@@ -1571,9 +1561,11 @@ function buildRegistreEvents(data){
     ev.push({date:r.date,time:"—",ts:eventTs(r.createdAt,r.date),type:"reheating",icon:"🔥",title:`Remise en T° · ${r.product}`,detail:`${r.endTemp}°C en ${r.duration} min`,status:r.status==="ok"?"good":"bad",module:"Remise en température",operator:r.operator||"—"});
   });
 
-  data.labels.forEach(l=>{
-    ev.push({date:l.dateProd,time:"—",ts:eventTs(l.createdAt,l.dateProd),type:"label",icon:"🏷️",title:`Étiquette · ${l.product}`,detail:`DLC ${l.dlc} · Lot ${l.lot}`,status:"good",module:"Étiquetage",operator:l.operator||"—"});
-  });
+  // L'étiquetage n'est volontairement pas archivé dans le Registre HACCP :
+  // ce n'est pas une obligation réglementaire (contrairement à la
+  // traçabilité, aux températures, au nettoyage...), et ça encombrait
+  // l'historique sans réel besoin. L'historique des étiquettes reste
+  // consultable directement dans l'écran Étiquetage.
 
   data.pests.forEach(p=>{
     ev.push({date:p.date,time:"—",ts:eventTs(p.createdAt,p.date),type:"pest",icon:"🐀",title:`Contrôle nuisibles · ${p.type}`,detail:`${p.company||"—"} · Résultat : ${p.result}`,status:p.result==="RAS"?"good":"bad",module:"Nuisibles",operator:"—"});
@@ -1623,27 +1615,8 @@ function Registre({data,db}){
   const[archiveMonths,setArchiveMonths]=useState({});
   const[loadingMonth,setLoadingMonth]=useState(null);
   const[openMonth,setOpenMonth]=useState(null);
-  // Complète les étiquettes au-delà des 7 jours en mémoire (limite fixée
-  // pour l'écran Étiquetage) — sans ça, "30 jours" et "Ce mois" auraient un
-  // trou silencieux sur tout ce qui dépasse 7 jours. Chargé une fois par
-  // session, pas à chaque rendu.
-  const[extraLabels,setExtraLabels]=useState(null);
-  useEffect(()=>{
-    if(period==="7j") return; // pas besoin, la fenêtre normale suffit déjà
-    if(extraLabels!==null) return; // déjà chargé cette session
-    const from=new Date(Date.now()-31*86400000).toISOString(); // couvre "30 jours" et "Ce mois"
-    db.fetchLabelsSince(from).then(setExtraLabels).catch(()=>setExtraLabels([]));
-  },[period]);
 
-  const dataForRegistry = useMemo(()=>{
-    if(!extraLabels) return data;
-    // Fusionne sans doublons (une étiquette peut être dans les deux lots).
-    const seen=new Set(data.labels.map(l=>l.id));
-    const merged=[...data.labels, ...extraLabels.filter(l=>!seen.has(l.id))];
-    return {...data, labels:merged};
-  },[data,extraLabels]);
-
-  const allEvents=useMemo(()=>buildRegistreEvents(dataForRegistry),[dataForRegistry]);
+  const allEvents=useMemo(()=>buildRegistreEvents(data),[data]);
 
   const now=new Date();
   const cutoffs={"7j":7,"30j":30,"mois":31};
@@ -1702,7 +1675,7 @@ function Registre({data,db}){
   function eventsForMonth(year,monthIdx){
     const key=`${year}-${String(monthIdx+1).padStart(2,"0")}`;
     const inMemory = year===thisYear && monthIdx===thisMonth;
-    const source = inMemory ? dataForRegistry : (archiveMonths[key]
+    const source = inMemory ? data : (archiveMonths[key]
       ? {...data, ...archiveMonths[key]} // complète avec haccpSettings/users déjà connus
       : null);
     if(!source) return null;
@@ -3807,6 +3780,51 @@ function RecipeDetail({recipe,allRecipes,onBack,onEdit,lang}){
   </div>);
 }
 
+// Sélecteur avec recherche — remplace le menu déroulant classique qui
+// devient ingérable avec un catalogue de plusieurs centaines de produits.
+// Tape pour filtrer, tape sur un résultat pour choisir. Générique : sert
+// aussi bien pour les produits que pour les préparations en sous-recette.
+function SearchSelect({items,getLabel,getSub,selectedLabel,onSelect,placeholder,freeLabel,onFreeText}){
+  const[query,setQuery]=useState("");
+  const[open,setOpen]=useState(false);
+  const boxRef=useRef(null);
+  useEffect(()=>{
+    function onClickOutside(e){ if(boxRef.current&&!boxRef.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown",onClickOutside);
+    document.addEventListener("touchstart",onClickOutside);
+    return ()=>{ document.removeEventListener("mousedown",onClickOutside); document.removeEventListener("touchstart",onClickOutside); };
+  },[]);
+  // Insensible aux accents : "creme" doit retrouver "crème" — sur un
+  // catalogue de plusieurs centaines de produits, personne ne veut avoir à
+  // taper les accents exactement pour que ça marche.
+  const norm=s=>(s||"").toString().normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+  const filtered = query.trim()
+    ? items.filter(it=>norm(getLabel(it)).includes(norm(query))).slice(0,8)
+    : items.slice(0,8);
+  return (
+    <div ref={boxRef} style={{position:"relative"}}>
+      <input className="input input-sm" value={open?query:(selectedLabel||"")} onFocus={()=>{setOpen(true);setQuery("");}}
+        onChange={e=>setQuery(e.target.value)} placeholder={placeholder}/>
+      {open && (
+        <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:20,background:T.bg2,border:`1px solid ${T.border}`,borderRadius:10,marginTop:4,maxHeight:260,overflowY:"auto",boxShadow:"0 8px 24px rgba(0,0,0,.4)"}}>
+          {onFreeText && (
+            <div className="row-line" style={{padding:"10px 12px",cursor:"pointer"}} onClick={()=>{onFreeText(query);setOpen(false);setQuery("");}}>
+              <div className="item-body"><div className="item-title" style={{fontSize:13}}>{freeLabel}{query.trim()?` : "${query.trim()}"`:""}</div></div>
+            </div>
+          )}
+          {filtered.length===0 && !onFreeText && <div className="text-xs text-dim center" style={{padding:"14px 0"}}>Aucun résultat</div>}
+          {filtered.map((it,idx)=>(
+            <div key={idx} className="row-line" style={{padding:"10px 12px",cursor:"pointer"}} onClick={()=>{onSelect(it);setOpen(false);setQuery("");}}>
+              <div className="item-body"><div className="item-title" style={{fontSize:13}}>{getLabel(it)}</div>{getSub&&<div className="item-sub">{getSub(it)}</div>}</div>
+            </div>
+          ))}
+          {query.trim() && filtered.length===8 && <div className="text-xs text-dim center" style={{padding:"8px 0"}}>Affine ta recherche pour voir plus de résultats</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RecipeEditor({recipe,allRecipes,products=[],defaultType="plat",onSave,onCancel,lang}){
   const isEditing=!!recipe;
   const[type,setType]=useState(recipe?.type||defaultType);
@@ -3870,21 +3888,22 @@ function RecipeEditor({recipe,allRecipes,products=[],defaultType="plat",onSave,o
     <div className="card"><div className="between mb8"><div className="bucket-label">{t("redit_ingredients",lang)}</div><div className="row gap6"><button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={addIngredient}>{t("redit_add_ingredient",lang)}</button>{otherRecipes.length>0&&<button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={addSubrecipe}>{t("redit_add_prep",lang)}</button>}</div></div>
       {components.length===0&&<div className="text-xs text-dim center" style={{padding:"10px 0"}}>{t("redit_no_ingredient",lang)}</div>}
       {components.map((c,i)=>{
-        if(c.kind!=="ingredient")return(<div key={i} style={{padding:"10px 0",borderBottom:i<components.length-1?`1px solid ${T.border}`:"none"}}><div className="row gap6 mb6"><span style={{fontSize:16}}>🧪</span><select className="input input-sm" style={{flex:1}} value={c.subrecipeId} onChange={e=>{const sub=allRecipes.find(r=>r.id===parseInt(e.target.value));updateComp(i,{subrecipeId:parseInt(e.target.value),unit:sub.yield.unit});}}>{otherRecipes.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}</select></div><div className="row gap6"><input className="input input-sm" style={{flex:1}} type="text" inputMode="decimal" value={c.qty} onChange={e=>{const v=e.target.value;if(/^\d*[.,]?\d*$/.test(v))updateComp(i,{qty:v.replace(",",".")});}}/><span style={{padding:"9px 12px",color:T.textDim,fontSize:13}}>{c.unit}</span><button style={{width:44,height:44,borderRadius:9,background:T.badBg,color:T.bad,border:"none",fontSize:16,flexShrink:0}} onClick={()=>removeComp(i)}>×</button></div></div>);
+        if(c.kind!=="ingredient"){
+          const selectedSub=allRecipes.find(r=>r.id===c.subrecipeId);
+          return(<div key={i} style={{padding:"10px 0",borderBottom:i<components.length-1?`1px solid ${T.border}`:"none"}}><div className="row gap6 mb6"><span style={{fontSize:16}}>🧪</span><div style={{flex:1}}><SearchSelect items={otherRecipes} getLabel={r=>r.name} selectedLabel={selectedSub?.name} placeholder="Rechercher une préparation…" onSelect={sub=>updateComp(i,{subrecipeId:sub.id,unit:sub.yield.unit})}/></div></div><div className="row gap6"><input className="input input-sm" style={{flex:1}} type="text" inputMode="decimal" value={c.qty} onChange={e=>{const v=e.target.value;if(/^\d*[.,]?\d*$/.test(v))updateComp(i,{qty:v.replace(",",".")});}}/><span style={{padding:"9px 12px",color:T.textDim,fontSize:13}}>{c.unit}</span><button style={{width:44,height:44,borderRadius:9,background:T.badBg,color:T.bad,border:"none",fontSize:16,flexShrink:0}} onClick={()=>removeComp(i)}>×</button></div></div>);
+        }
         // Ligne ingrédient : soit lié à un produit du catalogue (coût auto), soit saisie libre
         const linkedProduct=c.productId?products.find(p=>p.id===c.productId):null;
         const autoCost=linkedProduct?computeIngredientCost(parseFloat(String(c.qty).replace(",","."))||0,c.unit,linkedProduct):null;
         const unitMismatch=linkedProduct&&autoCost===null;
         return(<div key={i} style={{padding:"10px 0",borderBottom:i<components.length-1?`1px solid ${T.border}`:"none"}}>
           <div className="field" style={{marginBottom:6}}>
-            <select className="input input-sm" value={c.productId||""} onChange={e=>{
-              const pid=e.target.value?parseInt(e.target.value):null;
-              const prod=pid?products.find(p=>p.id===pid):null;
-              updateComp(i,{productId:pid,item:prod?prod.name:c.item});
-            }}>
-              <option value="">{t("redit_free_entry",lang)}</option>
-              {products.map(p=><option key={p.id} value={p.id}>{p.name} ({p.price.toFixed(2)}€/{p.unit})</option>)}
-            </select>
+            <SearchSelect items={products} getLabel={p=>p.name} getSub={p=>`${p.price.toFixed(2)}€/${p.unit}`}
+              selectedLabel={linkedProduct?linkedProduct.name:(c.item||"")}
+              placeholder="Rechercher un produit…"
+              freeLabel={t("redit_free_entry",lang)}
+              onFreeText={()=>updateComp(i,{productId:null,item:c.item||""})}
+              onSelect={p=>updateComp(i,{productId:p.id,item:p.name})}/>
           </div>
           {!c.productId&&<input className="input input-sm mb6" value={c.item} onChange={e=>updateComp(i,{item:e.target.value})} placeholder={t("redit_ingredient_name",lang)}/>}
           <div className="row gap6">
@@ -5543,7 +5562,7 @@ export default function App(){
     else setNavDir("forward");
     setPage(k); setProfile(false);
   };
-  const logout=()=>{setUser(null);setPage("home");};
+  const logout=()=>{setUser(null);setPage("home");setProfile(false);setVoiceOpen(false);};
 
   // ── Service worker : socle des notifications (étape 1) ──────────────────
   // Il ne fait rien de visible pour l'instant — il se contente d'exister, pour
