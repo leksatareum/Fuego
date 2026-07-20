@@ -2243,84 +2243,6 @@ function GbphGuide({initialSection}){
 // position flottante fixe), s'intègre au flux normal du contenu — s'affiche
 // donc toujours au même endroit relatif, sans risque de recouvrement ni de
 // calcul de position instable.
-// ─── LECTURE AUTOMATIQUE D'ÉTIQUETTE (OCR) ─────────────────────────────────
-// Tesseract.js tourne entièrement sur le téléphone (aucune donnée envoyée à
-// un tiers), chargé depuis un CDN au moment où on en a vraiment besoin —
-// jamais au démarrage de l'app, pour ne rien ralentir pour ceux qui ne
-// l'utilisent pas. Volontairement une simple SUGGESTION à vérifier, jamais
-// un remplissage automatique silencieux : la saisie manuelle qui marchait
-// déjà avant reste le filet de sécurité, intact.
-let _tesseractLoading=null;
-function loadTesseract(){
-  if(window.Tesseract) return Promise.resolve(window.Tesseract);
-  if(_tesseractLoading) return _tesseractLoading;
-  _tesseractLoading=new Promise((resolve,reject)=>{
-    const s=document.createElement("script");
-    s.src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
-    s.onload=()=>resolve(window.Tesseract);
-    s.onerror=()=>reject(new Error("Impossible de charger la lecture automatique"));
-    document.head.appendChild(s);
-  });
-  return _tesseractLoading;
-}
-
-// Cherche une date (DLC) et un numéro de lot dans le texte lu sur l'étiquette.
-// Principe : ne JAMAIS deviner si ce n'est pas clair. Une date proche d'un
-// mot-clé (DLC, DDM, EXP...) est une bonne piste ; plusieurs dates sans mot-clé
-// pour les départager, on laisse le champ vide plutôt que de risquer une
-// mauvaise date sur un document de sécurité alimentaire.
-function extractDlcAndLot(rawText){
-  const text=rawText.toUpperCase();
-  const dateRe=/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/g;
-  const dlcKeywords=["DLC","DDM","A CONSOMMER","PEREMPTION","PÉREMPTION","EXP","BEST BEFORE"];
-  const dates=[];
-  let m;
-  while((m=dateRe.exec(text))){
-    const day=parseInt(m[1],10), month=parseInt(m[2],10);
-    let year=parseInt(m[3],10);
-    if(year<100) year+=2000;
-    if(day<1||day>31||month<1||month>12) continue; // pas une vraie date, ignore
-    dates.push({index:m.index,day,month,year});
-  }
-  let bestDate=null;
-  if(dates.length===1){
-    bestDate=dates[0]; // une seule date trouvée : raisonnablement sûr
-  }else if(dates.length>1){
-    // Plusieurs dates : on ne retient que celle collée à un mot-clé DLC. Une
-    // étiquette écrit presque toujours "DLC : <date>" ou "à consommer
-    // jusqu'au <date>" — la date vient APRÈS le mot-clé, jamais avant. On
-    // cherche donc en priorité la date la plus proche qui suit le mot-clé,
-    // pas simplement la plus proche au sens brut (une date sans lien qui se
-    // trouve être physiquement proche avant le mot-clé ne doit pas gagner).
-    let best=null,bestDist=Infinity;
-    for(const kw of dlcKeywords){
-      let idx=text.indexOf(kw);
-      while(idx!==-1){
-        const kwEnd=idx+kw.length;
-        for(const d of dates){
-          if(d.index>=kwEnd){ // la date suit le mot-clé
-            const dist=d.index-kwEnd;
-            if(dist<bestDist){bestDist=dist;best=d;}
-          }
-        }
-        idx=text.indexOf(kw,idx+1);
-      }
-    }
-    if(best&&bestDist<35) bestDate=best; // assez proche d'un mot-clé pour être fiable
-  }
-  let dlcIso=null;
-  if(bestDate){
-    const {day,month,year}=bestDate;
-    dlcIso=`${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
-  }
-  // Lot : "LOT", "L°", "N° LOT" suivi d'un code alphanumérique — on exige au
-  // moins un chiffre dans le code, sinon "lot de production" matcherait le
-  // mot "production" comme si c'était un numéro de lot.
-  const lotMatch=text.match(/(?:LOT|N°\s*LOT|L°)\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-\/]{2,14})/);
-  const lot=(lotMatch&&/\d/.test(lotMatch[1]))?lotMatch[1]:null;
-  return {dlc:dlcIso, lot, confident:dates.length<=1||!!bestDate};
-}
-
 function GbphHelpButton({section,go}){
   return(
     <button
@@ -2821,40 +2743,11 @@ function Traceability({data,setData,db,reload,go,markLocalWrite,lang}){
   const[filter,setFilter]=useState("all");
   const[detail,setDetail]=useState(null); // fiche sélectionnée pour voir sa photo en grand
   const[form,setForm]=useState({product:"",supplier:"",lot:"",dlc:"",qty:"",allergenes:""});
-  const[ocrBusy,setOcrBusy]=useState(false);
-  const[ocrHint,setOcrHint]=useState(null); // ce qui a été détecté, pour prévenir que c'est une suggestion à vérifier
   function handlePhoto(e){
     const file=e.target.files[0];if(!file)return;
     const reader=new FileReader();
-    reader.onload=(ev)=>{
-      setPhoto(ev.target.result); // garde le data-URL tel quel (ré-affichable directement dans une <img>)
-      runLabelOcr(ev.target.result);
-    };
+    reader.onload=(ev)=>{ setPhoto(ev.target.result); }; // garde le data-URL tel quel (ré-affichable directement dans une <img>)
     reader.readAsDataURL(file);
-  }
-  // Lance la lecture automatique sur la photo qu'on vient de prendre — pas
-  // de nouvelle étape pour l'équipe, juste un remplissage suggéré une fois
-  // la photo capturée. N'écrase jamais un champ déjà rempli à la main.
-  async function runLabelOcr(dataUrl){
-    setOcrBusy(true);setOcrHint(null);
-    try{
-      const Tesseract=await loadTesseract();
-      const result=await Tesseract.recognize(dataUrl,"fra");
-      const {dlc,lot,confident}=extractDlcAndLot(result.data.text||"");
-      setForm(f=>({...f,dlc:dlc&&!f.dlc?dlc:f.dlc,lot:lot&&!f.lot?lot:f.lot}));
-      if(dlc||lot){
-        setOcrHint(confident
-          ? "Date et/ou lot détectés automatiquement — vérifie avant d'enregistrer."
-          : "Plusieurs dates repérées sur l'étiquette, aucune n'était assez claire — à saisir toi-même.");
-      }else{
-        setOcrHint("Rien de fiable détecté sur la photo — saisie manuelle comme d'habitude.");
-      }
-    }catch(e){
-      // Échec silencieux : la photo et la saisie manuelle marchent déjà très
-      // bien sans ça, ce n'est qu'un coup de main en plus, jamais un blocage.
-      setOcrHint(null);
-    }
-    setOcrBusy(false);
   }
   async function save(){
     if(!form.product)return;
@@ -2923,11 +2816,9 @@ function Traceability({data,setData,db,reload,go,markLocalWrite,lang}){
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">{t("trace_add_product",lang)}</div>
       {photo
-        ? <div style={{position:"relative",marginBottom:14}}><img src={photo} alt="" style={{width:"100%",borderRadius:14}}/><button onClick={()=>{setPhoto(null);setOcrHint(null);}} style={{position:"absolute",top:8,right:8,width:44,height:44,borderRadius:"50%",background:"rgba(0,0,0,.6)",border:"none",color:"#fff",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button></div>
+        ? <div style={{position:"relative",marginBottom:14}}><img src={photo} alt="" style={{width:"100%",borderRadius:14}}/><button onClick={()=>setPhoto(null)} style={{position:"absolute",top:8,right:8,width:44,height:44,borderRadius:"50%",background:"rgba(0,0,0,.6)",border:"none",color:"#fff",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button></div>
         : <label className="scan" style={{cursor:"pointer",display:"block"}}><div className="scan-icon">📸</div><div className="scan-title">{t("trace_photo",lang)}</div><div className="scan-sub">{t("trace_photo_sub",lang)}</div><input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handlePhoto}/></label>
       }
-      {ocrBusy && <div className="text-xs text-dim center mb10">🔍 Lecture de l'étiquette…</div>}
-      {ocrHint && !ocrBusy && <div className="banner banner-info mb10"><span>ℹ️</span><div style={{fontSize:11,lineHeight:1.5}}>{ocrHint}</div></div>}
       <div className="field"><label className="label">{t("trace_product",lang)}</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})}/></div>
       <div className="field"><label className="label">{t("trace_supplier",lang)}</label><input className="input" value={form.supplier} onChange={e=>setForm({...form,supplier:e.target.value})}/></div>
       <div className="row gap8 mb14"><div style={{flex:1}}><label className="label">{t("trace_lot",lang)}</label><input className="input input-sm" value={form.lot} onChange={e=>setForm({...form,lot:e.target.value})}/></div><div style={{flex:1}}><label className="label">{t("trace_qty",lang)}</label><input className="input input-sm" value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})}/></div></div>
