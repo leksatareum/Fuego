@@ -1604,6 +1604,37 @@ function buildRegistreEvents(data){
   return ev;
 }
 
+// Regroupement à trois niveaux du registre — catégorie réglementaire, puis
+// module, puis jour. Reprend exactement les 3 mêmes groupes que le menu
+// HACCP (déjà calé sur la structure du GBPH), pour que la logique soit
+// familière et corresponde à la façon dont un contrôleur DDPP parcourt
+// habituellement un dossier : "montrez-moi vos températures", puis
+// jour par jour à l'intérieur.
+const REGISTRE_CATEGORIES = [
+  {name:"Contrôles quotidiens", icon:"🌡️", modules:["Températures","Réception","Refroidissement","Remise en température","Huiles"]},
+  {name:"Traçabilité", icon:"📦", modules:["Traçabilité"]},
+  {name:"Hygiène et nettoyage", icon:"🧹", modules:["Nettoyage","Nuisibles"]},
+];
+
+function groupRegistreEvents(events){
+  return REGISTRE_CATEGORIES.map(cat=>{
+    const catEvents=events.filter(e=>cat.modules.includes(e.module));
+    if(catEvents.length===0) return null;
+    const modules=cat.modules.map(modName=>{
+      const modEvents=catEvents.filter(e=>e.module===modName);
+      if(modEvents.length===0) return null;
+      const byDate={};
+      modEvents.forEach(e=>{ (byDate[e.date]=byDate[e.date]||[]).push(e); });
+      const dateKeys=Object.keys(byDate).sort((a,b)=>{
+        const evA=byDate[a][0],evB=byDate[b][0];
+        return (evB.ts?.getTime()||0)-(evA.ts?.getTime()||0);
+      });
+      return {module:modName, count:modEvents.length, dates:dateKeys.map(d=>({date:d,events:byDate[d]}))};
+    }).filter(Boolean);
+    return {category:cat.name, icon:cat.icon, count:catEvents.length, modules};
+  }).filter(Boolean);
+}
+
 function Registre({data,db}){
   const[period,setPeriod]=useState("7j"); // 7j | 30j | mois | archives
   const[moduleFilter,setModuleFilter]=useState("tous");
@@ -1635,14 +1666,6 @@ function Registre({data,db}){
   const modules=[...new Set(allEvents.map(e=>e.module))];
   const nbBad=filtered.filter(e=>e.status==="bad").length;
   const nbGood=filtered.filter(e=>e.status==="good").length;
-
-  // Groupe par date pour affichage en timeline (modes 7j/30j/mois)
-  const grouped={};
-  filtered.forEach(e=>{ (grouped[e.date]=grouped[e.date]||[]).push(e); });
-  const dateKeys=Object.keys(grouped).sort((a,b)=>{
-    const evA=grouped[a][0],evB=grouped[b][0];
-    return (evB.ts?.getTime()||0)-(evA.ts?.getTime()||0);
-  });
 
   // ── Mode Archives : arborescence Année → Mois ───────────────────────────
   // Tout reste consultable, rien n'est jamais supprimé — seuls les mois
@@ -1714,28 +1737,42 @@ function Registre({data,db}){
 
       <button className="btn btn-ghost mt14 mb14" onClick={()=>setShowExport(true)}>📄 Exporter en PDF</button>
 
-      {/* Timeline groupée par jour — chaque jour est un sous-menu repliable,
-          le plus récent ouvert par défaut pour ne pas devoir tout déplier
-          juste pour voir ce qui vient de se passer. */}
-      {dateKeys.length===0
-        ? <div className="empty"><div className="empty-icon">📋</div><div className="empty-title">Aucun événement</div><div className="empty-sub">Ajustez les filtres pour voir l'historique</div></div>
-        : dateKeys.map((dateKey,idx)=>(
-          <div key={dateKey} style={{marginBottom:10}}>
-            <CollapsibleSection title={dateKey} icon="📅" count={grouped[dateKey].length} defaultOpen={idx===0}>
-              {grouped[dateKey].map((e,i)=>(
-                <div key={i} className="row-line">
-                  <div className="item-icon" style={{background:e.status==="bad"?T.badBg:T.infoBg,fontSize:18}}>{e.icon}</div>
-                  <div className="item-body">
-                    <div className="item-title">{e.title}</div>
-                    <div className="item-sub">{e.detail} · {e.operator}</div>
-                  </div>
-                  <span className={`badge ${e.status==="bad"?"b-bad":"b-good"}`}>{e.status==="bad"?"⚠":"✓"}</span>
+      {/* Arborescence catégorie → module → jour. Seul le premier niveau de
+          chaque étage s'ouvre par défaut (comme pour les Archives) : de quoi
+          voir immédiatement ce qui est le plus récent, sans tout déplier
+          d'un coup sur une période de 30 jours. */}
+      {(() => {
+        const tree = groupRegistreEvents(filtered);
+        if(tree.length===0) return <div className="empty"><div className="empty-icon">📋</div><div className="empty-title">Aucun événement</div><div className="empty-sub">Ajustez les filtres pour voir l'historique</div></div>;
+        return tree.map((cat,ci)=>(
+          <div key={cat.category} style={{marginBottom:10}}>
+            <CollapsibleSection title={cat.category} icon={cat.icon} count={cat.count} defaultOpen={ci===0}>
+              {cat.modules.map((mod,mi)=>(
+                <div key={mod.module} style={{marginBottom:8,marginLeft:6}}>
+                  <CollapsibleSection title={mod.module} icon="▸" count={mod.count} defaultOpen={ci===0&&mi===0}>
+                    {mod.dates.map((d,di)=>(
+                      <div key={d.date} style={{marginBottom:6,marginLeft:6}}>
+                        <CollapsibleSection title={d.date} icon="📅" count={d.events.length} defaultOpen={ci===0&&mi===0&&di===0}>
+                          {d.events.map((e,i)=>(
+                            <div key={i} className="row-line">
+                              <div className="item-icon" style={{background:e.status==="bad"?T.badBg:T.infoBg,fontSize:18}}>{e.icon}</div>
+                              <div className="item-body">
+                                <div className="item-title">{e.title}</div>
+                                <div className="item-sub">{e.detail} · {e.operator}</div>
+                              </div>
+                              <span className={`badge ${e.status==="bad"?"b-bad":"b-good"}`}>{e.status==="bad"?"⚠":"✓"}</span>
+                            </div>
+                          ))}
+                        </CollapsibleSection>
+                      </div>
+                    ))}
+                  </CollapsibleSection>
                 </div>
               ))}
             </CollapsibleSection>
           </div>
-        ))
-      }
+        ));
+      })()}
     </>}
 
     {period==="archives" && (
@@ -1764,14 +1801,32 @@ function Registre({data,db}){
                       {isLoading
                         ? <div className="text-xs text-dim center" style={{padding:"12px 0"}}>Chargement…</div>
                         : (monthEvents && monthEvents.length>0
-                          ? monthEvents.map((e,i)=>(
-                            <div key={i} className="row-line">
-                              <div className="item-icon" style={{background:e.status==="bad"?T.badBg:T.infoBg,fontSize:16}}>{e.icon}</div>
-                              <div className="item-body">
-                                <div className="item-title">{e.title}</div>
-                                <div className="item-sub">{e.date} · {e.detail} · {e.operator}</div>
-                              </div>
-                              <span className={`badge ${e.status==="bad"?"b-bad":"b-good"}`}>{e.status==="bad"?"⚠":"✓"}</span>
+                          ? groupRegistreEvents(monthEvents).map((cat,ci)=>(
+                            <div key={cat.category} style={{marginBottom:8}}>
+                              <CollapsibleSection title={cat.category} icon={cat.icon} count={cat.count} defaultOpen={ci===0}>
+                                {cat.modules.map(mod=>(
+                                  <div key={mod.module} style={{marginBottom:6,marginLeft:6}}>
+                                    <CollapsibleSection title={mod.module} icon="▸" count={mod.count}>
+                                      {mod.dates.map(d=>(
+                                        <div key={d.date} style={{marginBottom:4,marginLeft:6}}>
+                                          <CollapsibleSection title={d.date} icon="📅" count={d.events.length}>
+                                            {d.events.map((e,i)=>(
+                                              <div key={i} className="row-line">
+                                                <div className="item-icon" style={{background:e.status==="bad"?T.badBg:T.infoBg,fontSize:16}}>{e.icon}</div>
+                                                <div className="item-body">
+                                                  <div className="item-title">{e.title}</div>
+                                                  <div className="item-sub">{e.detail} · {e.operator}</div>
+                                                </div>
+                                                <span className={`badge ${e.status==="bad"?"b-bad":"b-good"}`}>{e.status==="bad"?"⚠":"✓"}</span>
+                                              </div>
+                                            ))}
+                                          </CollapsibleSection>
+                                        </div>
+                                      ))}
+                                    </CollapsibleSection>
+                                  </div>
+                                ))}
+                              </CollapsibleSection>
                             </div>
                           ))
                           : <div className="text-xs text-dim center" style={{padding:"12px 0"}}>Aucun événement ce mois-ci</div>
@@ -1813,17 +1868,27 @@ function exportRegistrePDF(events,{period,moduleFilter}){
   const w=window.open("","_blank");
   if(!w){ alert("Autorisez les pop-ups pour exporter"); return; }
   const periodLabel={"7j":"7 derniers jours","30j":"30 derniers jours","mois":"Ce mois-ci","tout":"Historique complet"}[period];
-  const grouped={};
-  events.forEach(e=>{ (grouped[e.date]=grouped[e.date]||[]).push(e); });
-  const rows=Object.entries(grouped).map(([date,evs])=>`
-    <div class="daygroup">
-      <div class="dayhead">${date}</div>
-      ${evs.map(e=>`
-        <div class="row">
-          <div class="col-icon">${e.status==="bad"?"⚠":"✓"}</div>
-          <div class="col-main"><b>${e.title}</b><br/><span class="muted">${e.detail}</span></div>
-          <div class="col-mod">${e.module}</div>
-          <div class="col-op">${e.operator}</div>
+  // Même hiérarchie catégorie → module → jour que dans l'écran, pour que le
+  // document imprimé se parcoure exactement comme un contrôleur DDPP
+  // s'attend à le faire : par thème d'abord, puis chronologiquement à
+  // l'intérieur de chaque thème.
+  const tree=groupRegistreEvents(events);
+  const sections=tree.map(cat=>`
+    <div class="category">
+      <div class="cathead">${cat.icon} ${cat.category} <span class="count">${cat.count}</span></div>
+      ${cat.modules.map(mod=>`
+        <div class="module">
+          <div class="modhead">${mod.module} <span class="count">${mod.count}</span></div>
+          ${mod.dates.map(d=>`
+            <div class="daygroup">
+              <div class="dayhead">${d.date}</div>
+              ${d.events.map(e=>`
+                <div class="row">
+                  <div class="col-icon">${e.status==="bad"?"⚠":"✓"}</div>
+                  <div class="col-main"><b>${e.title}</b><br/><span class="muted">${e.detail}</span></div>
+                  <div class="col-op">${e.operator}</div>
+                </div>`).join("")}
+            </div>`).join("")}
         </div>`).join("")}
     </div>`).join("");
 
@@ -1843,11 +1908,15 @@ function exportRegistrePDF(events,{period,moduleFilter}){
     .summary{display:flex;gap:16px;margin-bottom:20px;}
     .stat{flex:1;border:1px solid #ddd;border-radius:6px;padding:10px;text-align:center;}
     .stat b{font-size:18pt;display:block;}
-    .daygroup{margin-bottom:14px;page-break-inside:avoid;}
-    .dayhead{font-weight:bold;font-size:11pt;background:#f2f2f2;padding:5px 8px;border-radius:4px;margin-bottom:4px;}
-    .row{display:grid;grid-template-columns:24px 1fr 130px 110px;gap:8px;padding:6px 8px;border-bottom:1px solid #eee;align-items:center;font-size:9pt;}
+    .category{margin-bottom:22px;page-break-inside:avoid;}
+    .cathead{font-weight:900;font-size:13pt;background:#E8390A;color:#fff;padding:7px 10px;border-radius:5px;margin-bottom:8px;}
+    .module{margin-bottom:12px;margin-left:6px;}
+    .modhead{font-weight:bold;font-size:10.5pt;color:#333;border-bottom:2px solid #ddd;padding-bottom:3px;margin-bottom:6px;}
+    .count{font-weight:400;opacity:.75;font-size:9pt;}
+    .daygroup{margin-bottom:10px;margin-left:6px;page-break-inside:avoid;}
+    .dayhead{font-weight:bold;font-size:9.5pt;background:#f2f2f2;padding:4px 8px;border-radius:4px;margin-bottom:3px;}
+    .row{display:grid;grid-template-columns:20px 1fr 110px;gap:8px;padding:5px 8px;border-bottom:1px solid #eee;align-items:center;font-size:9pt;}
     .col-icon{text-align:center;}
-    .col-mod{color:#666;font-size:8pt;}
     .col-op{color:#666;font-size:8pt;text-align:right;}
     .muted{color:#666;font-size:8.5pt;}
     .footer{margin-top:24px;padding-top:10px;border-top:1px solid #ddd;font-size:8pt;color:#888;text-align:center;}
@@ -1866,7 +1935,7 @@ function exportRegistrePDF(events,{period,moduleFilter}){
       <div class="stat"><b style="color:#2a7d3f">${events.filter(e=>e.status==="good").length}</b>Conformes</div>
       <div class="stat"><b style="color:#c0392b">${events.filter(e=>e.status==="bad").length}</b>Non-conformités</div>
     </div>
-    ${rows}
+    ${sections}
     <div class="footer">Document généré automatiquement par Fuego · Plan de Maîtrise Sanitaire</div>
     </div>
   </body></html>`);
@@ -3784,7 +3853,7 @@ function RecipeDetail({recipe,allRecipes,onBack,onEdit,lang}){
 // devient ingérable avec un catalogue de plusieurs centaines de produits.
 // Tape pour filtrer, tape sur un résultat pour choisir. Générique : sert
 // aussi bien pour les produits que pour les préparations en sous-recette.
-function SearchSelect({items,getLabel,getSub,selectedLabel,onSelect,placeholder,freeLabel,onFreeText}){
+function SearchSelect({items,getLabel,getSub,selectedLabel,onSelect,placeholder,freeLabel,onFreeText,onCreateNew,createLabel}){
   const[query,setQuery]=useState("");
   const[open,setOpen]=useState(false);
   const boxRef=useRef(null);
@@ -3812,7 +3881,16 @@ function SearchSelect({items,getLabel,getSub,selectedLabel,onSelect,placeholder,
               <div className="item-body"><div className="item-title" style={{fontSize:13}}>{freeLabel}{query.trim()?` : "${query.trim()}"`:""}</div></div>
             </div>
           )}
-          {filtered.length===0 && !onFreeText && <div className="text-xs text-dim center" style={{padding:"14px 0"}}>Aucun résultat</div>}
+          {/* Raccourci pour créer un produit manquant sans quitter la fiche
+              technique — plus besoin d'aller dans Paramètres puis de
+              revenir. N'apparaît que si on tape vraiment quelque chose, pour
+              ne pas polluer la liste par défaut. */}
+          {onCreateNew && query.trim() && (
+            <div className="row-line" style={{padding:"10px 12px",cursor:"pointer",color:T.accent}} onClick={()=>{onCreateNew(query.trim());setOpen(false);}}>
+              <div className="item-body"><div className="item-title" style={{fontSize:13,color:T.accent}}>➕ {createLabel||"Créer"} "{query.trim()}"</div></div>
+            </div>
+          )}
+          {filtered.length===0 && !onFreeText && !onCreateNew && <div className="text-xs text-dim center" style={{padding:"14px 0"}}>Aucun résultat</div>}
           {filtered.map((it,idx)=>(
             <div key={idx} className="row-line" style={{padding:"10px 12px",cursor:"pointer"}} onClick={()=>{onSelect(it);setOpen(false);setQuery("");}}>
               <div className="item-body"><div className="item-title" style={{fontSize:13}}>{getLabel(it)}</div>{getSub&&<div className="item-sub">{getSub(it)}</div>}</div>
@@ -3825,8 +3903,29 @@ function SearchSelect({items,getLabel,getSub,selectedLabel,onSelect,placeholder,
   );
 }
 
-function RecipeEditor({recipe,allRecipes,products=[],defaultType="plat",onSave,onCancel,lang}){
+function RecipeEditor({recipe,allRecipes,products=[],defaultType="plat",onSave,onCancel,lang,db,setData,markLocalWrite}){
   const isEditing=!!recipe;
+  // Création rapide d'un produit manquant sans quitter la fiche technique —
+  // on garde en mémoire QUELLE ligne d'ingrédient a demandé la création,
+  // pour la sélectionner automatiquement une fois le produit enregistré.
+  const[quickAddProduct,setQuickAddProduct]=useState(null); // {compIndex, name}
+  const[qaCategory,setQaCategory]=useState("Épicerie");
+  const[qaPrice,setQaPrice]=useState("");
+  const[qaUnit,setQaUnit]=useState("kg");
+  const[qaBusy,setQaBusy]=useState(false);
+  async function saveQuickProduct(){
+    if(!quickAddProduct||qaBusy)return;
+    setQaBusy(true);
+    const res=await db.addProduct({name:quickAddProduct.name,price:parseFloat(qaPrice.replace(",","."))||0,unit:qaUnit,category:qaCategory});
+    setQaBusy(false);
+    if(res?.error||!res?.data){alert("Le produit n'a pas été créé. Vérifie la connexion Supabase.");return;}
+    const p=res.data;
+    markLocalWrite?.();
+    setData(d=>({...d,products:[...(d.products||[]),{id:p.id,name:p.name,price:p.price,unit:p.unit,category:p.category}]}));
+    updateComp(quickAddProduct.compIndex,{productId:p.id,item:p.name});
+    setQuickAddProduct(null);setQaPrice("");setQaCategory("Épicerie");setQaUnit("kg");
+    haptic.success();
+  }
   const[type,setType]=useState(recipe?.type||defaultType);
   const[name,setName]=useState(recipe?.name||"");
   const[emoji,setEmoji]=useState(recipe?.emoji||"🍽️");
@@ -3903,7 +4002,9 @@ function RecipeEditor({recipe,allRecipes,products=[],defaultType="plat",onSave,o
               placeholder="Rechercher un produit…"
               freeLabel={t("redit_free_entry",lang)}
               onFreeText={()=>updateComp(i,{productId:null,item:c.item||""})}
-              onSelect={p=>updateComp(i,{productId:p.id,item:p.name})}/>
+              onSelect={p=>updateComp(i,{productId:p.id,item:p.name})}
+              onCreateNew={name=>setQuickAddProduct({compIndex:i,name})}
+              createLabel="Créer un produit"/>
           </div>
           {!c.productId&&<input className="input input-sm mb6" value={c.item} onChange={e=>updateComp(i,{item:e.target.value})} placeholder={t("redit_ingredient_name",lang)}/>}
           <div className="row gap6">
@@ -3924,6 +4025,26 @@ function RecipeEditor({recipe,allRecipes,products=[],defaultType="plat",onSave,o
     </div>
     <div className="card"><div className="field" style={{marginBottom:0}}><label className="label">{t("redit_allergens",lang)}</label><input className="input input-sm" value={allergensStr} onChange={e=>setAllergensStr(e.target.value)} placeholder="Gluten, Lait..."/></div></div>
     <button className="btn btn-primary mb14" onClick={save}>✓ {isEditing?t("redit_update",lang):t("redit_create",lang)}</button>
+
+    {quickAddProduct && (
+      <div className="overlay" onClick={()=>!qaBusy&&setQuickAddProduct(null)}><div className="sheet" onClick={e=>e.stopPropagation()}>
+        <div className="sheet-handle"></div>
+        <div className="sheet-title">➕ Nouveau produit</div>
+        <div className="text-xs text-dim mb14">Ajouté directement au catalogue Produits — tu n'as pas besoin de repasser par les Paramètres.</div>
+        <div className="field"><label className="label">Nom</label><input className="input" value={quickAddProduct.name} onChange={e=>setQuickAddProduct(q=>({...q,name:e.target.value}))}/></div>
+        <div className="row gap8 mb14">
+          <div style={{flex:1}}><label className="label">Prix</label><input className="input input-sm" type="text" inputMode="decimal" value={qaPrice} onChange={e=>{const v=e.target.value;if(/^\d*[.,]?\d*$/.test(v))setQaPrice(v);}} placeholder="€"/></div>
+          <div style={{flex:0,width:80}}><label className="label">Unité</label><select className="input input-sm" value={qaUnit} onChange={e=>setQaUnit(e.target.value)}><option>g</option><option>kg</option><option>ml</option><option>L</option><option>pce</option><option>u</option></select></div>
+        </div>
+        <div className="field"><label className="label">Catégorie</label>
+          <select className="input input-sm" value={qaCategory} onChange={e=>setQaCategory(e.target.value)}>
+            {PRODUCT_CATEGORIES.map(cat=><option key={cat}>{cat}</option>)}
+          </select>
+        </div>
+        <button className="btn btn-primary mt8" onClick={saveQuickProduct} disabled={!quickAddProduct.name.trim()||qaBusy}>{qaBusy?"Enregistrement…":"Créer et utiliser"}</button>
+        <button className="btn btn-ghost mt8" onClick={()=>setQuickAddProduct(null)} disabled={qaBusy}>Annuler</button>
+      </div></div>
+    )}
   </div>);
 }
 
@@ -3946,7 +4067,7 @@ function Recipes({data,setData,db,reload,user,markLocalWrite,lang}){
   const filtered=allRecipes.filter(r=>r.type===typeFilter);
   const nbPlats=allRecipes.filter(r=>r.type==="plat").length;
   const nbPreps=allRecipes.filter(r=>r.type==="mere").length;
-  if(view==="edit")return<RecipeEditor recipe={sel?allRecipes.find(r=>r.id===sel):null} defaultType={typeFilter} allRecipes={allRecipes} products={data.products||[]} lang={lang} onSave={async(rec)=>{
+  if(view==="edit")return<RecipeEditor recipe={sel?allRecipes.find(r=>r.id===sel):null} defaultType={typeFilter} allRecipes={allRecipes} products={data.products||[]} lang={lang} db={db} setData={setData} markLocalWrite={markLocalWrite} onSave={async(rec)=>{
     const res=await db.saveRecipe(rec);
     if(res?.error){alert("La fiche n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload({force:true});return;}
     // Une fiche technique est un objet riche (composants, étapes…) : on
