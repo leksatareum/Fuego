@@ -1292,6 +1292,7 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
   // — un petit effet d'ouverture (~500ms) plutôt qu'un cercle qui apparaît
   // déjà rempli, sans en faire trop.
   const[ringPct,setRingPct]=useState(0);
+  const[showMissing,setShowMissing]=useState(false);
   const h=new Date().getHours();const greeting=h<12?t("home_greeting_morning",lang):h<18?t("home_greeting_afternoon",lang):t("home_greeting_evening",lang);
   const today=new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"});
   const win=getServiceWindow();
@@ -1360,6 +1361,27 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
   const globalDone = matinDone+soirDone+cleanDone;
   const globalTotal = totalFridges*2+cleanTotal;
   const globalPct = safePct(globalDone, globalTotal);
+
+  // Détail de ce qui manque pour atteindre 100% — affiché en touchant le
+  // cercle. Même niveau de précision que pour les frigos (matin/soir
+  // distincts) pour le nettoyage quotidien, pas juste "fait / pas fait".
+  const missingItems=[];
+  data.haccpSettings.fridgeTargets.forEach(f=>{
+    if(!getReleve(data,f.id,"matin")) missingItems.push({icon:f.icon||"🌡️",label:`${f.name} — relevé matin`,goto:"temps"});
+    if(!getReleve(data,f.id,"soir")) missingItems.push({icon:f.icon||"🌡️",label:`${f.name} — relevé soir`,goto:"temps"});
+  });
+  data.cleaning.forEach(c=>{
+    if(c.freq==="Quotidien"){
+      const todayISO=serviceISODate(data.haccpSettings?.resetSoir);
+      const checks=data.cleaningChecks||[];
+      const hasMatin=checks.some(x=>x.cleaningId===c.id&&x.date===todayISO&&x.period==="matin");
+      const hasSoir=checks.some(x=>x.cleaningId===c.id&&x.date===todayISO&&x.period==="soir");
+      if(!hasMatin) missingItems.push({icon:c.icon||"🧹",label:`${c.zone} — matin`,goto:"clean"});
+      if(!hasSoir) missingItems.push({icon:c.icon||"🧹",label:`${c.zone} — soir`,goto:"clean"});
+    }else if(!cleaningIsDoneToday(c,data.cleaningChecks,data.haccpSettings?.resetSoir)){
+      missingItems.push({icon:c.icon||"🧹",label:c.zone,goto:"clean"});
+    }
+  });
   const anomalyCount = criticalAlerts.length;
 
   // Déclenche l'animation une fois la vraie valeur connue — un setTimeout(0)
@@ -1385,7 +1407,7 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
     {/* Carte de service — la seule vraie "carte importante" de l'accueil,
         avec les alertes. Tout le reste en dessous redevient plus léger. */}
     {globalTotal>0 && (
-      <div className="card mb14" style={{background:`linear-gradient(135deg,${T.bg2},${T.bg3})`,border:`1px solid ${T.border}`,borderLeft:"3px solid #FF6B00",position:"relative",overflow:"hidden"}}>
+      <div className="card mb14" onClick={()=>setShowMissing(s=>!s)} style={{background:`linear-gradient(135deg,${T.bg2},${T.bg3})`,border:`1px solid ${T.border}`,borderLeft:"3px solid #FF6B00",position:"relative",overflow:"hidden",cursor:"pointer"}}>
         <div className="row" style={{alignItems:"center",gap:16}}>
           <div style={{position:"relative",width:64,height:64,flexShrink:0}}>
             <svg width="64" height="64" viewBox="0 0 64 64" style={{transform:"rotate(-90deg)"}}>
@@ -1409,6 +1431,23 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
               : <div style={{fontSize:13,color:T.good,fontWeight:600,marginTop:2}}>✓ Rien à signaler</div>}
           </div>
         </div>
+        {/* Touche le cercle (ou n'importe où sur la carte) pour voir
+            précisément ce qui manque pour atteindre 100% — plutôt que de
+            devoir recomposer ça mentalement à partir du pourcentage seul. */}
+        {showMissing && (
+          <div style={{marginTop:14,paddingTop:12,borderTop:`1px solid ${T.border}`}}>
+            {missingItems.length===0
+              ? <div style={{fontSize:13,color:T.good,fontWeight:600}}>✓ Tout est fait, rien ne manque.</div>
+              : missingItems.map((m,i)=>(
+                <div key={i} className="row-line" style={{cursor:"pointer"}} onClick={e=>{e.stopPropagation();go(m.goto);}}>
+                  <div className="item-icon" style={{background:T.bg3,fontSize:16,width:32,height:32}}>{m.icon}</div>
+                  <div className="item-body"><div className="item-title" style={{fontSize:13}}>{m.label}</div></div>
+                  <span className="item-arrow">›</span>
+                </div>
+              ))
+            }
+          </div>
+        )}
       </div>
     )}
 
