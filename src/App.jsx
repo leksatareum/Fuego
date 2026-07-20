@@ -191,7 +191,7 @@ const DB = {
       },
       fridgeReleves: fr.map(r=>({id:r.id,fridgeId:r.fridge_id,date:r.date,period:r.period,temp:r.temp,time:r.time,operatorId:r.operator_id,createdAt:r.created_at})),
       reception: rec.map(r=>({id:r.id,date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,tempOk:r.temp_ok,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed,createdAt:r.created_at})),
-      cooling: cool.map(c=>({id:c.id,product:c.product,qty:c.qty,startTemp:c.start_temp,endTemp:c.end_temp,duration:c.duration,startedMs:c.started_ms,operator:c.operator,status:c.status,date:c.date,dlc:c.dlc,createdAt:c.created_at})),
+      cooling: cool.map(c=>({id:c.id,product:c.product,qty:c.qty,startTemp:c.start_temp,endTemp:c.end_temp,duration:c.duration,startedMs:c.started_ms,operator:c.operator,status:c.status,date:c.date,dlc:c.dlc,mode:c.mode,manual:c.manual,createdAt:c.created_at})),
       reheating: reheat.map(r=>({id:r.id,product:r.product,endTemp:r.end_temp,duration:r.duration,operator:r.operator,status:r.status,date:r.date,createdAt:r.created_at})),
       oils: oils.map(o=>({id:o.id,name:o.name,type:o.type,dateInstall:o.date_install,lastTest:o.last_test,polaires:o.polaires,operator:o.operator,createdAt:o.created_at})),
       cleaning: clean.map(c=>({id:c.id,zone:c.zone,icon:c.icon,freq:c.freq,produit:c.produit,dilution:c.dilution,done:c.done,doneAt:c.done_at,operator:c.operator||null})),
@@ -230,8 +230,19 @@ const DB = {
     return sbPost("fridge_releves",{fridge_id:fridgeId,date,period,temp,time,operator_id:operatorId});
   },
   async addReception(r){return sbPost("reception",{date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,temp_ok:r.tempOk,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed});},
-  async startCooling(c){return sbPost("cooling",{product:c.product,qty:c.qty,start_temp:c.startTemp,started_ms:c.startedMs,status:"active",operator:c.operator,date:c.date});},
-  async finishCooling(id,{endTemp,duration,status,dlc}){return sbPatch("cooling",{end_temp:endTemp,duration,started_ms:null,status,dlc},qs(`id=eq.${id}`));},
+  // mode manquait aussi ici : reprendre un refroidissement actif (voir
+  // resumeActive) serait retombé sur "Refroidissement" par défaut, même
+  // pour une surgélation en cours.
+  async startCooling(c){return sbPost("cooling",{product:c.product,qty:c.qty,start_temp:c.startTemp,started_ms:c.startedMs,status:"active",operator:c.operator,date:c.date,mode:c.mode});},
+  // mode était silencieusement perdu ici : l'appelant l'envoyait, mais la
+  // fonction ne le reprenait pas dans le PATCH — une surgélation retrouvait
+  // l'affichage "Refroidissement" dès qu'on rechargeait la page.
+  async finishCooling(id,{endTemp,duration,status,dlc,mode}){return sbPatch("cooling",{end_temp:endTemp,duration,started_ms:null,status,dlc,mode},qs(`id=eq.${id}`));},
+  // Refroidissement noté après coup — quand le chrono n'a pas été lancé sur
+  // le moment mais que le refroidissement a bien eu lieu. Écrit directement
+  // en statut terminé, pas de passage par "active". Marqué manual:true pour
+  // rester honnête sur la façon dont la donnée a été obtenue.
+  async logCoolingRetroactive(c){return sbPost("cooling",{product:c.product,qty:c.qty,start_temp:c.startTemp,end_temp:c.endTemp,duration:c.duration,status:c.status,dlc:c.dlc,mode:c.mode,operator:c.operator,date:c.date,manual:true});},
   async addReheating(r){return sbPost("reheating",{product:r.product,end_temp:r.endTemp,duration:r.duration,operator:r.operator,status:r.status,date:r.date});},
   async addOil(o){return sbPost("oils",{name:o.name,type:o.type,date_install:todayStr(),last_test:todayStr(),polaires:0,operator:o.operator});},
   async deleteOil(id){return sbDelete("oils",qs(`id=eq.${id}`));},
@@ -242,8 +253,24 @@ const DB = {
   async deleteTraining(id){return sbDelete("training",qs(`id=eq.${id}`));},
   // Liste "à commander" — pense-bête simple, ouvert à toute l'équipe.
   async addShoppingItem(item,operator){return sbPost("shopping_list",{item,operator});},
+  // Best-effort, jamais bloquant : si ça échoue (pas de connexion, fonction
+  // pas encore déployée...), l'article est déjà enregistré de toute façon —
+  // on ne fait juste pas suivre la notification. Pas d'alerte à l'utilisateur
+  // pour un échec ici, ce n'est pas une donnée HACCP.
+  async notifyShoppingAdd(item,operator){
+    if(!SUPABASE_URL || SUPABASE_URL.includes("REMPLACE")) return;
+    try{
+      await fetch(`${SUPABASE_URL}/functions/v1/notify-shopping-add`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":`Bearer ${SUPABASE_ANON}`,"apikey":SUPABASE_ANON},
+        body:JSON.stringify({item,operator}),
+      });
+    }catch(e){ /* silencieux, volontairement */ }
+  },
   async toggleShoppingItem(id,done){return sbPatch("shopping_list",{done},qs(`id=eq.${id}`));},
   async deleteShoppingItem(id){return sbDelete("shopping_list",qs(`id=eq.${id}`));},
+  // Repart de zéro — vide TOUTE la liste, cochée ou non. Réservé aux admins.
+  async purgeShoppingList(){return sbDelete("shopping_list",qs("id=gt.0"));},
   async updateOil(id,{polaires,operator,changed,dateInstall}){
     const body={polaires,operator,last_test:todayStr()};
     if(changed)body.date_install=dateInstall;
@@ -1192,6 +1219,11 @@ function ShoppingList({data,setData,db,reload,markLocalWrite,user,go,lang}){
     setData(d=>({...d,shoppingList:[{id:r.id,item:r.item,done:r.done,operator:r.operator,createdAt:r.created_at},...(d.shoppingList||[])]}));
     setText("");setShow(false);
     haptic.success();
+    // Notifie les admins uniquement quand c'est un membre de l'équipe qui
+    // ajoute — un admin qui s'ajoute un pense-bête à lui-même n'a pas besoin
+    // de se notifier lui-même (et les autres admins). Ne bloque jamais
+    // l'ajout : lancé sans attendre, l'article est déjà enregistré.
+    if(!user?.isAdmin) db.notifyShoppingAdd(clean,user?.name);
   }
   async function toggleItem(it){
     const next=!it.done;
@@ -1207,6 +1239,17 @@ function ShoppingList({data,setData,db,reload,markLocalWrite,user,go,lang}){
     if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload?.({force:true});return;}
     markLocalWrite?.();
     setData(d=>({...d,shoppingList:d.shoppingList.filter(x=>x.id!==it.id)}));
+  }
+  // Réservé aux admins : repart d'une liste vide, cochés et non cochés
+  // confondus — pas juste un nettoyage des articles déjà commandés.
+  async function purgeList(){
+    if(!list.length)return;
+    if(!window.confirm(`Vider toute la liste (${list.length} article${list.length>1?"s":""}) ? Cette action est définitive.`))return;
+    const res=await db.purgeShoppingList();
+    if(res?.error){alert("La liste n'a pas pu être vidée. Vérifie la connexion Supabase.");await reload?.({force:true});return;}
+    markLocalWrite?.();
+    setData(d=>({...d,shoppingList:[]}));
+    haptic.success();
   }
 
   const list=data.shoppingList||[];
@@ -1227,6 +1270,9 @@ function ShoppingList({data,setData,db,reload,markLocalWrite,user,go,lang}){
               {done.map(it=><ShoppingRow key={it.id} it={it} onToggle={toggleItem} onDelete={removeItem}/>)}
             </CollapsibleSection>
           </div>
+        )}
+        {user?.isAdmin && (
+          <button className="btn btn-ghost mt14" style={{color:T.bad}} onClick={purgeList}>🗑 Nouvelle liste</button>
         )}
       </>
     }
@@ -2155,6 +2201,84 @@ function GbphGuide({initialSection}){
 // position flottante fixe), s'intègre au flux normal du contenu — s'affiche
 // donc toujours au même endroit relatif, sans risque de recouvrement ni de
 // calcul de position instable.
+// ─── LECTURE AUTOMATIQUE D'ÉTIQUETTE (OCR) ─────────────────────────────────
+// Tesseract.js tourne entièrement sur le téléphone (aucune donnée envoyée à
+// un tiers), chargé depuis un CDN au moment où on en a vraiment besoin —
+// jamais au démarrage de l'app, pour ne rien ralentir pour ceux qui ne
+// l'utilisent pas. Volontairement une simple SUGGESTION à vérifier, jamais
+// un remplissage automatique silencieux : la saisie manuelle qui marchait
+// déjà avant reste le filet de sécurité, intact.
+let _tesseractLoading=null;
+function loadTesseract(){
+  if(window.Tesseract) return Promise.resolve(window.Tesseract);
+  if(_tesseractLoading) return _tesseractLoading;
+  _tesseractLoading=new Promise((resolve,reject)=>{
+    const s=document.createElement("script");
+    s.src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+    s.onload=()=>resolve(window.Tesseract);
+    s.onerror=()=>reject(new Error("Impossible de charger la lecture automatique"));
+    document.head.appendChild(s);
+  });
+  return _tesseractLoading;
+}
+
+// Cherche une date (DLC) et un numéro de lot dans le texte lu sur l'étiquette.
+// Principe : ne JAMAIS deviner si ce n'est pas clair. Une date proche d'un
+// mot-clé (DLC, DDM, EXP...) est une bonne piste ; plusieurs dates sans mot-clé
+// pour les départager, on laisse le champ vide plutôt que de risquer une
+// mauvaise date sur un document de sécurité alimentaire.
+function extractDlcAndLot(rawText){
+  const text=rawText.toUpperCase();
+  const dateRe=/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/g;
+  const dlcKeywords=["DLC","DDM","A CONSOMMER","PEREMPTION","PÉREMPTION","EXP","BEST BEFORE"];
+  const dates=[];
+  let m;
+  while((m=dateRe.exec(text))){
+    const day=parseInt(m[1],10), month=parseInt(m[2],10);
+    let year=parseInt(m[3],10);
+    if(year<100) year+=2000;
+    if(day<1||day>31||month<1||month>12) continue; // pas une vraie date, ignore
+    dates.push({index:m.index,day,month,year});
+  }
+  let bestDate=null;
+  if(dates.length===1){
+    bestDate=dates[0]; // une seule date trouvée : raisonnablement sûr
+  }else if(dates.length>1){
+    // Plusieurs dates : on ne retient que celle collée à un mot-clé DLC. Une
+    // étiquette écrit presque toujours "DLC : <date>" ou "à consommer
+    // jusqu'au <date>" — la date vient APRÈS le mot-clé, jamais avant. On
+    // cherche donc en priorité la date la plus proche qui suit le mot-clé,
+    // pas simplement la plus proche au sens brut (une date sans lien qui se
+    // trouve être physiquement proche avant le mot-clé ne doit pas gagner).
+    let best=null,bestDist=Infinity;
+    for(const kw of dlcKeywords){
+      let idx=text.indexOf(kw);
+      while(idx!==-1){
+        const kwEnd=idx+kw.length;
+        for(const d of dates){
+          if(d.index>=kwEnd){ // la date suit le mot-clé
+            const dist=d.index-kwEnd;
+            if(dist<bestDist){bestDist=dist;best=d;}
+          }
+        }
+        idx=text.indexOf(kw,idx+1);
+      }
+    }
+    if(best&&bestDist<35) bestDate=best; // assez proche d'un mot-clé pour être fiable
+  }
+  let dlcIso=null;
+  if(bestDate){
+    const {day,month,year}=bestDate;
+    dlcIso=`${year}-${String(month).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+  }
+  // Lot : "LOT", "L°", "N° LOT" suivi d'un code alphanumérique — on exige au
+  // moins un chiffre dans le code, sinon "lot de production" matcherait le
+  // mot "production" comme si c'était un numéro de lot.
+  const lotMatch=text.match(/(?:LOT|N°\s*LOT|L°)\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-\/]{2,14})/);
+  const lot=(lotMatch&&/\d/.test(lotMatch[1]))?lotMatch[1]:null;
+  return {dlc:dlcIso, lot, confident:dates.length<=1||!!bestDate};
+}
+
 function GbphHelpButton({section,go}){
   return(
     <button
@@ -2329,6 +2453,9 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite,lang}){
   const[form,setForm]=useState({product:"",qty:""});const[startTemp,setStartTemp]=useState(65);const[endTemp,setEndTemp]=useState(8);
   const[startMs,setStartMs]=useState(null);const[elapsed,setElapsed]=useState(0);
   const[activeCoolingId,setActiveCoolingId]=useState(null);
+  const[showManual,setShowManual]=useState(false);
+  const[manualForm,setManualForm]=useState(null);
+  const[manualBusy,setManualBusy]=useState(false);
   const M=CELL_MODES[mode];
   // freezingMax n'a jamais été vraiment câblé (pas de colonne en base, pas de
   // champ dans les Paramètres) — il n'existait que dans les données de démo,
@@ -2341,7 +2468,7 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite,lang}){
   const fmt=s=>`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
   const limitSec=Math.max(1,safeNum(maxMin,120))*60;const overtime=elapsed>limitSec;const progress=startMs?safePct(elapsed,limitSec):0;
   async function start(){
-    const r=await db.startCooling({product:form.product,qty:form.qty,startTemp,startedMs:Date.now(),operator:user.name,date:todayStr()});
+    const r=await db.startCooling({product:form.product,qty:form.qty,startTemp,startedMs:Date.now(),operator:user.name,date:todayStr(),mode});
     if(r?.error){alert("Le passage en cellule n'a pas pu démarrer. Vérifie la connexion Supabase.");return;}
     // La ligne créée est déjà renvoyée par Supabase : on l'ajoute localement
     // plutôt que de recharger les 20 tables.
@@ -2364,6 +2491,31 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite,lang}){
       setData(d=>({...d,cooling:d.cooling.map(x=>x.id===activeCoolingId?{...x,endTemp,duration:dur,status,dlc,mode}:x)}));
     }
     setShow(false);setStep(0);setMode("refroid");setStartMs(null);setElapsed(0);setStartTemp(65);setEndTemp(8);setForm({product:"",qty:""});setActiveCoolingId(null);}
+
+  // Même règle de conformité et de calcul de DLC que le suivi en direct
+  // (finish() ci-dessus) — seule la source de la durée change : ici on la
+  // saisit directement plutôt que de la mesurer avec un chrono.
+  async function saveManualCooling(){
+    if(!manualForm.product.trim()||manualBusy)return;
+    const mm=CELL_MODES[manualForm.mode];
+    const dur=Number(manualForm.duration)||0;
+    const conform=manualForm.mode==="surgel"?(manualForm.endTemp<=-18):(dur<=maxMin&&manualForm.endTemp<=10);
+    const status=conform?"ok":"alert";
+    const dlc=mm.dlcMonths
+      ? (()=>{const d=new Date();d.setMonth(d.getMonth()+mm.dlcMonths);return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"2-digit"});})()
+      : new Date(Date.now()+data.haccpSettings.labelDlcDefault*86400000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
+    setManualBusy(true);
+    const [y,mo,da]=manualForm.date.split("-");
+    const dateStr=`${da}/${mo}`;
+    const res=await db.logCoolingRetroactive({product:manualForm.product.trim(),qty:manualForm.qty,startTemp:manualForm.startTemp,endTemp:manualForm.endTemp,duration:dur,status,dlc,mode:manualForm.mode,operator:user?.name,date:dateStr});
+    setManualBusy(false);
+    if(res?.error||!res?.data){alert("Le refroidissement n'a pas été enregistré. Vérifie la connexion Supabase.");await reload?.({force:true});return;}
+    markLocalWrite?.();
+    const r=res.data;
+    setData(d=>({...d,cooling:[{id:r.id,product:r.product,qty:r.qty,startTemp:r.start_temp,endTemp:r.end_temp,duration:r.duration,status:r.status,dlc:r.dlc,mode:r.mode,manual:true,operator:r.operator,date:r.date,createdAt:r.created_at},...d.cooling]}));
+    setShowManual(false);
+    haptic.success();
+  }
   const coolingDone=data.cooling.filter(c=>c.status!=="active");
   // Refroidissement en cours quelque part (même si on a quitté l'écran, swipe,
   // app fermée par iOS...) : on le retrouve depuis la vraie donnée persistée
@@ -2398,10 +2550,11 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite,lang}){
     )}
     {coolingDone.length===0 && !activeCooling && <div className="empty"><div className="empty-icon">❄️</div><div className="empty-title">{t("cool_empty_title",lang)}</div><div className="empty-sub">{t("cool_empty_sub",lang)}</div></div>}
     {coolingDone.map(c=>{const cm=CELL_MODES[c.mode||"refroid"];const okTemp=(c.mode==="surgel")?c.endTemp<=-18:c.endTemp<=10;return(<div key={c.id} className="card">
-      <div className="between mb6"><div><div className="item-title">{cm.icon} {c.product}</div><div className="item-sub">{cm.label} · {c.qty} · {c.date}</div></div><span className={`badge ${c.status==="ok"?"b-good":"b-bad"}`}>{c.status==="ok"?"✓ OK":"⚠"}</span></div>
+      <div className="between mb6"><div><div className="item-title">{cm.icon} {c.product}{c.manual&&<span className="badge b-mute" style={{marginLeft:6,fontSize:9}}>saisi après coup</span>}</div><div className="item-sub">{cm.label} · {c.qty} · {c.date}</div></div><span className={`badge ${c.status==="ok"?"b-good":"b-bad"}`}>{c.status==="ok"?"✓ OK":"⚠"}</span></div>
       <div className="row gap12" style={{flexWrap:"wrap"}}><div><div className="text-xs text-dim">Départ</div><div className="text-sm fw7 tabular">{c.startTemp}°C</div></div><div><div className="text-xs text-dim">Arrivée</div><div className="text-sm fw7 tabular" style={{color:okTemp?T.good:T.bad}}>{c.endTemp}°C</div></div><div><div className="text-xs text-dim">Durée</div><div className="text-sm fw7 tabular" style={{color:c.duration<=maxMin?T.good:T.bad}}>{c.duration} min</div></div></div>
       <div className="text-xs text-dim mt6">DLC : {c.dlc} · {c.operator}</div>
     </div>);})}
+    <button className="btn btn-ghost mb8" onClick={()=>{setManualForm({product:"",qty:"",mode:"refroid",startTemp:65,endTemp:8,duration:60,date:isoDate(new Date())});setShowManual(true);}}>🕐 Enregistrer un refroidissement passé</button>
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>{setStep(0);setMode("refroid");setShow(true);}}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div>
@@ -2445,6 +2598,25 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite,lang}){
         {mode==="refroid"&&endTemp>10&&<div className="banner banner-bad mb12"><span>⚠️</span><div><b>{t("cool_nonconform",lang)}</b> {t("cool_recook_discard",lang)}</div></div>}
         {mode==="refroid"&&endTemp<=10&&elapsed<=maxMin*60&&<div className="banner banner-good mb12"><span>✓</span><div><b>{t("cool_conform",lang)}</b> {t("cool_dlc_j",lang)}{data.haccpSettings.labelDlcDefault}.</div></div>}
         <button className="btn btn-primary" onClick={finish}>{t("cool_save",lang)}</button></>}
+    </div></div>}
+
+    {showManual&&manualForm&&<div className="overlay" onClick={()=>!manualBusy&&setShowManual(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
+      <div className="sheet-handle"></div>
+      <div className="sheet-title">🕐 Refroidissement passé</div>
+      <div className="text-xs text-dim mb14" style={{lineHeight:1.5}}>À utiliser quand le chrono n'a pas été lancé sur le moment, mais que le refroidissement a bien eu lieu — reste apparent dans l'historique comme "saisi après coup", pour rester honnête en cas de contrôle.</div>
+      <div className="field"><label className="label">Type</label><SegmentedControl value={manualForm.mode} onChange={v=>setManualForm(f=>({...f,mode:v,endTemp:CELL_MODES[v].endCenter}))} options={[{value:"refroid",label:t("cool_mode_refroid",lang)},{value:"surgel",label:t("cool_mode_surgel",lang)}]}/></div>
+      <div className="field"><label className="label">Produit</label><input className="input" value={manualForm.product} onChange={e=>setManualForm(f=>({...f,product:e.target.value}))}/></div>
+      <div className="field"><label className="label">Quantité</label><input className="input" value={manualForm.qty} onChange={e=>setManualForm(f=>({...f,qty:e.target.value}))}/></div>
+      <div className="row gap8 mb14">
+        <div style={{flex:1}}><label className="label">Date</label><input className="input input-sm" type="date" value={manualForm.date} onChange={e=>setManualForm(f=>({...f,date:e.target.value}))}/></div>
+        <div style={{flex:1}}><label className="label">Durée (min)</label><input className="input input-sm" type="number" value={manualForm.duration} onChange={e=>setManualForm(f=>({...f,duration:e.target.value}))}/></div>
+      </div>
+      <div className="field"><label className="label">Température de départ</label><TapDial value={manualForm.startTemp} onChange={v=>setManualForm(f=>({...f,startTemp:v}))} center={65} step={2} colorFn={v=>v>=63?"good":"warn"}/></div>
+      {manualForm.mode==="surgel"
+        ? <div className="field"><label className="label">{t("cool_core_temp_surgel",lang)}</label><TapDial value={manualForm.endTemp} onChange={v=>setManualForm(f=>({...f,endTemp:v}))} center={-18} step={2} colorFn={v=>v<=-18?"good":"bad"}/></div>
+        : <div className="field"><label className="label">{t("cool_core_temp_refroid",lang)}</label><TapDial value={manualForm.endTemp} onChange={v=>setManualForm(f=>({...f,endTemp:v}))} center={8} colorFn={v=>v<=10?"good":"bad"}/></div>}
+      <button className="btn btn-primary mt8" onClick={saveManualCooling} disabled={!manualForm.product.trim()||manualBusy}>{manualBusy?"Enregistrement…":"Enregistrer"}</button>
+      <button className="btn btn-ghost mt8" onClick={()=>setShowManual(false)} disabled={manualBusy}>Annuler</button>
     </div></div>}
   </div>);
 }
@@ -2607,11 +2779,40 @@ function Traceability({data,setData,db,reload,go,markLocalWrite,lang}){
   const[filter,setFilter]=useState("all");
   const[detail,setDetail]=useState(null); // fiche sélectionnée pour voir sa photo en grand
   const[form,setForm]=useState({product:"",supplier:"",lot:"",dlc:"",qty:"",allergenes:""});
+  const[ocrBusy,setOcrBusy]=useState(false);
+  const[ocrHint,setOcrHint]=useState(null); // ce qui a été détecté, pour prévenir que c'est une suggestion à vérifier
   function handlePhoto(e){
     const file=e.target.files[0];if(!file)return;
     const reader=new FileReader();
-    reader.onload=(ev)=>{ setPhoto(ev.target.result); }; // garde le data-URL tel quel (ré-affichable directement dans une <img>)
+    reader.onload=(ev)=>{
+      setPhoto(ev.target.result); // garde le data-URL tel quel (ré-affichable directement dans une <img>)
+      runLabelOcr(ev.target.result);
+    };
     reader.readAsDataURL(file);
+  }
+  // Lance la lecture automatique sur la photo qu'on vient de prendre — pas
+  // de nouvelle étape pour l'équipe, juste un remplissage suggéré une fois
+  // la photo capturée. N'écrase jamais un champ déjà rempli à la main.
+  async function runLabelOcr(dataUrl){
+    setOcrBusy(true);setOcrHint(null);
+    try{
+      const Tesseract=await loadTesseract();
+      const result=await Tesseract.recognize(dataUrl,"fra");
+      const {dlc,lot,confident}=extractDlcAndLot(result.data.text||"");
+      setForm(f=>({...f,dlc:dlc&&!f.dlc?dlc:f.dlc,lot:lot&&!f.lot?lot:f.lot}));
+      if(dlc||lot){
+        setOcrHint(confident
+          ? "Date et/ou lot détectés automatiquement — vérifie avant d'enregistrer."
+          : "Plusieurs dates repérées sur l'étiquette, aucune n'était assez claire — à saisir toi-même.");
+      }else{
+        setOcrHint("Rien de fiable détecté sur la photo — saisie manuelle comme d'habitude.");
+      }
+    }catch(e){
+      // Échec silencieux : la photo et la saisie manuelle marchent déjà très
+      // bien sans ça, ce n'est qu'un coup de main en plus, jamais un blocage.
+      setOcrHint(null);
+    }
+    setOcrBusy(false);
   }
   async function save(){
     if(!form.product)return;
@@ -2680,9 +2881,11 @@ function Traceability({data,setData,db,reload,go,markLocalWrite,lang}){
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">{t("trace_add_product",lang)}</div>
       {photo
-        ? <div style={{position:"relative",marginBottom:14}}><img src={photo} alt="" style={{width:"100%",borderRadius:14}}/><button onClick={()=>setPhoto(null)} style={{position:"absolute",top:8,right:8,width:44,height:44,borderRadius:"50%",background:"rgba(0,0,0,.6)",border:"none",color:"#fff",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button></div>
+        ? <div style={{position:"relative",marginBottom:14}}><img src={photo} alt="" style={{width:"100%",borderRadius:14}}/><button onClick={()=>{setPhoto(null);setOcrHint(null);}} style={{position:"absolute",top:8,right:8,width:44,height:44,borderRadius:"50%",background:"rgba(0,0,0,.6)",border:"none",color:"#fff",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button></div>
         : <label className="scan" style={{cursor:"pointer",display:"block"}}><div className="scan-icon">📸</div><div className="scan-title">{t("trace_photo",lang)}</div><div className="scan-sub">{t("trace_photo_sub",lang)}</div><input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handlePhoto}/></label>
       }
+      {ocrBusy && <div className="text-xs text-dim center mb10">🔍 Lecture de l'étiquette…</div>}
+      {ocrHint && !ocrBusy && <div className="banner banner-info mb10"><span>ℹ️</span><div style={{fontSize:11,lineHeight:1.5}}>{ocrHint}</div></div>}
       <div className="field"><label className="label">{t("trace_product",lang)}</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})}/></div>
       <div className="field"><label className="label">{t("trace_supplier",lang)}</label><input className="input" value={form.supplier} onChange={e=>setForm({...form,supplier:e.target.value})}/></div>
       <div className="row gap8 mb14"><div style={{flex:1}}><label className="label">{t("trace_lot",lang)}</label><input className="input input-sm" value={form.lot} onChange={e=>setForm({...form,lot:e.target.value})}/></div><div style={{flex:1}}><label className="label">{t("trace_qty",lang)}</label><input className="input input-sm" value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})}/></div></div>
