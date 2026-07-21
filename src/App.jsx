@@ -673,7 +673,7 @@ const S = `
   .dial-wrap{display:flex;align-items:center;gap:4px;}
   .dial-arrow{width:38px;height:52px;flex-shrink:0;border-radius:8px;border:none;background:${T.bg1};color:${T.textDim};font-size:17px;font-weight:600;display:flex;align-items:center;justify-content:center;}
   .dial-arrow:active{background:${T.bg2};}
-  .dial-scroll{flex:1;overflow:hidden;height:52px;display:flex;align-items:center;background:${T.bg1};border-radius:11px;border:1px solid ${T.border};position:relative;touch-action:pan-y;padding-left:calc(50% - 30px);padding-right:calc(50% - 30px);}
+  .dial-scroll{flex:1;overflow:hidden;height:52px;display:flex;align-items:center;background:${T.bg1};border-radius:11px;border:1px solid ${T.border};position:relative;touch-action:pan-y;}
   .dial-track{display:flex;will-change:transform;}
   .dial-scroll::-webkit-scrollbar{display:none;}
   .dial-scroll-item{flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600;color:${T.textDim};font-variant-numeric:tabular-nums;opacity:.45;transition:opacity .1s;}
@@ -681,7 +681,7 @@ const S = `
   .dial-scroll-item.sel.good{color:${T.good};}
   .dial-scroll-item.sel.warn{color:${T.warn};}
   .dial-scroll-item.sel.bad{color:${T.bad};}
-  .dial-center-frame{position:absolute;top:5px;bottom:5px;left:50%;width:${DIAL_ITEM_W+10}px;transform:translateX(-50%);border:2px solid ${T.accent};border-radius:9px;pointer-events:none;background:rgba(255,107,0,.07);}
+  .dial-center-frame{position:absolute;top:8px;bottom:8px;left:50%;width:${DIAL_ITEM_W-4}px;transform:translateX(-50%);border:2px solid ${T.accent};border-radius:8px;pointer-events:none;background:rgba(255,107,0,.07);}
 
   .binary{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
   .binary-btn{height:46px;border-radius:10px;border:1.5px solid ${T.border};background:${T.bg2};color:${T.textDim};font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;transition:all var(--dur-fast);}
@@ -842,14 +842,21 @@ function TapDial({value,onChange,center,step=1,colorFn,format=(v)=>`${v}°`}){
   // utilisées dans l'app (températures, %, minutes), sans avoir à adapter
   // les bornes au cas par cas.
   const RANGE=120;
+  const wrapRef=useRef(null);   // pour mesurer la vraie largeur du conteneur
   const trackRef=useRef(null);
-  const pos=useRef(0);       // position actuelle de la bande, en px
-  const vel=useRef(0);       // vitesse au moment du lâcher, en px/ms
+  const pos=useRef(0);          // position actuelle de la bande, en px
+  const vel=useRef(0);          // vitesse au moment du lâcher, en px/ms
   const dragging=useRef(false);
   const lastX=useRef(0);
   const lastT=useRef(0);
   const raf=useRef(null);
   const mounted=useRef(false);
+  // Décalage pour que l'index 0 soit visuellement centré — mesuré en vrai
+  // (clientWidth) plutôt que déduit d'un padding CSS en %, qui ne se
+  // calcule pas de façon fiable à l'intérieur d'un conteneur flexible ici :
+  // ça avait laissé la valeur sélectionnée décalée de 30px vers la droite,
+  // pile la moitié de la largeur d'une valeur.
+  const centerOffset=useRef(0);
   const [centerIndex,setCenterIndex]=useState(RANGE); // suit le centre en TEMPS RÉEL, pas seulement une fois arrêté — comme sur iPhone, le chiffre en surbrillance est toujours celui qui est physiquement au centre pendant qu'on fait défiler
 
   const values=useMemo(()=>{
@@ -858,11 +865,13 @@ function TapDial({value,onChange,center,step=1,colorFn,format=(v)=>`${v}°`}){
     return arr;
   },[center,step]);
 
+  const idxToPos=idx=>centerOffset.current-idx*DIAL_ITEM_W;
+  const posToIdx=px=>Math.max(0,Math.min(values.length-1,Math.round((centerOffset.current-px)/DIAL_ITEM_W)));
+
   function applyPos(px){
     pos.current=px;
     if(trackRef.current) trackRef.current.style.transform=`translateX(${px}px)`;
-    const idx=Math.max(0,Math.min(values.length-1,Math.round(-px/DIAL_ITEM_W)));
-    setCenterIndex(idx);
+    setCenterIndex(posToIdx(px));
   }
   function stopAnim(){ if(raf.current){cancelAnimationFrame(raf.current);raf.current=null;} }
 
@@ -870,10 +879,11 @@ function TapDial({value,onChange,center,step=1,colorFn,format=(v)=>`${v}°`}){
   // changement de `value` ferait sauter la bande sous le doigt en pleine
   // interaction.
   useEffect(()=>{
-    if(mounted.current)return;
+    if(mounted.current||!wrapRef.current)return;
     mounted.current=true;
+    centerOffset.current=wrapRef.current.clientWidth/2-DIAL_ITEM_W/2;
     const idx=Math.round((value-center)/step)+RANGE;
-    applyPos(-(idx*DIAL_ITEM_W));
+    applyPos(idxToPos(idx));
   },[]);
 
   function animateTo(target,onDone){
@@ -887,8 +897,8 @@ function TapDial({value,onChange,center,step=1,colorFn,format=(v)=>`${v}°`}){
     raf.current=requestAnimationFrame(frame);
   }
   function commitCenter(){
-    const idx=Math.max(0,Math.min(values.length-1,Math.round(-pos.current/DIAL_ITEM_W)));
-    animateTo(-(idx*DIAL_ITEM_W),()=>{
+    const idx=posToIdx(pos.current);
+    animateTo(idxToPos(idx),()=>{
       const v=values[idx];
       if(v!==value){ haptic.light(); onChange(v); }
     });
@@ -933,12 +943,12 @@ function TapDial({value,onChange,center,step=1,colorFn,format=(v)=>`${v}°`}){
   const shiftOne=(dir)=>{
     haptic.light();
     const idx=Math.max(0,Math.min(values.length-1,centerIndex+dir));
-    animateTo(-(idx*DIAL_ITEM_W),()=>{ if(values[idx]!==value) onChange(values[idx]); });
+    animateTo(idxToPos(idx),()=>{ if(values[idx]!==value) onChange(values[idx]); });
   };
 
   return(<div className="dial-wrap">
     <button className="dial-arrow" onClick={()=>shiftOne(-1)}>‹</button>
-    <div className="dial-scroll"
+    <div className="dial-scroll" ref={wrapRef}
       onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd}
       onMouseDown={onStart} onMouseMove={e=>{if(dragging.current)onMove(e);}} onMouseUp={onEnd} onMouseLeave={()=>{if(dragging.current)onEnd();}}>
       <div className="dial-center-frame"></div>
@@ -948,7 +958,7 @@ function TapDial({value,onChange,center,step=1,colorFn,format=(v)=>`${v}°`}){
           const cls=isSel&&colorFn?colorFn(v):"";
           return(
             <div key={i} className={`dial-scroll-item ${isSel?`sel ${cls}`:""}`} style={{width:DIAL_ITEM_W}}
-              onClick={()=>{ if(dragging.current)return; animateTo(-(i*DIAL_ITEM_W),()=>{if(values[i]!==value)onChange(values[i]);}); }}>
+              onClick={()=>{ if(dragging.current)return; animateTo(idxToPos(i),()=>{if(values[i]!==value)onChange(values[i]);}); }}>
               {format(v)}
             </div>
           );
