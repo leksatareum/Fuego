@@ -1373,8 +1373,18 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
   // réglementaire comme les températures ou le nettoyage, juste de
   // l'organisation interne. La mélanger aurait fait baisser artificiellement
   // le pourcentage sur des tâches qui n'ont rien d'obligatoire à finir.
-  const globalDone = matinDone+soirDone+cleanDone;
-  const globalTotal = totalFridges*2+cleanTotal;
+  //
+  // Les créneaux du soir (températures ET nettoyage) ne comptent qu'à partir
+  // du moment où ils sont vraiment d'actualité — même logique que les cartes
+  // "à venir" plus bas, qui ne signalent le relevé du soir qu'à partir de
+  // la préparation soir. Sans ça, le cercle affichait un plafond de 50%
+  // toute la matinée, avant même que le service du soir ait commencé.
+  const soirRelevant = win.id==="prep_pm"||win.id==="dinner"||win.id==="closing";
+  const tempTotalForRing = soirRelevant ? totalFridges*2 : totalFridges;
+  const tempDoneForRing = soirRelevant ? (matinDone+soirDone) : matinDone;
+
+  const globalDone = tempDoneForRing+cleanDone;
+  const globalTotal = tempTotalForRing+cleanTotal;
   const globalPct = safePct(globalDone, globalTotal);
 
   // Détail de ce qui manque pour atteindre 100% — affiché en touchant la
@@ -1385,7 +1395,7 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
   let tempMissing=0, cleanMissing=0;
   data.haccpSettings.fridgeTargets.forEach(f=>{
     if(!getReleve(data,f.id,"matin")) tempMissing++;
-    if(!getReleve(data,f.id,"soir")) tempMissing++;
+    if(soirRelevant && !getReleve(data,f.id,"soir")) tempMissing++;
   });
   data.cleaning.forEach(c=>{
     if(c.freq==="Quotidien"){
@@ -1394,7 +1404,7 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
       const hasMatin=checks.some(x=>x.cleaningId===c.id&&x.date===todayISO&&x.period==="matin");
       const hasSoir=checks.some(x=>x.cleaningId===c.id&&x.date===todayISO&&x.period==="soir");
       if(!hasMatin) cleanMissing++;
-      if(!hasSoir) cleanMissing++;
+      if(soirRelevant && !hasSoir) cleanMissing++;
     }else if(!cleaningIsDoneToday(c,data.cleaningChecks,data.haccpSettings?.resetSoir)){
       cleanMissing++;
     }
