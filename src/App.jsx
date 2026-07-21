@@ -122,9 +122,19 @@ const DB = {
       sbGet("haccp_settings",  qs(q.limit(1),q.select())),
       sbGet("fridge_targets",  qs(q.order("sort_order"),q.select())),
       sbGet("fridge_releves",  qs(q.order("id",false),q.limit(200),q.select())),
-      sbGet("reception",       qs(q.order("created_at",false),q.limit(100),q.select())),
-      sbGet("cooling",         qs(q.order("created_at",false),q.limit(100),q.select())),
-      sbGet("reheating",       qs(q.order("created_at",false),q.limit(100),q.select())),
+      // Une limite de 100 lignes ne suffit pas à elle seule : avec plusieurs
+      // livraisons par semaine, ça peut représenter des mois de jours
+      // affichés d'un coup sur l'écran Réception. Fenêtre de 30 jours sur
+      // created_at (vrai horodatage — le champ "date" est juste du texte
+      // JJ/MM, impropre à trier) — l'historique complet reste consultable
+      // dans le Registre HACCP (Archives), fait pour naviguer loin dans le temps.
+      sbGet("reception",       qs(`created_at=gte.${new Date(Date.now()-30*86400000).toISOString()}`,q.order("created_at",false),q.limit(200),q.select())),
+      // Même raisonnement que pour Réception : une limite de lignes seule ne
+      // suffit pas, elle peut représenter des mois selon le rythme du
+      // service. Fenêtre de 30 jours — l'historique complet reste dans le
+      // Registre HACCP (Archives).
+      sbGet("cooling",         qs(`created_at=gte.${new Date(Date.now()-30*86400000).toISOString()}`,q.order("created_at",false),q.limit(200),q.select())),
+      sbGet("reheating",       qs(`created_at=gte.${new Date(Date.now()-30*86400000).toISOString()}`,q.order("created_at",false),q.limit(200),q.select())),
       sbGet("oils",            qs(q.order("id"),q.select())),
       sbGet("cleaning",        qs(q.order("sort_order"),q.select())),
       // Colonnes explicites : on exclut volontairement "photo" (base64 lourd),
@@ -825,9 +835,10 @@ function TapDial({value,onChange,center,step=1,colorFn,format=(v)=>`${v}°`}){
   const [offset,setOffset]=useState(0);
   const startX=useRef(null);
   const startY=useRef(null);
+  const startTime=useRef(null);
   const moved=useRef(false);
-  const shift=(dir)=>{haptic.light();setOffset(o=>o+(dir*step));};
-  const start=(e)=>{const t=e.touches?e.touches[0]:e;startX.current=t.clientX;startY.current=t.clientY;moved.current=false;};
+  const shift=(dir,steps=1)=>{haptic.light();setOffset(o=>o+(dir*step*steps));};
+  const start=(e)=>{const t=e.touches?e.touches[0]:e;startX.current=t.clientX;startY.current=t.clientY;startTime.current=Date.now();moved.current=false;};
   const move=(e)=>{
     if(startX.current===null)return;
     const t=e.touches?e.touches[0]:e;
@@ -838,10 +849,18 @@ function TapDial({value,onChange,center,step=1,colorFn,format=(v)=>`${v}°`}){
     if(startX.current===null)return;
     const t=e.changedTouches?e.changedTouches[0]:e;
     const dx=t.clientX-startX.current, dy=t.clientY-startY.current;
-    startX.current=startY.current=null;
+    const dt=Math.max(16,Date.now()-(startTime.current||Date.now())); // évite une division par ~0 sur un geste instantané
+    startX.current=startY.current=startTime.current=null;
     if(Math.abs(dx)>46 && Math.abs(dx)>Math.abs(dy)*1.2){
+      // Un swipe lent et posé n'avance que d'un cran, comme avant. Mais un
+      // vrai "flick" franc — façon roue du réveil iPhone — doit pouvoir
+      // traverser plusieurs dizaines de valeurs d'un coup : passer de 10°C à
+      // -18°C ne doit pas obliger à répéter le geste 14 fois. La vitesse du
+      // doigt (distance / temps) détermine combien de crans sont parcourus.
+      const velocity=Math.abs(dx)/dt; // px/ms
+      const steps=Math.min(50,Math.max(1,Math.round((velocity-0.3)*15)));
       // swipe gauche = valeurs plus hautes, swipe droite = valeurs plus basses
-      shift(dx<0?1:-1);
+      shift(dx<0?1:-1,steps);
     }
   };
   const vals=[center-2*step+offset,center-step+offset,center+offset,center+step+offset,center+2*step+offset];
@@ -2497,6 +2516,7 @@ function Reception({data,setData,user,db,reload,go,markLocalWrite,lang}){
   return(<div className="page">
     <GbphHelpButton section="trace" go={go}/>
     <div className="section-title">{t("recv_title",lang)}</div><div className="section-sub">{t("recv_subtitle",lang)}</div>
+    <div className="text-xs text-dim mb14" style={{cursor:"pointer"}} onClick={()=>go("registre")}>30 derniers jours ici · historique complet dans le Registre HACCP ›</div>
     {data.reception.length===0 && (
       <div className="empty">
         <div className="empty-icon">🚚</div>
@@ -2504,11 +2524,28 @@ function Reception({data,setData,user,db,reload,go,markLocalWrite,lang}){
         <div className="empty-sub">{t("recv_empty_sub",lang)}</div>
       </div>
     )}
-    {data.reception.map(r=><div key={r.id} className="card">
-      <div className="between mb6"><div><div className="item-title">{r.product}</div><div className="item-sub">{r.supplier} · {r.qty}</div></div><span className={`badge ${r.tempOk?"b-good":"b-bad"} tabular`}>{r.temp}°C</span></div>
-      <div className="row gap6 mb6" style={{flexWrap:"wrap"}}><span className={`badge ${r.aspect==="OK"?"b-good":"b-bad"}`}>Aspect {r.aspect}</span><span className={`badge ${r.emballage==="OK"?"b-good":"b-bad"}`}>Emb. {r.emballage}</span><span className="badge b-mute">{r.signed}</span></div>
-      <div className="text-xs text-dim">DLC {r.dlc} · Lot {r.lot} · {r.date}</div>
-    </div>)}
+    {/* Regroupé par jour, le plus récent ouvert par défaut — sinon cet écran
+        devient vite une liste interminable au fil des livraisons. Même
+        principe que l'historique des étiquettes ou des nuisibles. */}
+    {(() => {
+      const byDate={};
+      data.reception.forEach(r=>{ (byDate[r.date]=byDate[r.date]||[]).push(r); });
+      const dateKeys=Object.keys(byDate).sort((a,b)=>{
+        const parse=d=>{const[dd,mm]=d.split("/").map(Number);return mm*100+dd;};
+        return parse(b)-parse(a);
+      });
+      return dateKeys.map((date,idx)=>(
+        <div key={date} style={{marginBottom:10}}>
+          <CollapsibleSection title={date} icon="📅" count={byDate[date].length} defaultOpen={idx===0}>
+            {byDate[date].map(r=><div key={r.id} className="card">
+              <div className="between mb6"><div><div className="item-title">{r.product}</div><div className="item-sub">{r.supplier} · {r.qty}</div></div><span className={`badge ${r.tempOk?"b-good":"b-bad"} tabular`}>{r.temp}°C</span></div>
+              <div className="row gap6 mb6" style={{flexWrap:"wrap"}}><span className={`badge ${r.aspect==="OK"?"b-good":"b-bad"}`}>Aspect {r.aspect}</span><span className={`badge ${r.emballage==="OK"?"b-good":"b-bad"}`}>Emb. {r.emballage}</span><span className="badge b-mute">{r.signed}</span></div>
+              <div className="text-xs text-dim">DLC {r.dlc} · Lot {r.lot}</div>
+            </div>)}
+          </CollapsibleSection>
+        </div>
+      ));
+    })()}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">{t("recv_new",lang)}</div>
@@ -2631,11 +2668,26 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite,lang}){
       </div>
     )}
     {coolingDone.length===0 && !activeCooling && <div className="empty"><div className="empty-icon">❄️</div><div className="empty-title">{t("cool_empty_title",lang)}</div><div className="empty-sub">{t("cool_empty_sub",lang)}</div></div>}
-    {coolingDone.map(c=>{const cm=CELL_MODES[c.mode||"refroid"];const okTemp=(c.mode==="surgel")?c.endTemp<=-18:c.endTemp<=10;return(<div key={c.id} className="card">
-      <div className="between mb6"><div><div className="item-title">{cm.icon} {c.product}{c.manual&&<span className="badge b-mute" style={{marginLeft:6,fontSize:9}}>saisi après coup</span>}</div><div className="item-sub">{cm.label} · {c.qty} · {c.date}</div></div><span className={`badge ${c.status==="ok"?"b-good":"b-bad"}`}>{c.status==="ok"?"✓ OK":"⚠"}</span></div>
-      <div className="row gap12" style={{flexWrap:"wrap"}}><div><div className="text-xs text-dim">Départ</div><div className="text-sm fw7 tabular">{c.startTemp}°C</div></div><div><div className="text-xs text-dim">Arrivée</div><div className="text-sm fw7 tabular" style={{color:okTemp?T.good:T.bad}}>{c.endTemp}°C</div></div><div><div className="text-xs text-dim">Durée</div><div className="text-sm fw7 tabular" style={{color:c.duration<=maxMin?T.good:T.bad}}>{c.duration} min</div></div></div>
-      <div className="text-xs text-dim mt6">DLC : {c.dlc} · {c.operator}</div>
-    </div>);})}
+    {coolingDone.length>0 && <div className="text-xs text-dim mb10" style={{cursor:"pointer"}} onClick={()=>go("registre")}>30 derniers jours ici · historique complet dans le Registre HACCP ›</div>}
+    {(() => {
+      const byDate={};
+      coolingDone.forEach(c=>{ (byDate[c.date]=byDate[c.date]||[]).push(c); });
+      const dateKeys=Object.keys(byDate).sort((a,b)=>{
+        const parse=d=>{const[dd,mm]=d.split("/").map(Number);return mm*100+dd;};
+        return parse(b)-parse(a);
+      });
+      return dateKeys.map((date,idx)=>(
+        <div key={date} style={{marginBottom:10}}>
+          <CollapsibleSection title={date} icon="📅" count={byDate[date].length} defaultOpen={idx===0}>
+            {byDate[date].map(c=>{const cm=CELL_MODES[c.mode||"refroid"];const okTemp=(c.mode==="surgel")?c.endTemp<=-18:c.endTemp<=10;return(<div key={c.id} className="card">
+              <div className="between mb6"><div><div className="item-title">{cm.icon} {c.product}{c.manual&&<span className="badge b-mute" style={{marginLeft:6,fontSize:9}}>saisi après coup</span>}</div><div className="item-sub">{cm.label} · {c.qty}</div></div><span className={`badge ${c.status==="ok"?"b-good":"b-bad"}`}>{c.status==="ok"?"✓ OK":"⚠"}</span></div>
+              <div className="row gap12" style={{flexWrap:"wrap"}}><div><div className="text-xs text-dim">Départ</div><div className="text-sm fw7 tabular">{c.startTemp}°C</div></div><div><div className="text-xs text-dim">Arrivée</div><div className="text-sm fw7 tabular" style={{color:okTemp?T.good:T.bad}}>{c.endTemp}°C</div></div><div><div className="text-xs text-dim">Durée</div><div className="text-sm fw7 tabular" style={{color:c.duration<=maxMin?T.good:T.bad}}>{c.duration} min</div></div></div>
+              <div className="text-xs text-dim mt6">DLC : {c.dlc} · {c.operator}</div>
+            </div>);})}
+          </CollapsibleSection>
+        </div>
+      ));
+    })()}
     <button className="btn btn-ghost mb8" onClick={()=>{setManualForm({product:"",qty:"",mode:"refroid",startTemp:65,endTemp:8,duration:60,date:isoDate(new Date())});setShowManual(true);}}>🕐 Enregistrer un refroidissement passé</button>
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>{setStep(0);setMode("refroid");setShow(true);}}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
@@ -2719,10 +2771,25 @@ function Reheating({data,setData,user,db,reload,go,markLocalWrite,lang}){
     <GbphHelpButton section="temp" go={go}/>
     <div className="section-title">{t("reheat_title",lang)}</div><div className="section-sub"><bdi dir="ltr">≥ {reheatMin}°C</bdi> {t("common_within",lang)} <bdi dir="ltr">{reheatMaxTime} min</bdi></div>
     {data.reheating.length===0 && <div className="empty"><div className="empty-icon">🔥</div><div className="empty-title">{t("reheat_empty_title",lang)}</div><div className="empty-sub">{t("reheat_empty_sub",lang)}</div></div>}
-    {data.reheating.map(r=><div key={r.id} className="card">
-      <div className="between mb6"><div><div className="item-title">{r.product}</div><div className="item-sub">{r.date} · {r.operator}</div></div><span className={`badge ${r.status==="ok"?"b-good":"b-bad"}`}>{r.status==="ok"?"✓":"⚠"}</span></div>
-      <div className="row gap12" style={{flexWrap:"wrap"}}><div><div className="text-xs text-dim">{t("reheat_final_temp",lang)}</div><div className="text-sm fw7 tabular" style={{color:r.endTemp>=reheatMin?T.good:T.bad}}>{r.endTemp}°C</div></div><div><div className="text-xs text-dim">{t("reheat_duration",lang)}</div><div className="text-sm fw7 tabular" style={{color:r.duration<=reheatMaxTime?T.good:T.bad}}>{r.duration} min</div></div></div>
-    </div>)}
+    {data.reheating.length>0 && <div className="text-xs text-dim mb10" style={{cursor:"pointer"}} onClick={()=>go("registre")}>30 derniers jours ici · historique complet dans le Registre HACCP ›</div>}
+    {(() => {
+      const byDate={};
+      data.reheating.forEach(r=>{ (byDate[r.date]=byDate[r.date]||[]).push(r); });
+      const dateKeys=Object.keys(byDate).sort((a,b)=>{
+        const parse=d=>{const[dd,mm]=d.split("/").map(Number);return mm*100+dd;};
+        return parse(b)-parse(a);
+      });
+      return dateKeys.map((date,idx)=>(
+        <div key={date} style={{marginBottom:10}}>
+          <CollapsibleSection title={date} icon="📅" count={byDate[date].length} defaultOpen={idx===0}>
+            {byDate[date].map(r=><div key={r.id} className="card">
+              <div className="between mb6"><div><div className="item-title">{r.product}</div><div className="item-sub">{r.operator}</div></div><span className={`badge ${r.status==="ok"?"b-good":"b-bad"}`}>{r.status==="ok"?"✓":"⚠"}</span></div>
+              <div className="row gap12" style={{flexWrap:"wrap"}}><div><div className="text-xs text-dim">{t("reheat_final_temp",lang)}</div><div className="text-sm fw7 tabular" style={{color:r.endTemp>=reheatMin?T.good:T.bad}}>{r.endTemp}°C</div></div><div><div className="text-xs text-dim">{t("reheat_duration",lang)}</div><div className="text-sm fw7 tabular" style={{color:r.duration<=reheatMaxTime?T.good:T.bad}}>{r.duration} min</div></div></div>
+            </div>)}
+          </CollapsibleSection>
+        </div>
+      ));
+    })()}
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="sheet-title">{t("reheat_new",lang)}</div>
@@ -2822,7 +2889,7 @@ function Oils({data,setData,user,db,reload,go,markLocalWrite,lang}){
                 Huile neuve enregistrée à <b>0%</b> de composés polaires. Prochain contrôle réel à la prochaine utilisation.
               </div></div>
             ) : (
-              <div className="field"><label className="label">Composés polaires</label><TapDial value={polaires} onChange={setPolaires} center={15} step={2} colorFn={v=>v<max-5?"good":v<max?"warn":"bad"} format={v=>`${v}%`}/></div>
+              <div className="field"><label className="label">Composés polaires</label><TapDial value={polaires} onChange={setPolaires} center={15} step={1} colorFn={v=>v<max-5?"good":v<max?"warn":"bad"} format={v=>`${v}%`}/></div>
             )}
             <div className="row gap6 mt8"><button className="btn btn-ghost btn-sm" style={{flex:1}} onClick={()=>setSelOil(null)}>Annuler</button><button className="btn btn-primary btn-sm" style={{flex:2}} onClick={save}>Enregistrer</button></div>
           </>:(
@@ -5536,29 +5603,36 @@ export default function App(){
     if(!data || !user){ navigator.clearAppBadge?.().catch(()=>{}); return; }
 
     const s = data.haccpSettings;
-    // Relevés de température manquants aujourd'hui (matin + soir par enceinte)
+    // Même logique que la carte de service sur l'accueil : le relevé du soir
+    // (températures ET nettoyage) ne compte comme "manquant" qu'à partir de
+    // la préparation soir — sinon la pastille comptait déjà le soir comme en
+    // retard dès le matin, gonflant le chiffre pour rien.
+    const win = getServiceWindow();
+    const soirRelevant = win.id==="prep_pm"||win.id==="dinner"||win.id==="closing";
+
     const fridges = s?.fridgeTargets || [];
     const relevesManquants = fridges.reduce((n,f)=>
-      n + (getReleve(data,f.id,"matin")?0:1) + (getReleve(data,f.id,"soir")?0:1), 0);
+      n + (getReleve(data,f.id,"matin")?0:1) + (soirRelevant&&!getReleve(data,f.id,"soir")?1:0), 0);
 
-    // Tâches du créneau en cours restant à cocher
-    const RESET_MIDI = s?.resetMidi ?? (16*60+30);
-    const RESET_SOIR = s?.resetSoir ?? (3*60);
-    const now = new Date(); const mins = now.getHours()*60+now.getMinutes();
-    const slotDate = new Date();
-    let slotService;
-    if(mins < RESET_SOIR){ slotDate.setDate(slotDate.getDate()-1); slotService="soir"; }
-    else if(mins < RESET_MIDI){ slotService="midi"; }
-    else { slotService="soir"; }
-    const slotIso = isoDate(slotDate);
-    const tachesRestantes = (data.tasks||[]).filter(t=>
-      t.date===slotIso && (t.service||"midi")===slotService && !t.done).length;
-
-    // Zones de nettoyage à faire + produits en alerte DLC
-    const nettoyageRestant = (data.cleaning||[]).filter(c=>!cleaningIsDoneToday(c,data.cleaningChecks,data.haccpSettings?.resetSoir)).length;
+    // Zones de nettoyage à faire + produits en alerte DLC. Mise en place
+    // volontairement exclue de la pastille : ce n'est pas une obligation
+    // réglementaire comme le reste, même principe que sur l'accueil.
+    let nettoyageRestant=0;
+    (data.cleaning||[]).forEach(c=>{
+      if(c.freq==="Quotidien"){
+        const todayISO=serviceISODate(s?.resetSoir);
+        const checks=data.cleaningChecks||[];
+        const hasMatin=checks.some(x=>x.cleaningId===c.id&&x.date===todayISO&&x.period==="matin");
+        const hasSoir=checks.some(x=>x.cleaningId===c.id&&x.date===todayISO&&x.period==="soir");
+        if(!hasMatin) nettoyageRestant++;
+        if(soirRelevant && !hasSoir) nettoyageRestant++;
+      }else if(!cleaningIsDoneToday(c,data.cleaningChecks,s?.resetSoir)){
+        nettoyageRestant++;
+      }
+    });
     const alertesDlc = (data.traceability||[]).filter(t=>t.status!=="ok").length;
 
-    const total = relevesManquants + tachesRestantes + nettoyageRestant + alertesDlc;
+    const total = relevesManquants + nettoyageRestant + alertesDlc;
 
     // setAppBadge(0) afficherait une pastille vide : on l'efface plutôt.
     if(total>0) navigator.setAppBadge(total).catch(()=>{});
