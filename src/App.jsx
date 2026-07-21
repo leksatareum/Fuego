@@ -200,7 +200,7 @@ const DB = {
       // Historique permanent — jamais réinitialisé, source du Registre HACCP.
       cleaningChecks: cleanChecks.map(c=>({id:c.id,cleaningId:c.cleaning_id,zone:c.zone,freq:c.freq,date:c.date,period:c.period,operator:c.operator,createdAt:c.created_at})),
       shoppingList: shoppingList.map(s=>({id:s.id,item:s.item,done:s.done,operator:s.operator,createdAt:s.created_at})),
-      oilTests: oilTests.map(o=>({id:o.id,oilId:o.oil_id,date:o.date,polaires:o.polaires,changed:o.changed,operator:o.operator,createdAt:o.created_at})),
+      oilTests: oilTests.map(o=>({id:o.id,oilId:o.oil_id,date:o.date,polaires:o.polaires,changed:o.changed,action:o.action||"none",operator:o.operator,createdAt:o.created_at})),
       // hasPhoto : la photo elle-même n'est pas chargée ici (trop lourde), on
       // sait juste si la fiche en a une. photo reste null jusqu'à ce qu'on
       // ouvre la fiche, qui déclenche alors le chargement de l'image.
@@ -278,13 +278,13 @@ const DB = {
   // courant" de l'écran Huiles (inchangé), MAIS enregistre aussi une ligne
   // dans oil_tests — sinon ce test précis disparaît dès le prochain,
   // exactement le problème remonté.
-  async updateOil(id,{polaires,operator,changed,dateInstall}){
+  async updateOil(id,{polaires,operator,changed,action,dateInstall}){
     const body={polaires,operator,last_test:todayStr()};
     if(changed)body.date_install=dateInstall;
     const res=await sbPatch("oils",body,qs(`id=eq.${id}`));
     if(res?.error) return res;
-    await sbPost("oil_tests",{oil_id:id,date:todayStr(),polaires,operator,changed:!!changed});
-    return res;
+    const testRes=await sbPost("oil_tests",{oil_id:id,date:todayStr(),polaires,operator,changed:!!changed,action:action||"none"});
+    return {...res, testResult:testRes};
   },
   async toggleCleaning(id,done,operator){return sbPatch("cleaning",{done,done_at:done?new Date().toISOString():null,operator:done?(operator||null):null},qs(`id=eq.${id}`));},
   // Historique permanent d'un nettoyage — jamais réinitialisé, contrairement
@@ -324,7 +324,7 @@ const DB = {
       // ici : c'est une config, pas un événement daté — la version déjà en
       // mémoire (data.oils) suffit à résoudre les noms. Seul l'historique
       // des tests (oilTests) est propre à la période demandée.
-      oilTests: (oilTests.data||[]).map(o=>({id:o.id,oilId:o.oil_id,date:o.date,polaires:o.polaires,changed:o.changed,operator:o.operator,createdAt:o.created_at})),
+      oilTests: (oilTests.data||[]).map(o=>({id:o.id,oilId:o.oil_id,date:o.date,polaires:o.polaires,changed:o.changed,action:o.action||"none",operator:o.operator,createdAt:o.created_at})),
       pests: (pests.data||[]).map(p=>({id:p.id,date:p.date,type:p.type,company:p.company,result:p.result,nextVisit:p.next_visit,createdAt:p.created_at})),
       fridgeReleves: (fr.data||[]).map(r=>({id:r.id,fridgeId:r.fridge_id,date:r.date,period:r.period,temp:r.temp,time:r.time,operatorId:r.operator_id,createdAt:r.created_at})),
       traceability: (trace.data||[]).map(t=>({id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status,createdAt:t.created_at})),
@@ -1666,7 +1666,8 @@ function buildRegistreEvents(data){
   (data.oilTests||[]).forEach(o=>{
     const oil=data.oils.find(x=>x.id===o.oilId);
     const bad = o.polaires >= (data.haccpSettings?.oilPolarMax ?? 25);
-    ev.push({date:o.date,time:"—",ts:eventTs(o.createdAt,o.date),type:"oils",icon:"🛢️",title:`Huile · ${oil?.name||"?"}`,detail:`${o.polaires}% polaires${o.changed?" · huile changée":""}`,status:bad?"bad":"good",module:"Huiles",operator:o.operator||"—"});
+    const actionLabel={changed:"huile changée",filtered:"huile filtrée",none:null}[o.action||"none"];
+    ev.push({date:o.date,time:"—",ts:eventTs(o.createdAt,o.date),type:"oils",icon:"🛢️",title:`Huile · ${oil?.name||"?"}`,detail:`${o.polaires}% polaires${actionLabel?` · ${actionLabel}`:""}`,status:bad?"bad":"good",module:"Huiles",operator:o.operator||"—"});
   });
 
   // Tri du plus récent au plus ancien — sur ts (vrai timestamp), plus fiable
@@ -2741,13 +2742,24 @@ function Oils({data,setData,user,db,reload,go,markLocalWrite,lang}){
 
   async function save(){
     const oilId=selOil.id, changed=action==="changed", today=todayStr();
-    const res=await db.updateOil(oilId,{polaires,operator:user.name,changed,dateInstall:today});
+    const res=await db.updateOil(oilId,{polaires,operator:user.name,changed,action,dateInstall:today});
     if(res?.error){alert("Le test n'a pas été enregistré. Vérifie la connexion Supabase.");await reload({force:true});return;}
     // Mise à jour locale immédiate — évite de recharger les 20 tables.
+    // Touche oils (état courant, pour l'écran) ET oilTests (historique, pour
+    // le Registre) — oublier ce second morceau faisait que le test
+    // s'enregistrait bien en base mais n'apparaissait dans le registre
+    // qu'après un rechargement complet de l'app.
     markLocalWrite?.();
-    setData(d=>({...d,oils:d.oils.map(o=>o.id===oilId
-      ? {...o,polaires,operator:user.name,lastTest:today,...(changed?{dateInstall:today}:{})}
-      : o)}));
+    setData(d=>({...d,
+      oils:d.oils.map(o=>o.id===oilId
+        ? {...o,polaires,operator:user.name,lastTest:today,...(changed?{dateInstall:today}:{})}
+        : o),
+      oilTests:[{
+        id:res.testResult?.data?.id,
+        oilId,date:today,polaires,changed,action,operator:user.name,
+        createdAt:res.testResult?.data?.created_at||new Date().toISOString(),
+      },...(d.oilTests||[])],
+    }));
     setSelOil(null);setPolaires(15);setAction("filtered");
   }
 
