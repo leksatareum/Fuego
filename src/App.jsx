@@ -665,15 +665,21 @@ const S = `
   .btn-fab{position:fixed;bottom:calc(110px + env(safe-area-inset-bottom));right:14px;width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#FF6B00,#E8390A);color:white;border:none;font-size:24px;box-shadow:0 8px 24px rgba(232,57,10,.5);display:flex;align-items:center;justify-content:center;transition:transform var(--dur-fast);z-index:35;}
   .btn-fab:active{transform:scale(.92);}
 
-  .dial{display:flex;align-items:center;gap:4px;background:${T.bg1};border-radius:11px;padding:3px;border:1px solid ${T.border};}
-  .dial-arrow{width:38px;height:40px;flex-shrink:0;border-radius:8px;border:none;background:transparent;color:${T.textDim};font-size:17px;font-weight:600;display:flex;align-items:center;justify-content:center;}
+  /* Roue à défilement natif — vraie inertie du téléphone (celle qui fait
+     tourner les roues natives d'iPhone), pas une physique réinventée en JS.
+     Le navigateur gère lui-même le ralentissement progressif et l'accrochage
+     sur la valeur la plus proche via scroll-snap. */
+  .dial-wrap{display:flex;align-items:center;gap:4px;}
+  .dial-arrow{width:38px;height:52px;flex-shrink:0;border-radius:8px;border:none;background:${T.bg1};color:${T.textDim};font-size:17px;font-weight:600;display:flex;align-items:center;justify-content:center;}
   .dial-arrow:active{background:${T.bg2};}
-  .dial-vals{display:flex;flex:1;gap:3px;}
-  .dial-val{flex:1;height:40px;border-radius:8px;border:none;background:transparent;color:${T.textDim};font-size:14px;font-weight:600;display:flex;align-items:center;justify-content:center;transition:all var(--dur-fast);}
-  .dial-val.sel{background:${T.text};color:${T.bg0};font-weight:700;}
-  .dial-val.sel.good{background:${T.good};color:${T.bg0};}
-  .dial-val.sel.warn{background:${T.warn};color:${T.bg0};}
-  .dial-val.sel.bad{background:${T.bad};color:${T.bg0};}
+  .dial-scroll{flex:1;display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;height:52px;align-items:center;background:${T.bg1};border-radius:11px;border:1px solid ${T.border};position:relative;}
+  .dial-scroll::-webkit-scrollbar{display:none;}
+  .dial-scroll-item{flex:0 0 auto;scroll-snap-align:center;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600;color:${T.textDim};font-variant-numeric:tabular-nums;opacity:.45;transition:opacity .1s;}
+  .dial-scroll-item.sel{font-size:21px;font-weight:800;opacity:1;color:${T.text};}
+  .dial-scroll-item.sel.good{color:${T.good};}
+  .dial-scroll-item.sel.warn{color:${T.warn};}
+  .dial-scroll-item.sel.bad{color:${T.bad};}
+  .dial-center-line{position:absolute;top:6px;bottom:6px;left:50%;width:1px;background:${T.border};pointer-events:none;}
 
   .binary{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
   .binary-btn{height:46px;border-radius:10px;border:1.5px solid ${T.border};background:${T.bg2};color:${T.textDim};font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;transition:all var(--dur-fast);}
@@ -690,8 +696,6 @@ const S = `
   .chips::-webkit-scrollbar{display:none;}
   .chip{flex-shrink:0;padding:7px 14px;border-radius:999px;background:${T.bg2};color:${T.textDim};border:1px solid ${T.border};font-size:13px;font-weight:600;white-space:nowrap;transition:all var(--dur-fast);}
   .chip.sel{background:#2D1208;color:#FF6B00;border-color:#5A2810;}
-  .dial.swipeable::after{content:"Glisser pour faire défiler";display:block;position:absolute;left:50%;transform:translateX(-50%);bottom:-17px;font-size:10px;color:${T.textMute};white-space:nowrap;}
-  .dial{position:relative;}
 
   .field{margin-bottom:14px;}
   .label{display:block;font-size:11px;font-weight:700;color:${T.textDim};margin-bottom:6px;text-transform:uppercase;letter-spacing:.07em;}
@@ -831,43 +835,68 @@ function useSaveToast(){
   return {ping,node};
 }
 
+const DIAL_ITEM_W=60; // largeur fixe de chaque valeur, sert aussi au calcul de position
 function TapDial({value,onChange,center,step=1,colorFn,format=(v)=>`${v}°`}){
-  const [offset,setOffset]=useState(0);
-  const startX=useRef(null);
-  const startY=useRef(null);
-  const startTime=useRef(null);
-  const moved=useRef(false);
-  const shift=(dir,steps=1)=>{haptic.light();setOffset(o=>o+(dir*step*steps));};
-  const start=(e)=>{const t=e.touches?e.touches[0]:e;startX.current=t.clientX;startY.current=t.clientY;startTime.current=Date.now();moved.current=false;};
-  const move=(e)=>{
-    if(startX.current===null)return;
-    const t=e.touches?e.touches[0]:e;
-    const dx=t.clientX-startX.current, dy=t.clientY-startY.current;
-    if(Math.abs(dx)>18 && Math.abs(dx)>Math.abs(dy)*1.15){moved.current=true;e.preventDefault?.();}
+  // ±120 pas autour du centre — largement assez pour toutes les plages
+  // utilisées dans l'app (températures, %, minutes), sans avoir à adapter
+  // les bornes au cas par cas.
+  const RANGE=120;
+  const scrollRef=useRef(null);
+  const settleTimer=useRef(null);
+  const mounted=useRef(false);
+  const values=useMemo(()=>{
+    const arr=[];
+    for(let i=-RANGE;i<=RANGE;i++) arr.push(Math.round((center+i*step)*100)/100);
+    return arr;
+  },[center,step]);
+  const valueToIndex=v=>Math.round((v-center)/step)+RANGE;
+
+  // Aligne le défilement sur la valeur actuelle au montage seulement — si on
+  // resynchronisait à chaque changement de `value`, ça re-scrollerait sous
+  // le doigt en pleine interaction.
+  useEffect(()=>{
+    if(!scrollRef.current||mounted.current)return;
+    mounted.current=true;
+    scrollRef.current.scrollLeft=valueToIndex(value)*DIAL_ITEM_W;
+  },[]);
+
+  // Le scroll natif ne s'arrête pas net : il ralentit progressivement puis
+  // s'accroche (scroll-snap) sur la valeur la plus proche. On attend que ça
+  // se stabilise avant de considérer qu'une nouvelle valeur est choisie —
+  // sinon onChange serait appelé en rafale à chaque pixel défilé.
+  const onScroll=()=>{
+    clearTimeout(settleTimer.current);
+    settleTimer.current=setTimeout(()=>{
+      if(!scrollRef.current)return;
+      const idx=Math.max(0,Math.min(values.length-1,Math.round(scrollRef.current.scrollLeft/DIAL_ITEM_W)));
+      const v=values[idx];
+      if(v!==value){ haptic.light(); onChange(v); }
+    },90);
   };
-  const end=(e)=>{
-    if(startX.current===null)return;
-    const t=e.changedTouches?e.changedTouches[0]:e;
-    const dx=t.clientX-startX.current, dy=t.clientY-startY.current;
-    const dt=Math.max(16,Date.now()-(startTime.current||Date.now())); // évite une division par ~0 sur un geste instantané
-    startX.current=startY.current=startTime.current=null;
-    if(Math.abs(dx)>46 && Math.abs(dx)>Math.abs(dy)*1.2){
-      // Un swipe lent et posé n'avance que d'un cran, comme avant. Mais un
-      // vrai "flick" franc — façon roue du réveil iPhone — doit pouvoir
-      // traverser plusieurs dizaines de valeurs d'un coup : passer de 10°C à
-      // -18°C ne doit pas obliger à répéter le geste 14 fois. La vitesse du
-      // doigt (distance / temps) détermine combien de crans sont parcourus.
-      const velocity=Math.abs(dx)/dt; // px/ms
-      const steps=Math.min(50,Math.max(1,Math.round((velocity-0.3)*15)));
-      // swipe gauche = valeurs plus hautes, swipe droite = valeurs plus basses
-      shift(dx<0?1:-1,steps);
-    }
+
+  const shiftOne=(dir)=>{
+    if(!scrollRef.current)return;
+    haptic.light();
+    scrollRef.current.scrollBy({left:dir*DIAL_ITEM_W,behavior:"smooth"});
   };
-  const vals=[center-2*step+offset,center-step+offset,center+offset,center+step+offset,center+2*step+offset];
-  return(<div className="dial swipeable" onTouchStart={start} onTouchMove={move} onTouchEnd={end} onMouseDown={start} onMouseMove={move} onMouseUp={end}>
-    <button className="dial-arrow" onClick={()=>shift(-1)}>‹</button>
-    <div className="dial-vals">{vals.map((v,i)=>{const cls=colorFn?colorFn(v):"";return(<button key={i} className={`dial-val ${value===v?"sel":""} ${value===v?cls:""}`} onClick={()=>{haptic.light();onChange(v);}}>{format(v)}</button>);})}</div>
-    <button className="dial-arrow" onClick={()=>shift(1)}>›</button>
+
+  return(<div className="dial-wrap">
+    <button className="dial-arrow" onClick={()=>shiftOne(-1)}>‹</button>
+    <div className="dial-scroll" ref={scrollRef} onScroll={onScroll}
+      style={{paddingLeft:`calc(50% - ${DIAL_ITEM_W/2}px)`,paddingRight:`calc(50% - ${DIAL_ITEM_W/2}px)`}}>
+      <div className="dial-center-line"></div>
+      {values.map((v,i)=>{
+        const isSel=v===value;
+        const cls=isSel&&colorFn?colorFn(v):"";
+        return(
+          <div key={i} className={`dial-scroll-item ${isSel?`sel ${cls}`:""}`} style={{width:DIAL_ITEM_W}}
+            onClick={()=>{if(scrollRef.current)scrollRef.current.scrollTo({left:i*DIAL_ITEM_W,behavior:"smooth"});}}>
+            {format(v)}
+          </div>
+        );
+      })}
+    </div>
+    <button className="dial-arrow" onClick={()=>shiftOne(1)}>›</button>
   </div>);
 }
 
@@ -1358,9 +1387,18 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
   const tasksTotal=slotTasks.length;const tasksDone=slotTasks.filter(t=>t.done).length;
   const cleanTotal=data.cleaning.length;const cleanDone=data.cleaning.filter(c=>cleaningIsDoneToday(c,data.cleaningChecks,data.haccpSettings?.resetSoir)).length;
 
+  // Les créneaux du soir (températures ET nettoyage) ne comptent qu'à partir
+  // du moment où ils sont vraiment d'actualité — le service du matin ne peut
+  // pas "manquer" un relevé qui n'est pas encore d'actualité. Même logique
+  // partout où un total/fait est affiché : la pastille d'accès rapide
+  // ci-dessous, la carte de service, et les cartes "à venir" plus bas.
+  const soirRelevant = win.id==="prep_pm"||win.id==="dinner"||win.id==="closing";
+  const tempTotalForRing = soirRelevant ? totalFridges*2 : totalFridges;
+  const tempDoneForRing = soirRelevant ? (matinDone+soirDone) : matinDone;
+
   // Statut de chaque module pour la pastille d'accès rapide : vert = complet
   // (ou rien à faire), rouge = il reste des actions en attente aujourd'hui.
-  const tempComplete = totalFridges===0 || (matinDone+soirDone)>=totalFridges*2;
+  const tempComplete = totalFridges===0 || tempDoneForRing>=tempTotalForRing;
   const tasksComplete = tasksTotal===0 || tasksDone>=tasksTotal;
   const cleanComplete = cleanTotal===0 || cleanDone>=cleanTotal;
   const traceAlerts = data.traceability.filter(t=>t.status!=="ok").length;
@@ -1384,24 +1422,10 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
 
   const allClear=criticalAlerts.length===0&&activeCoolings.length===0&&nowItems.length===0;
 
-  // Carte de service : une vue d'ensemble en un coup d'œil plutôt que de
-  // devoir recomposer mentalement l'état du service à partir de plusieurs
-  // listes séparées plus bas. Regroupe températures + tâches + nettoyage —
-  // les trois seules choses qui ont un total/fait mesurable dans la journée.
   // Mise en place volontairement exclue : ce n'est pas une obligation
   // réglementaire comme les températures ou le nettoyage, juste de
   // l'organisation interne. La mélanger aurait fait baisser artificiellement
   // le pourcentage sur des tâches qui n'ont rien d'obligatoire à finir.
-  //
-  // Les créneaux du soir (températures ET nettoyage) ne comptent qu'à partir
-  // du moment où ils sont vraiment d'actualité — même logique que les cartes
-  // "à venir" plus bas, qui ne signalent le relevé du soir qu'à partir de
-  // la préparation soir. Sans ça, le cercle affichait un plafond de 50%
-  // toute la matinée, avant même que le service du soir ait commencé.
-  const soirRelevant = win.id==="prep_pm"||win.id==="dinner"||win.id==="closing";
-  const tempTotalForRing = soirRelevant ? totalFridges*2 : totalFridges;
-  const tempDoneForRing = soirRelevant ? (matinDone+soirDone) : matinDone;
-
   const globalDone = tempDoneForRing+cleanDone;
   const globalTotal = tempTotalForRing+cleanTotal;
   const globalPct = safePct(globalDone, globalTotal);
@@ -1548,7 +1572,7 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
     <div className="bucket-label" style={{marginTop:18}}><span className="bucket-label-dot" style={{background:T.textMute}}></span>{t("home_quick_access",lang)}</div>
     <div className="tiles">
       <div className="tile" onClick={()=>go("labels")}><div className="tile-icon">🏷️</div><div className="tile-label">{t("home_tile_labeling",lang)}</div><div className="tile-value tabular">{data.labels.length}</div></div>
-      <div className="tile" onClick={()=>go("temps")}><span className="tile-dot" style={{background:tempComplete?T.good:T.bad}}></span><div className="tile-icon">🌡️</div><div className="tile-label">{t("home_tile_temps",lang)}</div><div className="tile-value tabular">{matinDone+soirDone}/{totalFridges*2}</div></div>
+      <div className="tile" onClick={()=>go("temps")}><span className="tile-dot" style={{background:tempComplete?T.good:T.bad}}></span><div className="tile-icon">🌡️</div><div className="tile-label">{t("home_tile_temps",lang)}</div><div className="tile-value tabular">{tempDoneForRing}/{tempTotalForRing}</div></div>
       <div className="tile" onClick={()=>go("trace")}><span className="tile-dot" style={{background:traceComplete?T.good:T.bad}}></span><div className="tile-icon">📦</div><div className="tile-label">{t("home_tile_trace",lang)}</div><div className="tile-value tabular">{data.traceability.length}</div></div>
       <div className="tile" onClick={()=>go("tasks")}><span className="tile-dot" style={{background:tasksComplete?T.good:T.bad}}></span><div className="tile-icon">✅</div><div className="tile-label">{t("home_tasks",lang)}</div><div className="tile-value tabular">{tasksDone}/{tasksTotal}</div></div>
       <div className="tile" onClick={()=>go("clean")}><span className="tile-dot" style={{background:cleanComplete?T.good:T.bad}}></span><div className="tile-icon">🧹</div><div className="tile-label">{t("home_cleaning",lang)}</div><div className="tile-value tabular">{cleanDone}/{cleanTotal}</div></div>
