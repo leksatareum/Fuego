@@ -43,12 +43,134 @@ const sbFetch = async (table, opts={}) => {
     const text = await res.text();
     const data = text ? JSON.parse(text) : null;
     return { data: single && Array.isArray(data) ? data[0] : data, error: null };
-  } catch(e) { return { data: null, error: e.message }; }
+  } catch(e) {
+    // Coupure réseau franche (pas une erreur HTTP) sur une écriture : mise
+    // en attente plutôt que perdue. Les lectures (GET), elles, échouent
+    // normalement — aucun sens à mettre une lecture "en file d'attente".
+    if (isNetworkError(e) && method!=="GET") {
+      return queueOfflineWrite(table, method, body, params, single);
+    }
+    return { data: null, error: e.message };
+  }
 };
 const sbGet    = (table, params="")    => sbFetch(table, { params });
 const sbPost   = (table, body)         => sbFetch(table, { method:"POST", body, single:true });
 const sbPatch  = (table, body, params) => sbFetch(table, { method:"PATCH", body, params });
 const sbDelete = (table, params)       => sbFetch(table, { method:"DELETE", params });
+
+// ─── FILE D'ATTENTE HORS LIGNE ──────────────────────────────────────────────
+// Les cuisines ont souvent un WiFi capricieux. Plutôt que de perdre un
+// relevé pris en plein rush parce que la connexion a coupé une seconde,
+// toute écriture qui échoue pour une vraie coupure réseau (pas une erreur
+// métier renvoyée par le serveur) est mise de côté dans le téléphone, puis
+// renvoyée automatiquement dès que la connexion revient — sans repasser par
+// l'écran d'origine, sans retaper quoi que ce soit.
+const OFFLINE_QUEUE_KEY = "fuego_offline_queue_v1";
+
+function loadOfflineQueue(){
+  try{ return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY)||"[]"); }
+  catch{ return []; }
+}
+function saveOfflineQueue(q){
+  try{ localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(q)); }
+  catch{ /* stockage plein ou indisponible — tant pis, pas bloquant pour autant */ }
+}
+// Mini pub/sub plutôt qu'un contexte React complet : sbFetch est en dehors
+// de l'arbre React, mais doit pouvoir prévenir l'indicateur affiché à
+// l'écran quand la file change.
+const offlineQueueListeners=new Set();
+function notifyOfflineQueueChange(){
+  const q=loadOfflineQueue();
+  offlineQueueListeners.forEach(fn=>fn(q));
+}
+
+// Une vraie coupure réseau (fetch() qui ne peut même pas joindre le
+// serveur) — jamais une erreur HTTP renvoyée PAR le serveur (400, 401...),
+// qu'il ne faut surtout pas mettre en attente indéfiniment : ça ne
+// réussira jamais, quel que soit le nombre de tentatives.
+function isNetworkError(e){ return e instanceof TypeError; }
+
+function queueOfflineWrite(table, method, body, params, single){
+  // Id négatif : ne peut jamais entrer en collision avec un vrai id serveur
+  // (toujours positif), et reste reconnaissable comme "temporaire" si besoin
+  // de déboguer un jour.
+  const tempId = -(Date.now()) - Math.floor(Math.random()*1000);
+  const entry = { table, method, body, params, single, queuedAt:new Date().toISOString() };
+  const q=loadOfflineQueue();
+  q.push(entry);
+  saveOfflineQueue(q);
+  notifyOfflineQueueChange();
+  // Pour un POST, on renvoie un objet "comme si" le serveur avait déjà
+  // répondu, avec cet id temporaire — l'écran d'origine continue donc
+  // normalement (affiche la nouvelle ligne tout de suite) sans qu'il ait
+  // besoin de savoir que ça n'est pas encore vraiment enregistré. Une fois
+  // la synchronisation faite, un rechargement complet remplace l'id
+  // temporaire par le vrai.
+  if(method==="POST"){
+    return { data: { ...(body||{}), id: tempId, created_at: entry.queuedAt }, error: null, queued: true };
+  }
+  return { data: body||null, error: null, queued: true };
+}
+
+let offlineFlushInProgress=false;
+// Rejoue la file dans l'ordre où les écritures ont été faites — s'arrête au
+// premier échec encore lié au réseau (on retentera plus tard), mais ne
+// bloque pas sur une vraie erreur métier renvoyée par le serveur : la
+// garder en boucle indéfiniment ne réglerait rien.
+async function flushOfflineQueue(onSynced){
+  if(offlineFlushInProgress) return;
+  const q=loadOfflineQueue();
+  if(q.length===0) return;
+  offlineFlushInProgress=true;
+  let synced=0;
+  const remaining=[...q];
+  for(const entry of q){
+    const url = `${SUPABASE_URL}/rest/v1/${entry.table}${entry.params||""}`;
+    const headers = {
+      "apikey": SUPABASE_ANON, "Authorization": `Bearer ${SUPABASE_ANON}`,
+      "Content-Type": "application/json",
+      "Prefer": entry.single ? "return=representation,resolution=ignore-duplicates" : "return=representation",
+    };
+    try{
+      await fetch(url, { method: entry.method, headers, body: entry.body ? JSON.stringify(entry.body) : undefined });
+      // Succès ou erreur métier (400, etc.) : dans les deux cas ce n'est
+      // plus une histoire de réseau, on retire de la file pour ne pas
+      // boucler dessus indéfiniment.
+      remaining.shift();
+      synced++;
+    }catch(e){
+      // Toujours hors ligne : on s'arrête ici pour garder l'ordre, on
+      // retentera au prochain signal de reconnexion.
+      break;
+    }
+  }
+  saveOfflineQueue(remaining);
+  notifyOfflineQueueChange();
+  offlineFlushInProgress=false;
+  if(synced>0 && onSynced) onSynced(synced);
+}
+
+// Hook : nombre d'écritures en attente, avec tentative de synchronisation
+// automatique. navigator.onLine n'est pas toujours fiable (dit "en ligne"
+// même quand le vrai serveur est injoignable) — d'où le filet de sécurité
+// avec un essai périodique, pas seulement sur l'évènement "online".
+function useOfflineQueue(onFlushed){
+  const [pending,setPending]=useState(()=>loadOfflineQueue().length);
+  useEffect(()=>{
+    const listener=(q)=>setPending(q.length);
+    offlineQueueListeners.add(listener);
+    function tryFlush(){ flushOfflineQueue(onFlushed); }
+    window.addEventListener("online", tryFlush);
+    const interval=setInterval(tryFlush, 20000);
+    tryFlush();
+    return ()=>{
+      offlineQueueListeners.delete(listener);
+      window.removeEventListener("online", tryFlush);
+      clearInterval(interval);
+    };
+  },[]);
+  return pending;
+}
 
 // ── Notifications push ──────────────────────────────────────────────────────
 // Clé PUBLIQUE VAPID : elle identifie l'expéditeur des notifications (Fuego)
@@ -5887,6 +6009,11 @@ export default function App(){
   },[]);
   useEffect(()=>{reload({force:true});},[]);
 
+  // File d'attente hors ligne : une fois des écritures resynchronisées avec
+  // succès, un rechargement complet remplace les identifiants temporaires
+  // (négatifs) affichés entre-temps par les vraies données du serveur.
+  const offlinePending=useOfflineQueue(()=>{ reload({force:true}); });
+
   // ── Temps réel : re-synchronise les données toutes les 25 s + au retour sur l'app.
   //    (Le client REST n'a pas de websocket ; le polling suffit pour une équipe de cuisine.)
   // ── Reset fin de service : quand on change de période (fin du midi selon
@@ -6056,6 +6183,15 @@ export default function App(){
     <div className="topbar">
       {isRoot?<><div style={{width:36}}></div><div className="topbar-center">{page==="home"?<div className="topbar-logo"><FuegoLogo/></div>:<div className="topbar-title">{TITLES[page]}</div>}</div><button className="topbar-avatar" onClick={()=>setProfile(!profile)}>{user.initials}</button></>:<><button className="topbar-back" onClick={()=>go(backTo)}>‹</button><div className="topbar-center"><div className="topbar-title">{TITLES[page]}</div></div><div style={{width:36}}></div></>}
     </div>
+    {/* Indicateur discret : rien n'est perdu, juste en attente d'une
+        connexion — pas une alerte agressive, la personne peut continuer à
+        travailler normalement. */}
+    {offlinePending>0 && (
+      <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 16px",background:"#2D1208",borderBottom:"1px solid #5A2810",fontSize:12,color:"#FF6B00",fontWeight:600}}>
+        <span style={{width:7,height:7,borderRadius:"50%",background:"#FF6B00",flexShrink:0}}></span>
+        {offlinePending} action{offlinePending>1?"s":""} en attente de connexion — rien n'est perdu, ça enverra automatiquement dès que possible
+      </div>
+    )}
     {profile&&<div className="overlay" onClick={()=>setProfile(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div><div className="profile-avatar">{user.initials}</div><div className="profile-name">{user.name}</div><div className="profile-role">{user.role}</div>
       <div className="center mb14"><span className={`badge ${user.isAdmin?"b-bad":"b-mute"}`}>{user.isAdmin?"Administrateur":"Équipe"}</span></div>
