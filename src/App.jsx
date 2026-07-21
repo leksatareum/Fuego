@@ -16,6 +16,15 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 
 import { SUPABASE_URL, SUPABASE_ANON } from "./config.js";
 import { t, LANGS, dirFor } from "./locales/index.js";
+// Fonctions de calcul extraites et testées séparément (voir logic.test.js) —
+// une seule source de vérité pour les dates de service, la fenêtre en cours,
+// et la conformité d'un refroidissement, plutôt que des copies qui peuvent
+// diverger d'un endroit à l'autre du fichier.
+import {
+  clamp, safePct, isoDate,
+  serviceISODate, serviceDateStr, getServiceWindow,
+  cleaningIsDoneToday, coolingConformity, groupRegistreEvents,
+} from "./logic.js";
 // Client REST Supabase léger — pas besoin du SDK
 const sbFetch = async (table, opts={}) => {
   if (!SUPABASE_URL || SUPABASE_URL.includes("REMPLACE")) return { data: null, error: "not_configured" };
@@ -314,7 +323,7 @@ const DB = {
   // horodatage), pas sur la date affichée qui n'a pas d'année.
   async fetchRegistrePeriod(fromISO,toISO){
     const range=`created_at=gte.${fromISO}&created_at=lt.${toISO}`;
-    const [rec,cool,reheat,oilTests,pests,fr,trace,cleanChecks]=await Promise.all([
+    const results=await Promise.all([
       sbGet("reception",   `?${range}&${q.select()}`),
       sbGet("cooling",     `?${range}&${q.select()}`),
       sbGet("reheating",   `?${range}&${q.select()}`),
@@ -324,6 +333,13 @@ const DB = {
       sbGet("traceability",`?${range}&${q.select("id,product,emoji,supplier,lot,dlc,qty,allergenes,status,created_at")}`),
       sbGet("cleaning_checks", `?date=gte.${fromISO.slice(0,10)}&date=lt.${toISO.slice(0,10)}&${q.select()}`),
     ]);
+    // Sans ce contrôle, un échec réseau réel (pas seulement le mode démo)
+    // produisait silencieusement un rapport vide ("0 événement") plutôt que
+    // de prévenir clairement — risqué pour un document destiné à un
+    // contrôle sanitaire, où "rien à signaler" et "on n'a pas pu vérifier"
+    // ne doivent jamais se ressembler.
+    if(results.every(r=>r?.error)) return {error:results[0].error};
+    const [rec,cool,reheat,oilTests,pests,fr,trace,cleanChecks]=results;
     // Même mapping que loadAll(), pour que buildRegistreEvents() puisse
     // traiter ces lignes exactement comme les données déjà en mémoire.
     return {
@@ -1152,16 +1168,7 @@ haptic.success=()=>haptic(25);   // succès (enregistrement, clôture)
 haptic.error=()=>{try{if(navigator.vibrate)navigator.vibrate([30,40,30]);}catch{}}; // motif d'erreur distinct
 // Même principe que serviceISODate, mais au format "JJ/MM" (todayStr()) —
 // c'est celui qu'utilisent les relevés de température, pas le format ISO.
-// Sans ça, un relevé du soir pris juste avant minuit redevenait "d'hier" à
-// minuit pile, faisant croire que le frigo n'avait pas été contrôlé alors
-// que le service du soir n'était pas terminé.
-function serviceDateStr(resetSoir){
-  const RESET_SOIR = Math.min(resetSoir ?? (3*60), 9*60);
-  const n=new Date(); const mins=n.getHours()*60+n.getMinutes();
-  const d=new Date(n);
-  if(mins<RESET_SOIR) d.setDate(d.getDate()-1);
-  return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
-}
+// (Fonction elle-même importée de logic.js, testée séparément.)
 
 const todayStr=()=>new Date().toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
 const nowTime=()=>new Date().toTimeString().slice(0,5);
@@ -1176,8 +1183,7 @@ function tempCenter(target){if(target==="-18")return -18;const[lo,hi]=target.spl
 // terminé. data contient déjà haccpSettings.resetSoir : aucun appelant n'a
 // besoin d'être modifié pour bénéficier de la correction.
 function getReleve(data,fridgeId,period,date){return data.fridgeReleves.find(r=>r.fridgeId===fridgeId&&r.period===period&&r.date===(date||serviceDateStr(data?.haccpSettings?.resetSoir)));}
-const clamp=(n,min=0,max=100)=>Math.max(min,Math.min(max,Number.isFinite(n)?n:min));
-const safePct=(done,total)=>total>0?clamp((done/total)*100):0;
+
 const safeNum=(v,fallback=0)=>{const n=Number(v);return Number.isFinite(n)?n:fallback;};
 // Convertit une quantité (qty, unit) vers l'unité d'achat du produit (kg, L, pce) pour calculer le coût.
 // ex: 300 g d'un produit acheté au kg → 0.3 kg × prix/kg
@@ -1193,22 +1199,8 @@ function recipeCostPerPortion(recipe,allRecipes){const total=recipeTotalCost(rec
 function recipeMargin(recipe,allRecipes){if(recipe.type!=="plat")return null;const price=safeNum(recipe.price,0);if(price<=0)return 0;const cost=recipeCostPerPortion(recipe,allRecipes);return Math.round(((price-cost)/price)*100);}
 function recipeAllergens(recipe,allRecipes){const set=new Set(recipe.allergens||[]);recipe.components.forEach(c=>{if(c.kind==="subrecipe"){const sub=allRecipes.find(r=>r.id===c.subrecipeId);if(sub)recipeAllergens(sub,allRecipes).forEach(a=>set.add(a));}});return[...set];}
 function findUsedIn(recipeId,allRecipes){return allRecipes.filter(r=>r.components.some(c=>c.kind==="subrecipe"&&c.subrecipeId===recipeId));}
-// Les horaires de service suivent maintenant le réglage réel (Paramètres →
-// Horaires de service, resetMidi), pas une heure fixe codée en dur — sinon
-// "préparation soir" démarrait à 15h pour tout le monde, sans lien avec
-// l'heure de bascule que chaque restaurant règle vraiment.
-function getServiceWindow(resetMidiMinutes){
-  const now=new Date();
-  const mins=now.getHours()*60+now.getMinutes();
-  // Plafonné à 17h59 : si jamais réglé après 18h, "préparation soir" doit
-  // quand même garder une fenêtre avant le début du service du soir.
-  const RESET_MIDI = Math.min(resetMidiMinutes ?? (16*60+30), 17*60+59);
-  if(mins>=7*60 && mins<11*60) return {id:"morning",label:"Ouverture",icon:"☀️"};
-  if(mins>=11*60 && mins<RESET_MIDI) return {id:"lunch",label:"Service midi",icon:"🍽️"};
-  if(mins>=RESET_MIDI && mins<18*60) return {id:"prep_pm",label:"Préparation soir",icon:"🔧"};
-  if(mins>=18*60 && mins<23*60) return {id:"dinner",label:"Service soir",icon:"🌙"};
-  return {id:"closing",label:"Clôture",icon:"🌃"};
-}
+// Les horaires de service suivent le réglage réel (Paramètres → Horaires de
+// service, resetMidi) — fonction importée de logic.js, testée séparément.
 
 // ─── FUEGO LOGO COMPONENTS ────────────────────────────────────────────────────
 function FuegoFlame({size=32}) {
@@ -1690,40 +1682,9 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Convertit "JJ/MM" (format utilisé partout dans l'app) en objet Date de l'année en cours
-// Date "de service" plutôt que date calendaire brute : entre minuit et
-// l'horaire réel de bascule (Paramètres → Horaires de service), on est
-// encore sur le service du soir de la veille. Sans ça, minuit faisait
-// réapparaître le nettoyage du soir comme "à faire" des heures avant la
-// vraie fin de service — même logique que celle déjà utilisée pour calculer
-// le créneau en cours dans Mise en place.
-function serviceISODate(resetSoir){
-  // Filet de sécurité : si une valeur incorrecte (ex. proche de minuit)
-  // existait déjà quelque part, on la ramène dans une plage sensée plutôt
-  // que de laisser le calcul du jour se casser silencieusement.
-  const RESET_SOIR = Math.min(resetSoir ?? (3*60), 9*60);
-  const n=new Date(); const mins=n.getHours()*60+n.getMinutes();
-  const d=new Date(n);
-  if(mins<RESET_SOIR) d.setDate(d.getDate()-1);
-  return isoDate(d);
-}
-
-// Une zone est-elle faite AUJOURD'HUI (au sens du service, pas du calendrier) ?
-// Fonction partagée, utilisée partout dans l'app (accueil, menu HACCP,
-// pastille de l'icône, écran Nettoyage) — une seule source de vérité, pour
-// ne plus jamais désynchroniser un compteur par rapport à un autre. Pour le
-// quotidien, matin ET soir sont nécessaires (l'ancienne case "done" ne
-// représente plus cet état depuis le passage au double créneau) ; pour les
-// autres fréquences, la case reste la référence.
-function cleaningIsDoneToday(c, cleaningChecks, resetSoir){
-  if(c.freq==="Quotidien"){
-    const today=serviceISODate(resetSoir);
-    const checks=cleaningChecks||[];
-    const hasMatin=checks.some(x=>x.cleaningId===c.id&&x.date===today&&x.period==="matin");
-    const hasSoir=checks.some(x=>x.cleaningId===c.id&&x.date===today&&x.period==="soir");
-    return hasMatin&&hasSoir;
-  }
-  return !!c.done;
-}
+// serviceISODate et cleaningIsDoneToday : importées de logic.js, testées
+// séparément — une seule source de vérité pour la date de service et l'état
+// "fait aujourd'hui" d'une zone de nettoyage, utilisées dans toute l'app.
 
 function parseAppDate(dstr){
   if(!dstr) return null;
@@ -1814,42 +1775,25 @@ function buildRegistreEvents(data){
   return ev;
 }
 
-// Regroupement à trois niveaux du registre — catégorie réglementaire, puis
-// module, puis jour. Reprend exactement les 3 mêmes groupes que le menu
-// HACCP (déjà calé sur la structure du GBPH), pour que la logique soit
-// familière et corresponde à la façon dont un contrôleur DDPP parcourt
-// habituellement un dossier : "montrez-moi vos températures", puis
-// jour par jour à l'intérieur.
-const REGISTRE_CATEGORIES = [
-  {name:"Contrôles quotidiens", icon:"🌡️", modules:["Températures","Réception","Refroidissement","Remise en température","Huiles"]},
-  {name:"Traçabilité", icon:"📦", modules:["Traçabilité"]},
-  {name:"Hygiène et nettoyage", icon:"🧹", modules:["Nettoyage","Nuisibles"]},
-];
-
-function groupRegistreEvents(events){
-  return REGISTRE_CATEGORIES.map(cat=>{
-    const catEvents=events.filter(e=>cat.modules.includes(e.module));
-    if(catEvents.length===0) return null;
-    const modules=cat.modules.map(modName=>{
-      const modEvents=catEvents.filter(e=>e.module===modName);
-      if(modEvents.length===0) return null;
-      const byDate={};
-      modEvents.forEach(e=>{ (byDate[e.date]=byDate[e.date]||[]).push(e); });
-      const dateKeys=Object.keys(byDate).sort((a,b)=>{
-        const evA=byDate[a][0],evB=byDate[b][0];
-        return (evB.ts?.getTime()||0)-(evA.ts?.getTime()||0);
-      });
-      return {module:modName, count:modEvents.length, dates:dateKeys.map(d=>({date:d,events:byDate[d]}))};
-    }).filter(Boolean);
-    return {category:cat.name, icon:cat.icon, count:catEvents.length, modules};
-  }).filter(Boolean);
-}
+// REGISTRE_CATEGORIES et groupRegistreEvents : importées de logic.js,
+// testées séparément — le regroupement à trois niveaux (catégorie
+// réglementaire → module → jour) du Registre HACCP.
 
 function Registre({data,db}){
   const[period,setPeriod]=useState("7j"); // 7j | 30j | mois | archives
   const[moduleFilter,setModuleFilter]=useState("tous");
   const[statusFilter,setStatusFilter]=useState("tous");
   const[showExport,setShowExport]=useState(false);
+  // Mode "préparer un contrôle" : un dossier complet sur une période choisie
+  // librement (plusieurs mois, pas juste 7j/30j/mois), avec une page de
+  // garde et un sommaire — pour le jour où un inspecteur passe vraiment,
+  // plutôt que d'assembler plusieurs exports période par période.
+  const[showControlMode,setShowControlMode]=useState(false);
+  const today=new Date();
+  const sixMonthsAgo=new Date();sixMonthsAgo.setMonth(sixMonthsAgo.getMonth()-6);
+  const[controlFrom,setControlFrom]=useState(isoDate(sixMonthsAgo));
+  const[controlTo,setControlTo]=useState(isoDate(today));
+  const[controlBusy,setControlBusy]=useState(false);
   // Navigation en profondeur (catégorie → module → jour), un seul niveau
   // affiché à la fois — plutôt que trois menus imbriqués les uns dans les
   // autres, qui donnaient un long déroulant confus où on perdait le fil de
@@ -1957,7 +1901,8 @@ function Registre({data,db}){
         {value:"tous",label:"Tous"},{value:"good",label:"✓ Conformes"},{value:"bad",label:"⚠ Non-conformités"},
       ]}/>
 
-      <button className="btn btn-ghost mt14 mb14" onClick={()=>setShowExport(true)}>📄 Exporter en PDF</button>
+      <button className="btn btn-ghost mt14" onClick={()=>setShowExport(true)}>📄 Exporter en PDF</button>
+      <button className="btn btn-ghost mb14" onClick={()=>setShowControlMode(true)}>🔍 Préparer un contrôle</button>
 
       {/* Navigation en profondeur : un seul niveau affiché à la fois. Tape
           une catégorie → ses modules ; tape un module → ses jours ; tape un
@@ -2116,6 +2061,42 @@ function Registre({data,db}){
         </div>
       </div>
     )}
+
+    {showControlMode&&(
+      <div className="overlay" onClick={()=>!controlBusy&&setShowControlMode(false)}>
+        <div className="sheet" onClick={e=>e.stopPropagation()}>
+          <div className="sheet-handle"></div>
+          <div className="sheet-title">🔍 Préparer un contrôle</div>
+          <div className="text-sm text-dim mb14" style={{lineHeight:1.6}}>
+            Un dossier complet sur la période de ton choix — page de garde, sommaire par catégorie, puis le détail jour par jour. Peut couvrir plusieurs mois d'un coup, contrairement à l'export classique.
+          </div>
+          <div className="row gap8 mb14">
+            <div style={{flex:1}}><label className="label">Du</label><input className="input input-sm" type="date" value={controlFrom} onChange={e=>setControlFrom(e.target.value)}/></div>
+            <div style={{flex:1}}><label className="label">Au</label><input className="input input-sm" type="date" value={controlTo} onChange={e=>setControlTo(e.target.value)}/></div>
+          </div>
+          <button className="btn btn-primary mb8" disabled={controlBusy} onClick={async()=>{
+            setControlBusy(true);
+            const fromISO=new Date(controlFrom+"T00:00:00").toISOString();
+            const toISO=new Date(controlTo+"T23:59:59").toISOString();
+            const res=await db.fetchRegistrePeriod(fromISO,toISO);
+            setControlBusy(false);
+            if(!res||res.error){ alert("Le dossier n'a pas pu être préparé. Vérifie la connexion Supabase."); return; }
+            // oils (config des friteuses) n'est pas re-demandé par
+            // fetchRegistrePeriod — on complète avec ce qui est déjà en
+            // mémoire pour que les noms de friteuse se résolvent bien.
+            const mergedData={...data,...res,oils:data.oils};
+            const events=buildRegistreEvents(mergedData);
+            exportControlPDF(events,{
+              fromLabel:new Date(controlFrom).toLocaleDateString("fr-FR",{day:"2-digit",month:"long",year:"numeric"}),
+              toLabel:new Date(controlTo).toLocaleDateString("fr-FR",{day:"2-digit",month:"long",year:"numeric"}),
+              restaurant:data.restaurant,
+            });
+            setShowControlMode(false);
+          }}>{controlBusy?"Préparation…":"📁 Générer le dossier"}</button>
+          <button className="btn btn-ghost" onClick={()=>setShowControlMode(false)} disabled={controlBusy}>Annuler</button>
+        </div>
+      </div>
+    )}
   </div>);
 }
 
@@ -2191,6 +2172,121 @@ function exportRegistrePDF(events,{period,moduleFilter}){
       <div class="stat"><b style="color:#2a7d3f">${events.filter(e=>e.status==="good").length}</b>Conformes</div>
       <div class="stat"><b style="color:#c0392b">${events.filter(e=>e.status==="bad").length}</b>Non-conformités</div>
     </div>
+    ${sections}
+    <div class="footer">Document généré automatiquement par Fuego · Plan de Maîtrise Sanitaire</div>
+    </div>
+  </body></html>`);
+  w.document.close();
+  setTimeout(()=>{ w.focus(); w.print(); }, 400);
+}
+
+// Dossier complet pour un contrôle sanitaire — même hiérarchie que
+// exportRegistrePDF, mais avec une page de garde (établissement, période,
+// synthèse) et un sommaire par catégorie avant le détail. Pensé pour
+// couvrir plusieurs mois d'un coup, assemblés en un seul document propre,
+// plutôt que d'imprimer période par période le jour où un inspecteur passe.
+function exportControlPDF(events,{fromLabel,toLabel,restaurant}){
+  const w=window.open("","_blank");
+  if(!w){ alert("Autorisez les pop-ups pour exporter"); return; }
+  const tree=groupRegistreEvents(events);
+  const nbGood=events.filter(e=>e.status==="good").length;
+  const nbBad=events.filter(e=>e.status==="bad").length;
+
+  const sommaire=tree.map(cat=>`
+    <div class="som-row"><span>${cat.icon} ${cat.category}</span><span class="som-count">${cat.count} événement${cat.count>1?"s":""}</span></div>
+    ${cat.modules.map(mod=>`<div class="som-subrow">${mod.module} — ${mod.count}</div>`).join("")}
+  `).join("");
+
+  const sections=tree.map(cat=>`
+    <div class="category">
+      <div class="cathead">${cat.icon} ${cat.category} <span class="count">${cat.count}</span></div>
+      ${cat.modules.map(mod=>`
+        <div class="module">
+          <div class="modhead">${mod.module} <span class="count">${mod.count}</span></div>
+          ${mod.dates.map(d=>`
+            <div class="daygroup">
+              <div class="dayhead">${d.date}</div>
+              ${d.events.map(e=>`
+                <div class="row">
+                  <div class="col-icon">${e.status==="bad"?"⚠":"✓"}</div>
+                  <div class="col-main"><b>${e.title}</b><br/><span class="muted">${e.detail}</span></div>
+                  <div class="col-op">${e.operator}</div>
+                </div>`).join("")}
+            </div>`).join("")}
+        </div>`).join("")}
+    </div>`).join("");
+
+  w.document.write(`<html><head><title>Dossier de contrôle HACCP — Fuego</title><style>
+    @page{margin:14mm;}
+    *{box-sizing:border-box;}
+    body{font-family:Arial,Helvetica,sans-serif;color:#111;font-size:10pt;margin:0;}
+    .closebar{position:sticky;top:0;background:#090909;padding:12px 16px;display:flex;align-items:center;gap:10px;z-index:10;}
+    .closebar button{background:linear-gradient(135deg,#FF6B00,#E8390A);color:#fff;border:none;border-radius:10px;padding:10px 18px;font-size:14px;font-weight:700;font-family:Arial,sans-serif;}
+    .closebar span{color:#999;font-size:12px;font-family:Arial,sans-serif;}
+    .pagebody{padding:14mm;}
+    @media print{ .closebar{display:none;} .pagebody{padding:0;} .cover{page-break-after:always;} }
+    .cover{min-height:240mm;display:flex;flex-direction:column;justify-content:center;text-align:center;}
+    .cover .brand{font-weight:900;font-size:28pt;letter-spacing:4px;margin-bottom:6px;}
+    .cover .brand span{color:#E8390A;}
+    .cover h1{font-size:20pt;margin:20px 0 6px;}
+    .cover .sub{color:#555;font-size:11pt;margin-bottom:30px;}
+    .cover-card{border:1px solid #ddd;border-radius:8px;padding:20px;max-width:400px;margin:0 auto 20px;text-align:left;}
+    .cover-card div{padding:4px 0;font-size:10pt;}
+    .cover-card b{display:inline-block;width:130px;color:#555;font-weight:normal;}
+    .cover-summary{display:flex;gap:16px;max-width:400px;margin:0 auto;}
+    .cover-stat{flex:1;border:1px solid #ddd;border-radius:6px;padding:10px;text-align:center;}
+    .cover-stat b{font-size:18pt;display:block;}
+    .sommaire{page-break-after:always;padding-top:10mm;}
+    .sommaire h2{border-bottom:3px solid #E8390A;padding-bottom:8px;margin-bottom:16px;}
+    .som-row{display:flex;justify-content:space-between;font-weight:bold;font-size:11pt;margin-top:14px;padding-bottom:4px;border-bottom:1px solid #ccc;}
+    .som-count{color:#666;font-weight:normal;font-size:9.5pt;}
+    .som-subrow{padding:3px 0 3px 16px;font-size:9.5pt;color:#444;}
+    .header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #E8390A;padding-bottom:10px;margin-bottom:16px;}
+    .brand{font-weight:900;font-size:20pt;letter-spacing:3px;}
+    .brand span{color:#E8390A;}
+    .meta{text-align:right;font-size:9pt;color:#555;}
+    .category{margin-bottom:22px;page-break-inside:avoid;}
+    .cathead{font-weight:900;font-size:13pt;background:#E8390A;color:#fff;padding:7px 10px;border-radius:5px;margin-bottom:8px;}
+    .module{margin-bottom:12px;margin-left:6px;}
+    .modhead{font-weight:bold;font-size:10.5pt;color:#333;border-bottom:2px solid #ddd;padding-bottom:3px;margin-bottom:6px;}
+    .count{font-weight:400;opacity:.75;font-size:9pt;}
+    .daygroup{margin-bottom:10px;margin-left:6px;page-break-inside:avoid;}
+    .dayhead{font-weight:bold;font-size:9.5pt;background:#f2f2f2;padding:4px 8px;border-radius:4px;margin-bottom:3px;}
+    .row{display:grid;grid-template-columns:20px 1fr 110px;gap:8px;padding:5px 8px;border-bottom:1px solid #eee;align-items:center;font-size:9pt;}
+    .col-icon{text-align:center;}
+    .col-op{color:#666;font-size:8pt;text-align:right;}
+    .muted{color:#666;font-size:8.5pt;}
+    .footer{margin-top:24px;padding-top:10px;border-top:1px solid #ddd;font-size:8pt;color:#888;text-align:center;}
+  </style></head><body>
+    <div class="closebar">
+      <button onclick="window.close()">← Retour à Fuego</button>
+      <span>Si le bouton ne fonctionne pas, ferme cet onglet manuellement.</span>
+    </div>
+    <div class="pagebody">
+
+    <div class="cover">
+      <div class="brand">FUEG<span>O</span></div>
+      <h1>Dossier de contrôle HACCP</h1>
+      <div class="sub">Période du ${fromLabel} au ${toLabel}</div>
+      <div class="cover-card">
+        <div><b>Établissement</b> ${restaurant?.name||"—"}</div>
+        <div><b>Adresse</b> ${restaurant?.address||"—"}</div>
+        <div><b>Téléphone</b> ${restaurant?.phone||"—"}</div>
+        <div><b>SIRET</b> ${restaurant?.siret||"—"}</div>
+        <div><b>Généré le</b> ${todayStr()} à ${nowTime()}</div>
+      </div>
+      <div class="cover-summary">
+        <div class="cover-stat"><b>${events.length}</b>Événements</div>
+        <div class="cover-stat"><b style="color:#2a7d3f">${nbGood}</b>Conformes</div>
+        <div class="cover-stat"><b style="color:#c0392b">${nbBad}</b>Non-conformités</div>
+      </div>
+    </div>
+
+    <div class="sommaire">
+      <h2>Sommaire</h2>
+      ${sommaire}
+    </div>
+
     ${sections}
     <div class="footer">Document généré automatiquement par Fuego · Plan de Maîtrise Sanitaire</div>
     </div>
@@ -2718,7 +2814,7 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite,lang}){
     }
     setStartMs(Date.now());setElapsed(0);setStep(2);
   }
-  async function finish(){const dur=Math.floor(elapsed/60);const conform=mode==="surgel"?(endTemp<=-18):(dur<=maxMin&&endTemp<=10);const status=conform?"ok":"alert";
+  async function finish(){const dur=Math.floor(elapsed/60);const status=coolingConformity(mode,dur,endTemp,maxMin);
     const dlc=M.dlcMonths
       ? (()=>{const d=new Date();d.setMonth(d.getMonth()+M.dlcMonths);return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"2-digit"});})()
       : new Date(Date.now()+data.haccpSettings.labelDlcDefault*86400000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
@@ -2737,8 +2833,7 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite,lang}){
     if(!manualForm.product.trim()||manualBusy)return;
     const mm=CELL_MODES[manualForm.mode];
     const dur=Number(manualForm.duration)||0;
-    const conform=manualForm.mode==="surgel"?(manualForm.endTemp<=-18):(dur<=maxMin&&manualForm.endTemp<=10);
-    const status=conform?"ok":"alert";
+    const status=coolingConformity(manualForm.mode,dur,manualForm.endTemp,maxMin);
     const dlc=mm.dlcMonths
       ? (()=>{const d=new Date();d.setMonth(d.getMonth()+mm.dlcMonths);return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"2-digit"});})()
       : new Date(Date.now()+data.haccpSettings.labelDlcDefault*86400000).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
@@ -4507,7 +4602,6 @@ function Margins({data}){
 // qui convertit en UTC : en France (UTC+1/+2), une saisie faite à 1h du matin
 // se retrouvait rangée à la date de la veille — précisément le créneau du
 // service du soir qui traverse minuit.
-const isoDate=(d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 function mondayOf(d){const x=new Date(d);const wd=(x.getDay()+6)%7;x.setDate(x.getDate()-wd);x.setHours(0,0,0,0);return x;}
 // Ligne de créneau planning : tap = modifier (admin), appui long =
 // supprimer (admin). Remplace le swipe pour uniformiser avec le reste de
