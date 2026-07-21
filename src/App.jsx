@@ -500,6 +500,7 @@ const T = {
   info:"#5A8FB5", infoBg:"#0E1C28",
 };
 
+const DIAL_ITEM_W=60; // largeur fixe de chaque valeur du sélecteur à roulette, utilisée à la fois ici (CSS) et dans le calcul de position en JS
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
   :root{
@@ -680,7 +681,7 @@ const S = `
   .dial-scroll-item.sel.good{color:${T.good};}
   .dial-scroll-item.sel.warn{color:${T.warn};}
   .dial-scroll-item.sel.bad{color:${T.bad};}
-  .dial-center-line{position:absolute;top:6px;bottom:6px;left:50%;width:1px;background:${T.border};pointer-events:none;}
+  .dial-center-frame{position:absolute;top:5px;bottom:5px;left:50%;width:${DIAL_ITEM_W+10}px;transform:translateX(-50%);border:2px solid ${T.accent};border-radius:9px;pointer-events:none;background:rgba(255,107,0,.07);}
 
   .binary{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
   .binary-btn{height:46px;border-radius:10px;border:1.5px solid ${T.border};background:${T.bg2};color:${T.textDim};font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;transition:all var(--dur-fast);}
@@ -836,7 +837,6 @@ function useSaveToast(){
   return {ping,node};
 }
 
-const DIAL_ITEM_W=60; // largeur fixe de chaque valeur, sert aussi au calcul de position
 function TapDial({value,onChange,center,step=1,colorFn,format=(v)=>`${v}°`}){
   // ±120 pas autour du centre — largement assez pour toutes les plages
   // utilisées dans l'app (températures, %, minutes), sans avoir à adapter
@@ -941,7 +941,7 @@ function TapDial({value,onChange,center,step=1,colorFn,format=(v)=>`${v}°`}){
     <div className="dial-scroll"
       onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd}
       onMouseDown={onStart} onMouseMove={e=>{if(dragging.current)onMove(e);}} onMouseUp={onEnd} onMouseLeave={()=>{if(dragging.current)onEnd();}}>
-      <div className="dial-center-line"></div>
+      <div className="dial-center-frame"></div>
       <div ref={trackRef} className="dial-track">
         {values.map((v,i)=>{
           const isSel=i===centerIndex;
@@ -1183,7 +1183,22 @@ function recipeCostPerPortion(recipe,allRecipes){const total=recipeTotalCost(rec
 function recipeMargin(recipe,allRecipes){if(recipe.type!=="plat")return null;const price=safeNum(recipe.price,0);if(price<=0)return 0;const cost=recipeCostPerPortion(recipe,allRecipes);return Math.round(((price-cost)/price)*100);}
 function recipeAllergens(recipe,allRecipes){const set=new Set(recipe.allergens||[]);recipe.components.forEach(c=>{if(c.kind==="subrecipe"){const sub=allRecipes.find(r=>r.id===c.subrecipeId);if(sub)recipeAllergens(sub,allRecipes).forEach(a=>set.add(a));}});return[...set];}
 function findUsedIn(recipeId,allRecipes){return allRecipes.filter(r=>r.components.some(c=>c.kind==="subrecipe"&&c.subrecipeId===recipeId));}
-function getServiceWindow(){const h=new Date().getHours();if(h>=7&&h<11)return{id:"morning",label:"Ouverture",icon:"☀️"};if(h>=11&&h<15)return{id:"lunch",label:"Service midi",icon:"🍽️"};if(h>=15&&h<18)return{id:"prep_pm",label:"Préparation soir",icon:"🔧"};if(h>=18&&h<23)return{id:"dinner",label:"Service soir",icon:"🌙"};return{id:"closing",label:"Clôture",icon:"🌃"};}
+// Les horaires de service suivent maintenant le réglage réel (Paramètres →
+// Horaires de service, resetMidi), pas une heure fixe codée en dur — sinon
+// "préparation soir" démarrait à 15h pour tout le monde, sans lien avec
+// l'heure de bascule que chaque restaurant règle vraiment.
+function getServiceWindow(resetMidiMinutes){
+  const now=new Date();
+  const mins=now.getHours()*60+now.getMinutes();
+  // Plafonné à 17h59 : si jamais réglé après 18h, "préparation soir" doit
+  // quand même garder une fenêtre avant le début du service du soir.
+  const RESET_MIDI = Math.min(resetMidiMinutes ?? (16*60+30), 17*60+59);
+  if(mins>=7*60 && mins<11*60) return {id:"morning",label:"Ouverture",icon:"☀️"};
+  if(mins>=11*60 && mins<RESET_MIDI) return {id:"lunch",label:"Service midi",icon:"🍽️"};
+  if(mins>=RESET_MIDI && mins<18*60) return {id:"prep_pm",label:"Préparation soir",icon:"🔧"};
+  if(mins>=18*60 && mins<23*60) return {id:"dinner",label:"Service soir",icon:"🌙"};
+  return {id:"closing",label:"Clôture",icon:"🌃"};
+}
 
 // ─── FUEGO LOGO COMPONENTS ────────────────────────────────────────────────────
 function FuegoFlame({size=32}) {
@@ -1417,7 +1432,7 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
   const[showMissing,setShowMissing]=useState(false);
   const h=new Date().getHours();const greeting=h<12?t("home_greeting_morning",lang):h<18?t("home_greeting_afternoon",lang):t("home_greeting_evening",lang);
   const today=new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"});
-  const win=getServiceWindow();
+  const win=getServiceWindow(data.haccpSettings?.resetMidi);
   const fridgesOutOfNorm=data.haccpSettings.fridgeTargets.filter(f=>{const m=getReleve(data,f.id,"matin"),s=getReleve(data,f.id,"soir");return(m&&tempStatus(m.temp,f.target)==="bad")||(s&&tempStatus(s.temp,f.target)==="bad");});
   const expiredProducts=data.traceability.filter(t=>t.status==="expired");
   const activeCoolings=data.cooling.filter(c=>c.status==="active"&&c.startedMs);
@@ -1444,7 +1459,6 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
   })();
   const slotTasks=data.tasks.filter(t=>t.date===homeSlot.date&&(t.service||"midi")===homeSlot.service);
   const tasksTotal=slotTasks.length;const tasksDone=slotTasks.filter(t=>t.done).length;
-  const cleanTotal=data.cleaning.length;const cleanDone=data.cleaning.filter(c=>cleaningIsDoneToday(c,data.cleaningChecks,data.haccpSettings?.resetSoir)).length;
 
   // Les créneaux du soir (températures ET nettoyage) ne comptent qu'à partir
   // du moment où ils sont vraiment d'actualité — le service du matin ne peut
@@ -1452,6 +1466,29 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
   // partout où un total/fait est affiché : la pastille d'accès rapide
   // ci-dessous, la carte de service, et les cartes "à venir" plus bas.
   const soirRelevant = win.id==="prep_pm"||win.id==="dinner"||win.id==="closing";
+
+  // Nettoyage : un seul calcul, réutilisé pour le pourcentage ET pour la
+  // liste "ce qui manque" plus bas — avant, les deux avaient chacun leur
+  // propre logique et pouvaient se désynchroniser (le pourcentage exigeait
+  // toujours matin+soir via cleaningIsDoneToday, la liste "manquant" avait
+  // déjà été corrigée pour respecter le rythme du service). Résultat vu en
+  // vrai : "23/38, rien ne manque" — contradictoire. Plus possible
+  // maintenant que les deux sortent de la même source.
+  let cleanTotal=0, cleanDone=0;
+  data.cleaning.forEach(c=>{
+    if(c.freq==="Quotidien"){
+      const todayISO=serviceISODate(data.haccpSettings?.resetSoir);
+      const checks=data.cleaningChecks||[];
+      const hasMatin=checks.some(x=>x.cleaningId===c.id&&x.date===todayISO&&x.period==="matin");
+      const hasSoir=checks.some(x=>x.cleaningId===c.id&&x.date===todayISO&&x.period==="soir");
+      cleanTotal += soirRelevant?2:1;
+      cleanDone += (hasMatin?1:0) + (soirRelevant&&hasSoir?1:0);
+    }else{
+      cleanTotal += 1;
+      cleanDone += cleaningIsDoneToday(c,data.cleaningChecks,data.haccpSettings?.resetSoir) ? 1 : 0;
+    }
+  });
+
   const tempTotalForRing = soirRelevant ? totalFridges*2 : totalFridges;
   const tempDoneForRing = soirRelevant ? (matinDone+soirDone) : matinDone;
 
@@ -1494,23 +1531,12 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
   // ligne (qui devenait vite très longue avec plusieurs frigos et zones) :
   // "3 relevés de température à faire", "5 nettoyages à faire" — un tap sur
   // chaque ligne emmène directement au bon écran pour s'en occuper.
-  let tempMissing=0, cleanMissing=0;
-  data.haccpSettings.fridgeTargets.forEach(f=>{
-    if(!getReleve(data,f.id,"matin")) tempMissing++;
-    if(soirRelevant && !getReleve(data,f.id,"soir")) tempMissing++;
-  });
-  data.cleaning.forEach(c=>{
-    if(c.freq==="Quotidien"){
-      const todayISO=serviceISODate(data.haccpSettings?.resetSoir);
-      const checks=data.cleaningChecks||[];
-      const hasMatin=checks.some(x=>x.cleaningId===c.id&&x.date===todayISO&&x.period==="matin");
-      const hasSoir=checks.some(x=>x.cleaningId===c.id&&x.date===todayISO&&x.period==="soir");
-      if(!hasMatin) cleanMissing++;
-      if(soirRelevant && !hasSoir) cleanMissing++;
-    }else if(!cleaningIsDoneToday(c,data.cleaningChecks,data.haccpSettings?.resetSoir)){
-      cleanMissing++;
-    }
-  });
+  //
+  // Dérivé directement des mêmes totaux que la carte de service (au lieu
+  // d'un calcul séparé) : les deux ne peuvent plus jamais raconter des
+  // histoires différentes, par construction.
+  const tempMissing = tempTotalForRing - tempDoneForRing;
+  const cleanMissing = cleanTotal - cleanDone;
   const missingItems=[];
   if(tempMissing>0) missingItems.push({icon:"🌡️",label:`${tempMissing} relevé${tempMissing>1?"s":""} de température à faire`,goto:"temps"});
   if(cleanMissing>0) missingItems.push({icon:"🧹",label:`${cleanMissing} nettoyage${cleanMissing>1?"s":""} à faire`,goto:"clean"});
@@ -5690,7 +5716,7 @@ export default function App(){
     // (températures ET nettoyage) ne compte comme "manquant" qu'à partir de
     // la préparation soir — sinon la pastille comptait déjà le soir comme en
     // retard dès le matin, gonflant le chiffre pour rien.
-    const win = getServiceWindow();
+    const win = getServiceWindow(data.haccpSettings?.resetMidi);
     const soirRelevant = win.id==="prep_pm"||win.id==="dinner"||win.id==="closing";
 
     const fridges = s?.fridgeTargets || [];
@@ -5759,8 +5785,9 @@ export default function App(){
 
   // ── Temps réel : re-synchronise les données toutes les 25 s + au retour sur l'app.
   //    (Le client REST n'a pas de websocket ; le polling suffit pour une équipe de cuisine.)
-  // ── Reset fin de service : quand on change de période (fin du midi 15h00, fin du soir 23h30),
-  //    les listes Mise en place + Nettoyage repassent à zéro pour toute l'équipe.
+  // ── Reset fin de service : quand on change de période (fin du midi selon
+  //    resetMidi, fin du soir selon resetSoir), les listes Mise en place +
+  //    Nettoyage repassent à zéro pour toute l'équipe.
   //    Les relevés de température sont déjà remis à zéro chaque jour (matin/soir par date).
   useEffect(()=>{
     // Deux bascules par jour, dont les horaires sont paramétrables
