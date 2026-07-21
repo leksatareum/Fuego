@@ -672,9 +672,10 @@ const S = `
   .dial-wrap{display:flex;align-items:center;gap:4px;}
   .dial-arrow{width:38px;height:52px;flex-shrink:0;border-radius:8px;border:none;background:${T.bg1};color:${T.textDim};font-size:17px;font-weight:600;display:flex;align-items:center;justify-content:center;}
   .dial-arrow:active{background:${T.bg2};}
-  .dial-scroll{flex:1;display:flex;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;height:52px;align-items:center;background:${T.bg1};border-radius:11px;border:1px solid ${T.border};position:relative;}
+  .dial-scroll{flex:1;overflow:hidden;height:52px;display:flex;align-items:center;background:${T.bg1};border-radius:11px;border:1px solid ${T.border};position:relative;touch-action:pan-y;padding-left:calc(50% - 30px);padding-right:calc(50% - 30px);}
+  .dial-track{display:flex;will-change:transform;}
   .dial-scroll::-webkit-scrollbar{display:none;}
-  .dial-scroll-item{flex:0 0 auto;scroll-snap-align:center;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600;color:${T.textDim};font-variant-numeric:tabular-nums;opacity:.45;transition:opacity .1s;}
+  .dial-scroll-item{flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:600;color:${T.textDim};font-variant-numeric:tabular-nums;opacity:.45;transition:opacity .1s;}
   .dial-scroll-item.sel{font-size:21px;font-weight:800;opacity:1;color:${T.text};}
   .dial-scroll-item.sel.good{color:${T.good};}
   .dial-scroll-item.sel.warn{color:${T.warn};}
@@ -841,60 +842,118 @@ function TapDial({value,onChange,center,step=1,colorFn,format=(v)=>`${v}°`}){
   // utilisées dans l'app (températures, %, minutes), sans avoir à adapter
   // les bornes au cas par cas.
   const RANGE=120;
-  const scrollRef=useRef(null);
-  const settleTimer=useRef(null);
+  const trackRef=useRef(null);
+  const pos=useRef(0);       // position actuelle de la bande, en px
+  const vel=useRef(0);       // vitesse au moment du lâcher, en px/ms
+  const dragging=useRef(false);
+  const lastX=useRef(0);
+  const lastT=useRef(0);
+  const raf=useRef(null);
   const mounted=useRef(false);
+  const [centerIndex,setCenterIndex]=useState(RANGE); // suit le centre en TEMPS RÉEL, pas seulement une fois arrêté — comme sur iPhone, le chiffre en surbrillance est toujours celui qui est physiquement au centre pendant qu'on fait défiler
+
   const values=useMemo(()=>{
     const arr=[];
     for(let i=-RANGE;i<=RANGE;i++) arr.push(Math.round((center+i*step)*100)/100);
     return arr;
   },[center,step]);
-  const valueToIndex=v=>Math.round((v-center)/step)+RANGE;
 
-  // Aligne le défilement sur la valeur actuelle au montage seulement — si on
-  // resynchronisait à chaque changement de `value`, ça re-scrollerait sous
-  // le doigt en pleine interaction.
+  function applyPos(px){
+    pos.current=px;
+    if(trackRef.current) trackRef.current.style.transform=`translateX(${px}px)`;
+    const idx=Math.max(0,Math.min(values.length-1,Math.round(-px/DIAL_ITEM_W)));
+    setCenterIndex(idx);
+  }
+  function stopAnim(){ if(raf.current){cancelAnimationFrame(raf.current);raf.current=null;} }
+
+  // Position initiale au montage seulement — resynchroniser à chaque
+  // changement de `value` ferait sauter la bande sous le doigt en pleine
+  // interaction.
   useEffect(()=>{
-    if(!scrollRef.current||mounted.current)return;
+    if(mounted.current)return;
     mounted.current=true;
-    scrollRef.current.scrollLeft=valueToIndex(value)*DIAL_ITEM_W;
+    const idx=Math.round((value-center)/step)+RANGE;
+    applyPos(-(idx*DIAL_ITEM_W));
   },[]);
 
-  // Le scroll natif ne s'arrête pas net : il ralentit progressivement puis
-  // s'accroche (scroll-snap) sur la valeur la plus proche. On attend que ça
-  // se stabilise avant de considérer qu'une nouvelle valeur est choisie —
-  // sinon onChange serait appelé en rafale à chaque pixel défilé.
-  const onScroll=()=>{
-    clearTimeout(settleTimer.current);
-    settleTimer.current=setTimeout(()=>{
-      if(!scrollRef.current)return;
-      const idx=Math.max(0,Math.min(values.length-1,Math.round(scrollRef.current.scrollLeft/DIAL_ITEM_W)));
+  function animateTo(target,onDone){
+    stopAnim();
+    function frame(){
+      const diff=target-pos.current;
+      if(Math.abs(diff)<0.4){ applyPos(target); onDone&&onDone(); return; }
+      applyPos(pos.current+diff*0.22); // amorti doux, accrochage final
+      raf.current=requestAnimationFrame(frame);
+    }
+    raf.current=requestAnimationFrame(frame);
+  }
+  function commitCenter(){
+    const idx=Math.max(0,Math.min(values.length-1,Math.round(-pos.current/DIAL_ITEM_W)));
+    animateTo(-(idx*DIAL_ITEM_W),()=>{
       const v=values[idx];
       if(v!==value){ haptic.light(); onChange(v); }
-    },90);
-  };
+    });
+  }
+
+  function onStart(e){
+    stopAnim();
+    dragging.current=true;
+    const t=e.touches?e.touches[0]:e;
+    lastX.current=t.clientX; lastT.current=performance.now(); vel.current=0;
+  }
+  function onMove(e){
+    if(!dragging.current)return;
+    const t=e.touches?e.touches[0]:e;
+    const now=performance.now();
+    const dx=t.clientX-lastX.current;
+    const dt=Math.max(1,now-lastT.current);
+    vel.current=dx/dt; // px/ms — mesurée en continu pour capter la vraie vitesse au lâcher, pas une moyenne sur tout le geste
+    applyPos(pos.current+dx);
+    lastX.current=t.clientX; lastT.current=now;
+    e.preventDefault?.();
+  }
+  function onEnd(){
+    if(!dragging.current)return;
+    dragging.current=false;
+    // Inertie pilotée à la main plutôt que le défilement natif du
+    // navigateur : le natif ralentit trop vite et je ne peux pas régler à
+    // quel point ça glisse. Ici, FRICTION proche de 1 = glisse longtemps,
+    // comme la vraie roue des réglages d'heure sur iPhone.
+    let v=vel.current*16; // px/ms -> approx px par image à 60fps
+    const FRICTION=0.945;
+    function frame(){
+      v*=FRICTION;
+      applyPos(pos.current+v);
+      if(Math.abs(v)>0.4) raf.current=requestAnimationFrame(frame);
+      else commitCenter();
+    }
+    if(Math.abs(v)>1) raf.current=requestAnimationFrame(frame);
+    else commitCenter();
+  }
 
   const shiftOne=(dir)=>{
-    if(!scrollRef.current)return;
     haptic.light();
-    scrollRef.current.scrollBy({left:dir*DIAL_ITEM_W,behavior:"smooth"});
+    const idx=Math.max(0,Math.min(values.length-1,centerIndex+dir));
+    animateTo(-(idx*DIAL_ITEM_W),()=>{ if(values[idx]!==value) onChange(values[idx]); });
   };
 
   return(<div className="dial-wrap">
     <button className="dial-arrow" onClick={()=>shiftOne(-1)}>‹</button>
-    <div className="dial-scroll" ref={scrollRef} onScroll={onScroll}
-      style={{paddingLeft:`calc(50% - ${DIAL_ITEM_W/2}px)`,paddingRight:`calc(50% - ${DIAL_ITEM_W/2}px)`}}>
+    <div className="dial-scroll"
+      onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd}
+      onMouseDown={onStart} onMouseMove={e=>{if(dragging.current)onMove(e);}} onMouseUp={onEnd} onMouseLeave={()=>{if(dragging.current)onEnd();}}>
       <div className="dial-center-line"></div>
-      {values.map((v,i)=>{
-        const isSel=v===value;
-        const cls=isSel&&colorFn?colorFn(v):"";
-        return(
-          <div key={i} className={`dial-scroll-item ${isSel?`sel ${cls}`:""}`} style={{width:DIAL_ITEM_W}}
-            onClick={()=>{if(scrollRef.current)scrollRef.current.scrollTo({left:i*DIAL_ITEM_W,behavior:"smooth"});}}>
-            {format(v)}
-          </div>
-        );
-      })}
+      <div ref={trackRef} className="dial-track">
+        {values.map((v,i)=>{
+          const isSel=i===centerIndex;
+          const cls=isSel&&colorFn?colorFn(v):"";
+          return(
+            <div key={i} className={`dial-scroll-item ${isSel?`sel ${cls}`:""}`} style={{width:DIAL_ITEM_W}}
+              onClick={()=>{ if(dragging.current)return; animateTo(-(i*DIAL_ITEM_W),()=>{if(values[i]!==value)onChange(values[i]);}); }}>
+              {format(v)}
+            </div>
+          );
+        })}
+      </div>
     </div>
     <button className="dial-arrow" onClick={()=>shiftOne(1)}>›</button>
   </div>);
