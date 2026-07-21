@@ -116,7 +116,7 @@ const DB = {
     const today = todayStr();
     const [
       ru, rhs, rft, rfr, rrec, rcool, rreh, roil,
-      rcl, rtr, rlb, rtr2, rpe, rrc, rcat, rtk, rre, rpr, rsh, rcc, rsl
+      rcl, rtr, rlb, rtr2, rpe, rrc, rcat, rtk, rre, rpr, rsh, rcc, rsl, rot
     ] = await Promise.all([
       sbGet("users",           qs(q.order("id"),q.select())),
       sbGet("haccp_settings",  qs(q.limit(1),q.select())),
@@ -151,6 +151,7 @@ const DB = {
       // écrasait l'état à chaque changement de service.
       sbGet("cleaning_checks", qs(`date=gte.${isoDate(new Date(Date.now()-100*86400000))}`,q.order("date",false),q.limit(2000),q.select())),
       sbGet("shopping_list",   qs(q.order("created_at",false),q.limit(200),q.select())),
+      sbGet("oil_tests",       qs(`created_at=gte.${new Date(Date.now()-100*86400000).toISOString()}`,q.order("created_at",false),q.limit(500),q.select())),
     ]);
     const users   = ru.data   || [];
     const hs      = rhs.data?.[0] || {};
@@ -163,6 +164,7 @@ const DB = {
     const clean   = rcl.data  || [];
     const cleanChecks = rcc.data || [];
     const shoppingList = rsl.data || [];
+    const oilTests = rot.data || [];
     const trace   = rtr.data  || [];
     const labels  = rlb.data  || [];
     const train   = rtr2.data || [];
@@ -198,6 +200,7 @@ const DB = {
       // Historique permanent — jamais réinitialisé, source du Registre HACCP.
       cleaningChecks: cleanChecks.map(c=>({id:c.id,cleaningId:c.cleaning_id,zone:c.zone,freq:c.freq,date:c.date,period:c.period,operator:c.operator,createdAt:c.created_at})),
       shoppingList: shoppingList.map(s=>({id:s.id,item:s.item,done:s.done,operator:s.operator,createdAt:s.created_at})),
+      oilTests: oilTests.map(o=>({id:o.id,oilId:o.oil_id,date:o.date,polaires:o.polaires,changed:o.changed,operator:o.operator,createdAt:o.created_at})),
       // hasPhoto : la photo elle-même n'est pas chargée ici (trop lourde), on
       // sait juste si la fiche en a une. photo reste null jusqu'à ce qu'on
       // ouvre la fiche, qui déclenche alors le chargement de l'image.
@@ -271,10 +274,17 @@ const DB = {
   async deleteShoppingItem(id){return sbDelete("shopping_list",qs(`id=eq.${id}`));},
   // Repart de zéro — vide TOUTE la liste, cochée ou non. Réservé aux admins.
   async purgeShoppingList(){return sbDelete("shopping_list",qs("id=gt.0"));},
+  // updateOil garde oils.polaires/last_test à jour pour l'affichage "état
+  // courant" de l'écran Huiles (inchangé), MAIS enregistre aussi une ligne
+  // dans oil_tests — sinon ce test précis disparaît dès le prochain,
+  // exactement le problème remonté.
   async updateOil(id,{polaires,operator,changed,dateInstall}){
     const body={polaires,operator,last_test:todayStr()};
     if(changed)body.date_install=dateInstall;
-    return sbPatch("oils",body,qs(`id=eq.${id}`));
+    const res=await sbPatch("oils",body,qs(`id=eq.${id}`));
+    if(res?.error) return res;
+    await sbPost("oil_tests",{oil_id:id,date:todayStr(),polaires,operator,changed:!!changed});
+    return res;
   },
   async toggleCleaning(id,done,operator){return sbPatch("cleaning",{done,done_at:done?new Date().toISOString():null,operator:done?(operator||null):null},qs(`id=eq.${id}`));},
   // Historique permanent d'un nettoyage — jamais réinitialisé, contrairement
@@ -294,11 +304,11 @@ const DB = {
   // horodatage), pas sur la date affichée qui n'a pas d'année.
   async fetchRegistrePeriod(fromISO,toISO){
     const range=`created_at=gte.${fromISO}&created_at=lt.${toISO}`;
-    const [rec,cool,reheat,oils,pests,fr,trace,cleanChecks]=await Promise.all([
+    const [rec,cool,reheat,oilTests,pests,fr,trace,cleanChecks]=await Promise.all([
       sbGet("reception",   `?${range}&${q.select()}`),
       sbGet("cooling",     `?${range}&${q.select()}`),
       sbGet("reheating",   `?${range}&${q.select()}`),
-      sbGet("oils",        `?${range}&${q.select()}`),
+      sbGet("oil_tests",   `?${range}&${q.select()}`),
       sbGet("pests",       `?${range}&${q.select()}`),
       sbGet("fridge_releves", `?${range}&${q.select()}`),
       sbGet("traceability",`?${range}&${q.select("id,product,emoji,supplier,lot,dlc,qty,allergenes,status,created_at")}`),
@@ -310,7 +320,11 @@ const DB = {
       reception: (rec.data||[]).map(r=>({id:r.id,date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,tempOk:r.temp_ok,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed,createdAt:r.created_at})),
       cooling: (cool.data||[]).map(c=>({id:c.id,product:c.product,qty:c.qty,startTemp:c.start_temp,endTemp:c.end_temp,duration:c.duration,startedMs:c.started_ms,operator:c.operator,status:c.status,date:c.date,dlc:c.dlc,createdAt:c.created_at})),
       reheating: (reheat.data||[]).map(r=>({id:r.id,product:r.product,endTemp:r.end_temp,duration:r.duration,operator:r.operator,status:r.status,date:r.date,createdAt:r.created_at})),
-      oils: (oils.data||[]).map(o=>({id:o.id,name:o.name,type:o.type,dateInstall:o.date_install,lastTest:o.last_test,polaires:o.polaires,operator:o.operator,createdAt:o.created_at})),
+      // oils (la liste des friteuses) n'est volontairement pas re-demandée
+      // ici : c'est une config, pas un événement daté — la version déjà en
+      // mémoire (data.oils) suffit à résoudre les noms. Seul l'historique
+      // des tests (oilTests) est propre à la période demandée.
+      oilTests: (oilTests.data||[]).map(o=>({id:o.id,oilId:o.oil_id,date:o.date,polaires:o.polaires,changed:o.changed,operator:o.operator,createdAt:o.created_at})),
       pests: (pests.data||[]).map(p=>({id:p.id,date:p.date,type:p.type,company:p.company,result:p.result,nextVisit:p.next_visit,createdAt:p.created_at})),
       fridgeReleves: (fr.data||[]).map(r=>({id:r.id,fridgeId:r.fridge_id,date:r.date,period:r.period,temp:r.temp,time:r.time,operatorId:r.operator_id,createdAt:r.created_at})),
       traceability: (trace.data||[]).map(t=>({id:t.id,product:t.product,emoji:t.emoji,supplier:t.supplier,lot:t.lot,dlc:t.dlc,qty:t.qty,allergenes:t.allergenes||[],status:t.status,createdAt:t.created_at})),
@@ -952,6 +966,7 @@ const INIT={
   ],
   cleaningChecks:[],
   shoppingList:[],
+  oilTests:[],
   traceability:[
     {id:1,product:"Saumon Gravlax",emoji:"🐟",supplier:"Marée Pêche Bretagne",lot:"SP2605A",dlc:"13/05",qty:"2 kg",allergenes:["Poisson"],status:"ok"},
     {id:2,product:"Bœuf Angus",emoji:"🥩",supplier:"Boucherie Dupont",lot:"BA0510",dlc:"15/05",qty:"5 kg",allergenes:[],status:"ok"},
@@ -1362,13 +1377,15 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
   const globalTotal = totalFridges*2+cleanTotal;
   const globalPct = safePct(globalDone, globalTotal);
 
-  // Détail de ce qui manque pour atteindre 100% — affiché en touchant le
-  // cercle. Même niveau de précision que pour les frigos (matin/soir
-  // distincts) pour le nettoyage quotidien, pas juste "fait / pas fait".
-  const missingItems=[];
+  // Détail de ce qui manque pour atteindre 100% — affiché en touchant la
+  // carte. Regroupé par type avec un compteur plutôt qu'une liste ligne par
+  // ligne (qui devenait vite très longue avec plusieurs frigos et zones) :
+  // "3 relevés de température à faire", "5 nettoyages à faire" — un tap sur
+  // chaque ligne emmène directement au bon écran pour s'en occuper.
+  let tempMissing=0, cleanMissing=0;
   data.haccpSettings.fridgeTargets.forEach(f=>{
-    if(!getReleve(data,f.id,"matin")) missingItems.push({icon:f.icon||"🌡️",label:`${f.name} — relevé matin`,goto:"temps"});
-    if(!getReleve(data,f.id,"soir")) missingItems.push({icon:f.icon||"🌡️",label:`${f.name} — relevé soir`,goto:"temps"});
+    if(!getReleve(data,f.id,"matin")) tempMissing++;
+    if(!getReleve(data,f.id,"soir")) tempMissing++;
   });
   data.cleaning.forEach(c=>{
     if(c.freq==="Quotidien"){
@@ -1376,12 +1393,15 @@ function Aujourdhui({data,setData,go,user,onVoiceOpen,lang,db,reload,markLocalWr
       const checks=data.cleaningChecks||[];
       const hasMatin=checks.some(x=>x.cleaningId===c.id&&x.date===todayISO&&x.period==="matin");
       const hasSoir=checks.some(x=>x.cleaningId===c.id&&x.date===todayISO&&x.period==="soir");
-      if(!hasMatin) missingItems.push({icon:c.icon||"🧹",label:`${c.zone} — matin`,goto:"clean"});
-      if(!hasSoir) missingItems.push({icon:c.icon||"🧹",label:`${c.zone} — soir`,goto:"clean"});
+      if(!hasMatin) cleanMissing++;
+      if(!hasSoir) cleanMissing++;
     }else if(!cleaningIsDoneToday(c,data.cleaningChecks,data.haccpSettings?.resetSoir)){
-      missingItems.push({icon:c.icon||"🧹",label:c.zone,goto:"clean"});
+      cleanMissing++;
     }
   });
+  const missingItems=[];
+  if(tempMissing>0) missingItems.push({icon:"🌡️",label:`${tempMissing} relevé${tempMissing>1?"s":""} de température à faire`,goto:"temps"});
+  if(cleanMissing>0) missingItems.push({icon:"🧹",label:`${cleanMissing} nettoyage${cleanMissing>1?"s":""} à faire`,goto:"clean"});
   const anomalyCount = criticalAlerts.length;
 
   // Déclenche l'animation une fois la vraie valeur connue — un setTimeout(0)
@@ -1628,13 +1648,15 @@ function buildRegistreEvents(data){
     ev.push({date:displayDate,time:"—",ts:eventTs(c.createdAt,null),type:"clean",icon:"🧹",title:`Nettoyage · ${c.zone}${periodLabel}`,detail:`${c.freq}`,status:"good",module:"Nettoyage",operator:c.operator||"—"});
   });
 
-  // Huiles de friture : chaque contrôle du taux de polaires est un événement
-  // à part entière (comme un relevé de température) — pas seulement les
-  // dépassements, pour prouver que le contrôle a bien été fait.
-  data.oils.forEach(o=>{
-    if(!o.lastTest||o.polaires==null) return;
+  // Huiles de friture : un événement par test RÉELLEMENT effectué (voir
+  // oil_tests) — pas seulement le dernier en date. oils.polaires/lastTest
+  // n'est qu'un "état courant" pour l'écran Huiles, écrasé à chaque
+  // nouveau test ; oilTests, lui, garde chaque contrôle sans jamais
+  // l'écraser, exactement comme cleaning_checks pour le nettoyage.
+  (data.oilTests||[]).forEach(o=>{
+    const oil=data.oils.find(x=>x.id===o.oilId);
     const bad = o.polaires >= (data.haccpSettings?.oilPolarMax ?? 25);
-    ev.push({date:o.lastTest,time:"—",ts:eventTs(o.createdAt,o.lastTest),type:"oils",icon:"🛢️",title:`Huile · ${o.name}`,detail:`${o.polaires}% polaires${o.type?` · ${o.type}`:""}`,status:bad?"bad":"good",module:"Huiles",operator:o.operator||"—"});
+    ev.push({date:o.date,time:"—",ts:eventTs(o.createdAt,o.date),type:"oils",icon:"🛢️",title:`Huile · ${oil?.name||"?"}`,detail:`${o.polaires}% polaires${o.changed?" · huile changée":""}`,status:bad?"bad":"good",module:"Huiles",operator:o.operator||"—"});
   });
 
   // Tri du plus récent au plus ancien — sur ts (vrai timestamp), plus fiable
@@ -1679,6 +1701,13 @@ function Registre({data,db}){
   const[moduleFilter,setModuleFilter]=useState("tous");
   const[statusFilter,setStatusFilter]=useState("tous");
   const[showExport,setShowExport]=useState(false);
+  // Navigation en profondeur (catégorie → module → jour), un seul niveau
+  // affiché à la fois — plutôt que trois menus imbriqués les uns dans les
+  // autres, qui donnaient un long déroulant confus où on perdait le fil de
+  // "où on en est". Repasser à null pour remonter d'un niveau.
+  const[drillCategory,setDrillCategory]=useState(null);
+  const[drillModule,setDrillModule]=useState(null);
+  const[drillDate,setDrillDate]=useState(null);
   // Mois consultés en archives : chargés à la demande, gardés en mémoire le
   // temps de la session seulement (pas dans data global, pour ne jamais
   // alourdir le reste de l'app). Clé "AAAA-MM" → objet partiel type `data`.
@@ -1687,6 +1716,11 @@ function Registre({data,db}){
   const[openMonth,setOpenMonth]=useState(null);
 
   const allEvents=useMemo(()=>buildRegistreEvents(data),[data]);
+
+  // Remonte au sommet si on change de période ou de filtre pendant qu'on
+  // était descendu dans l'arborescence — sinon on pourrait se retrouver sur
+  // un module qui n'a plus d'événements après le changement.
+  useEffect(()=>{ setDrillCategory(null);setDrillModule(null);setDrillDate(null); },[period,moduleFilter,statusFilter]);
 
   const now=new Date();
   const cutoffs={"7j":7,"30j":30,"mois":31};
@@ -1776,39 +1810,73 @@ function Registre({data,db}){
 
       <button className="btn btn-ghost mt14 mb14" onClick={()=>setShowExport(true)}>📄 Exporter en PDF</button>
 
-      {/* Arborescence catégorie → module → jour. Seul le premier niveau de
-          chaque étage s'ouvre par défaut (comme pour les Archives) : de quoi
-          voir immédiatement ce qui est le plus récent, sans tout déplier
-          d'un coup sur une période de 30 jours. */}
+      {/* Navigation en profondeur : un seul niveau affiché à la fois. Tape
+          une catégorie → ses modules ; tape un module → ses jours ; tape un
+          jour → les événements. Le bouton ‹ remonte d'un cran, avec le nom
+          du niveau parent pour toujours savoir où on est. */}
       {(() => {
         const tree = groupRegistreEvents(filtered);
+
+        // Niveau 4 : les événements d'un jour précis
+        if(drillDate){
+          const cat=tree.find(c=>c.category===drillCategory);
+          const mod=cat?.modules.find(m=>m.module===drillModule);
+          const dateGroup=mod?.dates.find(d=>d.date===drillDate);
+          return (<>
+            <div className="row-line" style={{cursor:"pointer",color:T.accent}} onClick={()=>setDrillDate(null)}><div className="item-body"><div className="item-title" style={{color:T.accent,fontSize:13}}>‹ {drillModule}</div></div></div>
+            <div className="group-label mt10">{drillDate}</div>
+            {(dateGroup?.events||[]).map((e,i)=>(
+              <div key={i} className="row-line">
+                <div className="item-icon" style={{background:e.status==="bad"?T.badBg:T.infoBg,fontSize:18}}>{e.icon}</div>
+                <div className="item-body"><div className="item-title">{e.title}</div><div className="item-sub">{e.detail} · {e.operator}</div></div>
+                <span className={`badge ${e.status==="bad"?"b-bad":"b-good"}`}>{e.status==="bad"?"⚠":"✓"}</span>
+              </div>
+            ))}
+          </>);
+        }
+
+        // Niveau 3 : les jours d'un module
+        if(drillModule){
+          const cat=tree.find(c=>c.category===drillCategory);
+          const mod=cat?.modules.find(m=>m.module===drillModule);
+          return (<>
+            <div className="row-line" style={{cursor:"pointer",color:T.accent}} onClick={()=>setDrillModule(null)}><div className="item-body"><div className="item-title" style={{color:T.accent,fontSize:13}}>‹ {drillCategory}</div></div></div>
+            <div className="group-label mt10">{drillModule}</div>
+            {(mod?.dates||[]).map(d=>(
+              <div key={d.date} className="row-line" style={{cursor:"pointer"}} onClick={()=>setDrillDate(d.date)}>
+                <div className="item-icon" style={{background:T.bg3,fontSize:16}}>📅</div>
+                <div className="item-body"><div className="item-title">{d.date}</div></div>
+                <span className="badge b-mute">{d.events.length}</span>
+                <span className="item-arrow">›</span>
+              </div>
+            ))}
+          </>);
+        }
+
+        // Niveau 2 : les modules d'une catégorie
+        if(drillCategory){
+          const cat=tree.find(c=>c.category===drillCategory);
+          return (<>
+            <div className="row-line" style={{cursor:"pointer",color:T.accent}} onClick={()=>setDrillCategory(null)}><div className="item-body"><div className="item-title" style={{color:T.accent,fontSize:13}}>‹ Registre</div></div></div>
+            <div className="group-label mt10">{cat?.icon} {drillCategory}</div>
+            {(cat?.modules||[]).map(mod=>(
+              <div key={mod.module} className="row-line" style={{cursor:"pointer"}} onClick={()=>setDrillModule(mod.module)}>
+                <div className="item-body"><div className="item-title">{mod.module}</div></div>
+                <span className="badge b-mute">{mod.count}</span>
+                <span className="item-arrow">›</span>
+              </div>
+            ))}
+          </>);
+        }
+
+        // Niveau 1 : les catégories
         if(tree.length===0) return <div className="empty"><div className="empty-icon">📋</div><div className="empty-title">Aucun événement</div><div className="empty-sub">Ajustez les filtres pour voir l'historique</div></div>;
-        return tree.map((cat,ci)=>(
-          <div key={cat.category} style={{marginBottom:10}}>
-            <CollapsibleSection title={cat.category} icon={cat.icon} count={cat.count} defaultOpen={ci===0}>
-              {cat.modules.map((mod,mi)=>(
-                <div key={mod.module} style={{marginBottom:8,marginLeft:6}}>
-                  <CollapsibleSection title={mod.module} icon="▸" count={mod.count} defaultOpen={ci===0&&mi===0}>
-                    {mod.dates.map((d,di)=>(
-                      <div key={d.date} style={{marginBottom:6,marginLeft:6}}>
-                        <CollapsibleSection title={d.date} icon="📅" count={d.events.length} defaultOpen={ci===0&&mi===0&&di===0}>
-                          {d.events.map((e,i)=>(
-                            <div key={i} className="row-line">
-                              <div className="item-icon" style={{background:e.status==="bad"?T.badBg:T.infoBg,fontSize:18}}>{e.icon}</div>
-                              <div className="item-body">
-                                <div className="item-title">{e.title}</div>
-                                <div className="item-sub">{e.detail} · {e.operator}</div>
-                              </div>
-                              <span className={`badge ${e.status==="bad"?"b-bad":"b-good"}`}>{e.status==="bad"?"⚠":"✓"}</span>
-                            </div>
-                          ))}
-                        </CollapsibleSection>
-                      </div>
-                    ))}
-                  </CollapsibleSection>
-                </div>
-              ))}
-            </CollapsibleSection>
+        return tree.map(cat=>(
+          <div key={cat.category} className="row-line" style={{cursor:"pointer"}} onClick={()=>setDrillCategory(cat.category)}>
+            <div className="item-icon" style={{background:T.bg3,fontSize:18}}>{cat.icon}</div>
+            <div className="item-body"><div className="item-title">{cat.category}</div></div>
+            <span className="badge b-mute">{cat.count}</span>
+            <span className="item-arrow">›</span>
           </div>
         ));
       })()}
