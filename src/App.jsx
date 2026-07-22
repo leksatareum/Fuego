@@ -3074,7 +3074,7 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite,lang}){
   const limitSec=Math.max(1,safeNum(maxMin,120))*60;const overtime=elapsed>limitSec;const progress=startMs?safePct(elapsed,limitSec):0;
   async function start(){
     const r=await db.startCooling({product:form.product,qty:form.qty,startTemp,startedMs:Date.now(),operator:user.name,date:todayStr(),mode});
-    if(r?.error){alert("Le passage en cellule n'a pas pu démarrer. Détail technique : "+JSON.stringify(r.error).slice(0,300));return;}
+    if(r?.error){alert("Le passage en cellule n'a pas pu démarrer. Vérifie la connexion Supabase.");return;}
     // La ligne créée est déjà renvoyée par Supabase : on l'ajoute localement
     // plutôt que de recharger les 20 tables.
     if(r?.data){
