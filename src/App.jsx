@@ -247,7 +247,7 @@ const DB = {
     const today = todayStr();
     const [
       ru, rhs, rft, rfr, rrec, rcool, rreh, roil,
-      rcl, rtr, rlb, rtr2, rpe, rrc, rcat, rtk, rre, rpr, rsh, rcc, rsl, rot
+      rcl, rtr, rlb, rtr2, rpe, rrc, rcat, rtk, rre, rpr, rsh, rcc, rsl, rot, rnc
     ] = await Promise.all([
       sbGet("users",           qs(q.order("id"),q.select())),
       sbGet("haccp_settings",  qs(q.limit(1),q.select())),
@@ -293,6 +293,7 @@ const DB = {
       sbGet("cleaning_checks", qs(`date=gte.${isoDate(new Date(Date.now()-100*86400000))}`,q.order("date",false),q.limit(2000),q.select())),
       sbGet("shopping_list",   qs(q.order("created_at",false),q.limit(200),q.select())),
       sbGet("oil_tests",       qs(`created_at=gte.${new Date(Date.now()-100*86400000).toISOString()}`,q.order("created_at",false),q.limit(500),q.select())),
+      sbGet("non_conformites", qs(`created_at=gte.${new Date(Date.now()-100*86400000).toISOString()}`,q.order("created_at",false),q.limit(300),q.select())),
     ]);
     const users   = ru.data   || [];
     const hs      = rhs.data?.[0] || {};
@@ -306,6 +307,7 @@ const DB = {
     const cleanChecks = rcc.data || [];
     const shoppingList = rsl.data || [];
     const oilTests = rot.data || [];
+    const nonConformites = rnc.data || [];
     const trace   = rtr.data  || [];
     const labels  = rlb.data  || [];
     const train   = rtr2.data || [];
@@ -333,7 +335,7 @@ const DB = {
         resetMidi:hs.reset_midi ?? 990, resetSoir:hs.reset_soir ?? 180,
       },
       fridgeReleves: fr.map(r=>({id:r.id,fridgeId:r.fridge_id,date:r.date,period:r.period,temp:r.temp,time:r.time,operatorId:r.operator_id,createdAt:r.created_at})),
-      reception: rec.map(r=>({id:r.id,date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,tempOk:r.temp_ok,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed,createdAt:r.created_at})),
+      reception: rec.map(r=>({id:r.id,date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,tempOk:r.temp_ok,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed,decision:r.decision||"accepted",motif:r.motif,createdAt:r.created_at})),
       cooling: cool.map(c=>({id:c.id,product:c.product,qty:c.qty,startTemp:c.start_temp,endTemp:c.end_temp,duration:c.duration,startedMs:c.started_ms,operator:c.operator,status:c.status,date:c.date,dlc:c.dlc,mode:c.mode,manual:c.manual,createdAt:c.created_at})),
       reheating: reheat.map(r=>({id:r.id,product:r.product,endTemp:r.end_temp,duration:r.duration,operator:r.operator,status:r.status,date:r.date,createdAt:r.created_at})),
       oils: oils.map(o=>({id:o.id,name:o.name,type:o.type,dateInstall:o.date_install,lastTest:o.last_test,polaires:o.polaires,operator:o.operator,createdAt:o.created_at})),
@@ -342,6 +344,7 @@ const DB = {
       cleaningChecks: cleanChecks.map(c=>({id:c.id,cleaningId:c.cleaning_id,zone:c.zone,freq:c.freq,date:c.date,period:c.period,operator:c.operator,createdAt:c.created_at})),
       shoppingList: shoppingList.map(s=>({id:s.id,item:s.item,done:s.done,operator:s.operator,createdAt:s.created_at})),
       oilTests: oilTests.map(o=>({id:o.id,oilId:o.oil_id,date:o.date,polaires:o.polaires,changed:o.changed,action:o.action||"none",operator:o.operator,createdAt:o.created_at})),
+      nonConformites: nonConformites.map(n=>({id:n.id,description:n.description,productOutcome:n.product_outcome,cause:n.cause,correctiveAction:n.corrective_action,sourceModule:n.source_module,closedBy:n.closed_by,closedAt:n.closed_at,operator:n.operator,createdAt:n.created_at})),
       // hasPhoto : la photo elle-même n'est pas chargée ici (trop lourde), on
       // sait juste si la fiche en a une. photo reste null jusqu'à ce qu'on
       // ouvre la fiche, qui déclenche alors le chargement de l'image.
@@ -373,7 +376,7 @@ const DB = {
       return sbPatch("fridge_releves",{temp,time,operator_id:operatorId},qs(`id=eq.${ex[0].id}`));
     return sbPost("fridge_releves",{fridge_id:fridgeId,date,period,temp,time,operator_id:operatorId});
   },
-  async addReception(r){return sbPost("reception",{date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,temp_ok:r.tempOk,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed});},
+  async addReception(r){return sbPost("reception",{date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,temp_ok:r.tempOk,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed,decision:r.decision,motif:r.motif});},
   // mode manquait aussi ici : reprendre un refroidissement actif (voir
   // resumeActive) serait retombé sur "Refroidissement" par défaut, même
   // pour une surgélation en cours.
@@ -413,6 +416,12 @@ const DB = {
   },
   async toggleShoppingItem(id,done){return sbPatch("shopping_list",{done},qs(`id=eq.${id}`));},
   async deleteShoppingItem(id){return sbDelete("shopping_list",qs(`id=eq.${id}`));},
+  // Registre des non-conformités — volontairement allégé : ce qui a été
+  // constaté, ce qu'est devenu le produit, qui a clôturé, quand. Cause et
+  // action corrective restent facultatives, ajoutées après coup si besoin.
+  async addNonConformity(nc){return sbPost("non_conformites",{description:nc.description,source_module:nc.sourceModule||null,operator:nc.operator||null,product_outcome:nc.productOutcome||null,closed_by:nc.closedBy||null,closed_at:nc.closedBy?new Date().toISOString():null,cause:nc.cause||null,corrective_action:nc.correctiveAction||null});},
+  async updateNonConformity(id,nc){return sbPatch("non_conformites",{product_outcome:nc.productOutcome,closed_by:nc.closedBy,closed_at:nc.closedBy?new Date().toISOString():null,cause:nc.cause,corrective_action:nc.correctiveAction},qs(`id=eq.${id}`));},
+  async deleteNonConformity(id){return sbDelete("non_conformites",qs(`id=eq.${id}`));},
   // Repart de zéro — vide TOUTE la liste, cochée ou non. Réservé aux admins.
   async purgeShoppingList(){return sbDelete("shopping_list",qs("id=gt.0"));},
   // updateOil garde oils.polaires/last_test à jour pour l'affichage "état
@@ -465,7 +474,7 @@ const DB = {
     // Même mapping que loadAll(), pour que buildRegistreEvents() puisse
     // traiter ces lignes exactement comme les données déjà en mémoire.
     return {
-      reception: (rec.data||[]).map(r=>({id:r.id,date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,tempOk:r.temp_ok,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed,createdAt:r.created_at})),
+      reception: (rec.data||[]).map(r=>({id:r.id,date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,tempOk:r.temp_ok,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed,decision:r.decision||"accepted",motif:r.motif,createdAt:r.created_at})),
       cooling: (cool.data||[]).map(c=>({id:c.id,product:c.product,qty:c.qty,startTemp:c.start_temp,endTemp:c.end_temp,duration:c.duration,startedMs:c.started_ms,operator:c.operator,status:c.status,date:c.date,dlc:c.dlc,createdAt:c.created_at})),
       reheating: (reheat.data||[]).map(r=>({id:r.id,product:r.product,endTemp:r.end_temp,duration:r.duration,operator:r.operator,status:r.status,date:r.date,createdAt:r.created_at})),
       // oils (la liste des friteuses) n'est volontairement pas re-demandée
@@ -1222,6 +1231,7 @@ const INIT={
   cleaningChecks:[],
   shoppingList:[],
   oilTests:[],
+  nonConformites:[],
   traceability:[
     {id:1,product:"Saumon Gravlax",emoji:"🐟",supplier:"Marée Pêche Bretagne",lot:"SP2605A",dlc:"13/05",qty:"2 kg",allergenes:["Poisson"],status:"ok"},
     {id:2,product:"Bœuf Angus",emoji:"🥩",supplier:"Boucherie Dupont",lot:"BA0510",dlc:"15/05",qty:"5 kg",allergenes:[],status:"ok"},
@@ -1839,7 +1849,23 @@ function buildRegistreEvents(data){
   });
 
   data.reception.forEach(r=>{
-    ev.push({date:r.date,time:"—",ts:eventTs(r.createdAt,r.date),type:"reception",icon:"🚚",title:`Réception · ${r.product}`,detail:`${r.supplier||"Fournisseur"} · ${r.temp}°C · Aspect ${r.aspect}`,status:r.tempOk&&r.aspect==="OK"&&r.emballage==="OK"?"good":"bad",module:"Réception",operator:r.signed||"—"});
+    const decisionLabel={accepted:"Accepté",reserve:"Sous réserve",refused:"Refusé"}[r.decision||"accepted"];
+    // Le statut du registre suit maintenant la vraie décision prise, pas
+    // seulement les valeurs brutes — une réception refusée doit apparaître
+    // comme non-conforme même si la température, elle, était correcte.
+    const bad=(r.decision&&r.decision!=="accepted")||!r.tempOk||r.aspect!=="OK"||r.emballage!=="OK";
+    ev.push({date:r.date,time:"—",ts:eventTs(r.createdAt,r.date),type:"reception",icon:"🚚",title:`Réception · ${r.product}`,detail:`${r.supplier||"Fournisseur"} · ${r.temp}°C · ${decisionLabel}${r.motif?` (${r.motif})`:""}`,status:bad?"bad":"good",module:"Réception",operator:r.signed||"—"});
+  });
+
+  // Non-conformités : ouverte = signalée mais pas encore traitée (rouge),
+  // clôturée = on sait ce qu'est devenu le produit (verte). Une fiche
+  // ouverte qui traîne dans le registre est justement ce que ce module sert
+  // à rendre visible.
+  (data.nonConformites||[]).forEach(n=>{
+    const d=new Date(n.createdAt);
+    const dateStr=d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
+    const closed=!!n.closedAt;
+    ev.push({date:dateStr,time:"—",ts:eventTs(n.createdAt,dateStr),type:"nonconformity",icon:closed?"✓":"🔴",title:`Non-conformité · ${n.description.slice(0,60)}${n.description.length>60?"…":""}`,detail:closed?`${n.productOutcome} · clôturé par ${n.closedBy}`:"Toujours en cours, pas encore clôturée",status:closed?"good":"bad",module:"Non-conformités",operator:n.operator||"—"});
   });
 
   data.cooling.forEach(c=>{
@@ -2746,6 +2772,7 @@ function HaccpHub({data,go,lang}){
     {title:t("haccp_group_trace",lang),items:[
       {key:"trace",icon:"📦",bg:T.warnBg,title:t("trace_title",lang),sub:`${data.traceability.length} ${t("trace_count_products",lang)}`,badge:alerts>0?{l:`${alerts} alerte`,c:"b-bad"}:{l:"OK",c:"b-good"}},
       {key:"labels",icon:"🏷️",bg:T.goodBg,title:t("label_title",lang),sub:t("label_hub_sub",lang),badge:{l:`${data.labels.length}`,c:"b-info"}},
+      {key:"nonconformities",icon:"📋",bg:T.badBg,title:"Non-conformités",sub:"Quoi, devenir du produit, qui a clôturé",badge:(data.nonConformites||[]).filter(n=>!n.closedAt).length>0?{l:`${(data.nonConformites||[]).filter(n=>!n.closedAt).length} en cours`,c:"b-bad"}:{l:"OK",c:"b-good"}},
     ]},
     {title:t("haccp_group_hygiene",lang),items:[
       {key:"clean",icon:"🧹",bg:T.goodBg,title:t("clean_title",lang),sub:`${cleanOk}/${data.cleaning.length} ${t("clean_zones_word",lang)}`,badge:cleanOk===data.cleaning.length?{l:t("clean_status_done",lang),c:"b-good"}:{l:t("clean_status_ongoing",lang),c:"b-warn"}},
@@ -2834,21 +2861,130 @@ function Temperatures({data,setData,user,db,reload,go,markLocalWrite,lang}){
   </div>);
 }
 
+// Registre des non-conformités — volontairement allégé : quoi, devenir du
+// produit, qui a clôturé, quand. Fuego détectait déjà les anomalies
+// (température hors norme, produit périmé, refroidissement trop long...)
+// mais ne gardait aucune trace de ce qui en avait été fait. Cause et action
+// corrective restent facultatives, ajoutées après coup si besoin — pas une
+// fiche à 8 champs que personne ne remplira en plein service.
+const NC_OUTCOMES=["Jeté","Consommé sur place","Retourné fournisseur","Autre"];
+function NonConformites({data,setData,user,db,reload,go,markLocalWrite,lang}){
+  const[show,setShow]=useState(false);
+  const[desc,setDesc]=useState("");
+  const[showMore,setShowMore]=useState(false);
+  const[cause,setCause]=useState("");
+  const[correctiveAction,setCorrectiveAction]=useState("");
+  const[closingId,setClosingId]=useState(null); // id d'une NC ouverte en train d'être clôturée
+  const[outcome,setOutcome]=useState("");
+
+  async function save(){
+    if(!desc.trim())return;
+    const res=await db.addNonConformity({description:desc.trim(),operator:user.name,cause:cause.trim()||null,correctiveAction:correctiveAction.trim()||null});
+    if(res?.error||!res?.data){alert("La fiche n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload({force:true});return;}
+    markLocalWrite?.();
+    const r=res.data;
+    setData(d=>({...d,nonConformites:[{id:r.id,description:r.description,productOutcome:r.product_outcome,cause:r.cause,correctiveAction:r.corrective_action,sourceModule:r.source_module,closedBy:r.closed_by,closedAt:r.closed_at,operator:r.operator,createdAt:r.created_at},...(d.nonConformites||[])]}));
+    setShow(false);setDesc("");setCause("");setCorrectiveAction("");setShowMore(false);
+    haptic.success();
+  }
+
+  async function closeNc(){
+    if(!closingId||!outcome)return;
+    const res=await db.updateNonConformity(closingId,{productOutcome:outcome,closedBy:user.name});
+    if(res?.error){alert("La clôture n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload({force:true});return;}
+    markLocalWrite?.();
+    setData(d=>({...d,nonConformites:d.nonConformites.map(n=>n.id===closingId?{...n,productOutcome:outcome,closedBy:user.name,closedAt:new Date().toISOString()}:n)}));
+    setClosingId(null);setOutcome("");
+    haptic.success();
+  }
+
+  const list=data.nonConformites||[];
+  const open=list.filter(n=>!n.closedAt);
+  const closed=list.filter(n=>n.closedAt);
+
+  return(<div className="page">
+    <div className="section-title">Non-conformités</div>
+    <div className="section-sub">Ce qui a été constaté, ce qu'est devenu le produit</div>
+
+    {list.length===0 && <div className="empty"><div className="empty-icon">✓</div><div className="empty-title">Aucune non-conformité</div><div className="empty-sub">Ajoute une fiche avec le bouton +</div></div>}
+
+    {open.length>0 && (
+      <div style={{marginBottom:16}}>
+        <div className="group-label">🔴 En cours ({open.length})</div>
+        {open.map(n=>(
+          <div key={n.id} className="card">
+            <div className="item-title" style={{marginBottom:4}}>{n.description}</div>
+            <div className="text-xs text-dim mb10">{n.sourceModule?`${n.sourceModule} · `:""}{n.operator} · {new Date(n.createdAt).toLocaleDateString("fr-FR",{day:"2-digit",month:"short"})}</div>
+            {closingId===n.id ? (
+              <>
+                <div className="text-xs text-dim mb6">Qu'est devenu le produit ?</div>
+                <div className="row gap6 mb8" style={{flexWrap:"wrap"}}>
+                  {NC_OUTCOMES.map(o=><button key={o} className={`chip ${outcome===o?"sel":""}`} onClick={()=>setOutcome(o)}>{o}</button>)}
+                </div>
+                <button className="btn btn-primary btn-sm" disabled={!outcome} onClick={closeNc}>✓ Clôturer</button>
+              </>
+            ) : (
+              <button className="btn btn-ghost btn-sm" onClick={()=>{setClosingId(n.id);setOutcome("");}}>Clôturer cette fiche</button>
+            )}
+          </div>
+        ))}
+      </div>
+    )}
+
+    {closed.length>0 && (
+      <CollapsibleSection title="Clôturées" icon="✓" count={closed.length}>
+        {closed.map(n=>(
+          <div key={n.id} className="row-line">
+            <div className="item-body">
+              <div className="item-title" style={{fontSize:13}}>{n.description}</div>
+              <div className="item-sub">{n.productOutcome} · clôturé par {n.closedBy}</div>
+            </div>
+          </div>
+        ))}
+      </CollapsibleSection>
+    )}
+
+    <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
+
+    {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
+      <div className="sheet-handle"></div>
+      <div className="sheet-title">Nouvelle non-conformité</div>
+      <div className="field"><label className="label">Qu'est-ce qui a été constaté ?</label>
+        <textarea className="input" rows={3} value={desc} onChange={e=>setDesc(e.target.value)} placeholder="ex : Frigo Entrées à 8°C ce matin, huile de friture au-dessus du seuil…"/>
+      </div>
+      {!showMore
+        ? <button className="text-xs text-dim mb14" style={{background:"none",border:"none",textAlign:"left",cursor:"pointer"}} onClick={()=>setShowMore(true)}>+ Ajouter une cause et une action corrective (facultatif)</button>
+        : <>
+          <div className="field"><label className="label">Cause probable</label><input className="input" value={cause} onChange={e=>setCause(e.target.value)} placeholder="facultatif"/></div>
+          <div className="field"><label className="label">Action pour que ça ne se reproduise pas</label><input className="input" value={correctiveAction} onChange={e=>setCorrectiveAction(e.target.value)} placeholder="facultatif"/></div>
+        </>
+      }
+      <button className="btn btn-primary mt8" onClick={save} disabled={!desc.trim()}>Enregistrer</button>
+      <button className="btn btn-ghost mt8" onClick={()=>setShow(false)}>Annuler</button>
+    </div></div>}
+  </div>);
+}
+
 function Reception({data,setData,user,db,reload,go,markLocalWrite,lang}){
   const[show,setShow]=useState(false);const[temp,setTemp]=useState(3);const[aspect,setAspect]=useState("OK");const[emb,setEmb]=useState("OK");
   const[form,setForm]=useState({supplier:"",product:"",qty:"",dlc:"",lot:""});
+  // Décision de réception : ce qui manquait le plus — tu notais la
+  // température et l'aspect, mais jamais si le produit avait finalement été
+  // accepté, accepté sous réserve, ou carrément refusé.
+  const[decision,setDecision]=useState("accepted");
+  const[motif,setMotif]=useState("");
   async function save(){
     if(!form.product)return;
-    const res=await db.addReception({date:todayStr(),supplier:form.supplier,product:form.product,qty:form.qty,dlc:form.dlc,lot:form.lot,temp,tempOk:temp<=4,aspect,emballage:emb,signed:user.name});
+    const res=await db.addReception({date:todayStr(),supplier:form.supplier,product:form.product,qty:form.qty,dlc:form.dlc,lot:form.lot,temp,tempOk:temp<=4,aspect,emballage:emb,signed:user.name,decision,motif:decision!=="accepted"?motif:null});
     if(res?.error){alert("La réception n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload({force:true});return;}
     // Mise à jour locale immédiate à partir de la ligne réellement créée
     // (avec son vrai id Supabase) — pas de reload complet des 20 tables.
     if(res?.data){
       const r=res.data;
       markLocalWrite?.();
-      setData(d=>({...d,reception:[{id:r.id,date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,tempOk:r.temp_ok,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed},...d.reception]}));
+      setData(d=>({...d,reception:[{id:r.id,date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,tempOk:r.temp_ok,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed,decision:r.decision,motif:r.motif},...d.reception]}));
     }
-    setShow(false);setTemp(3);setAspect("OK");setEmb("OK");setForm({supplier:"",product:"",qty:"",dlc:"",lot:""});
+    setShow(false);setTemp(3);setAspect("OK");setEmb("OK");setForm({supplier:"",product:"",qty:"",dlc:"",lot:""});setDecision("accepted");setMotif("");
   }
   return(<div className="page">
     <GbphHelpButton section="trace" go={go}/>
@@ -2874,11 +3010,14 @@ function Reception({data,setData,user,db,reload,go,markLocalWrite,lang}){
       return dateKeys.map((date,idx)=>(
         <div key={date} style={{marginBottom:10}}>
           <CollapsibleSection title={date} icon="📅" count={byDate[date].length} defaultOpen={idx===0}>
-            {byDate[date].map(r=><div key={r.id} className="card">
+            {byDate[date].map(r=>{
+              const decisionLabel={accepted:{l:"✓ Accepté",c:"b-good"},reserve:{l:"⚠ Sous réserve",c:"b-warn"},refused:{l:"✗ Refusé",c:"b-bad"}}[r.decision||"accepted"];
+              return(<div key={r.id} className="card">
               <div className="between mb6"><div><div className="item-title">{r.product}</div><div className="item-sub">{r.supplier} · {r.qty}</div></div><span className={`badge ${r.tempOk?"b-good":"b-bad"} tabular`}>{r.temp}°C</span></div>
-              <div className="row gap6 mb6" style={{flexWrap:"wrap"}}><span className={`badge ${r.aspect==="OK"?"b-good":"b-bad"}`}>Aspect {r.aspect}</span><span className={`badge ${r.emballage==="OK"?"b-good":"b-bad"}`}>Emb. {r.emballage}</span><span className="badge b-mute">{r.signed}</span></div>
+              <div className="row gap6 mb6" style={{flexWrap:"wrap"}}><span className={`badge ${r.aspect==="OK"?"b-good":"b-bad"}`}>Aspect {r.aspect}</span><span className={`badge ${r.emballage==="OK"?"b-good":"b-bad"}`}>Emb. {r.emballage}</span><span className={`badge ${decisionLabel.c}`}>{decisionLabel.l}</span><span className="badge b-mute">{r.signed}</span></div>
+              {r.motif && <div className="text-xs" style={{color:T.warn,marginBottom:4}}>Motif : {r.motif}</div>}
               <div className="text-xs text-dim">DLC {r.dlc} · Lot {r.lot}</div>
-            </div>)}
+            </div>);})}
           </CollapsibleSection>
         </div>
       ));
@@ -2893,6 +3032,16 @@ function Reception({data,setData,user,db,reload,go,markLocalWrite,lang}){
       <div className="field"><label className="label">{t("recv_temp_at_arrival",lang)}</label><TapDial value={temp} onChange={setTemp} center={3} colorFn={v=>v<=4?"good":v<=6?"warn":"bad"}/>{temp>4&&<div className="text-xs mt6" style={{color:T.bad}}>⚠ {t("recv_out_of_range",lang)}</div>}</div>
       <div className="field"><label className="label">{t("recv_aspect",lang)}</label><BinaryChoice value={aspect} onChange={setAspect} options={[{value:"OK",label:t("recv_conform",lang),icon:"✓",style:"good"},{value:"NON CONFORME",label:t("recv_not_conform",lang),icon:"✗",style:"bad"}]}/></div>
       <div className="field"><label className="label">{t("recv_packaging",lang)}</label><BinaryChoice value={emb} onChange={setEmb} options={[{value:"OK",label:t("recv_intact",lang),icon:"✓",style:"good"},{value:"ENDOMMAGÉ",label:t("recv_damaged",lang),icon:"✗",style:"bad"}]}/></div>
+      <div className="field"><label className="label">Décision</label>
+        <SegmentedControl value={decision} onChange={setDecision} options={[
+          {value:"accepted",label:"✓ Accepté"},
+          {value:"reserve",label:"⚠ Sous réserve"},
+          {value:"refused",label:"✗ Refusé"},
+        ]}/>
+      </div>
+      {decision!=="accepted" && (
+        <div className="field"><label className="label">Motif</label><input className="input" value={motif} onChange={e=>setMotif(e.target.value)} placeholder="ex : emballage abîmé, température trop haute…"/></div>
+      )}
       <button className="btn btn-primary mt8" onClick={save} disabled={!form.product}>{t("recv_save",lang)}</button>
     </div></div>}
   </div>);
@@ -2925,7 +3074,7 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite,lang}){
   const limitSec=Math.max(1,safeNum(maxMin,120))*60;const overtime=elapsed>limitSec;const progress=startMs?safePct(elapsed,limitSec):0;
   async function start(){
     const r=await db.startCooling({product:form.product,qty:form.qty,startTemp,startedMs:Date.now(),operator:user.name,date:todayStr(),mode});
-    if(r?.error){alert("Le passage en cellule n'a pas pu démarrer. Vérifie la connexion Supabase.");return;}
+    if(r?.error){alert("Le passage en cellule n'a pas pu démarrer. Détail technique : "+JSON.stringify(r.error).slice(0,300));return;}
     // La ligne créée est déjà renvoyée par Supabase : on l'ajoute localement
     // plutôt que de recharger les 20 tables.
     if(r?.data){
@@ -5692,7 +5841,7 @@ function NavIcon({name}){
 }
 
 const NAV=[{k:"home",i:"home",l:"Aujourd'hui"},{k:"haccp",i:"haccp",l:"HACCP"},{k:"recipes",i:"recipes",l:"Recettes"},{k:"tasks",i:"tasks",l:"Mise en place"},{k:"more",i:"more",l:"Plus"}];
-const TITLES={home:"Aujourd'hui",haccp:"HACCP",temps:"Températures",reception:"Réception",cooling:"Cellule",reheating:"Remise en T°",oils:"Huiles friture",trace:"Traçabilité",labels:"Étiquetage",clean:"Nettoyage",pests:"Nuisibles",training:"Formation",registre:"Registre HACCP",gbph:"Guide des bonnes pratiques",manual:"Notice d'utilisation",recipes:"Recettes",shopping:"À commander",margins:"Marges",planning:"Planning",tasks:"Mise en place",more:"Plus",settings:"Paramètres"};
+const TITLES={home:"Aujourd'hui",haccp:"HACCP",temps:"Températures",reception:"Réception",cooling:"Cellule",reheating:"Remise en T°",oils:"Huiles friture",trace:"Traçabilité",labels:"Étiquetage",nonconformities:"Non-conformités",clean:"Nettoyage",pests:"Nuisibles",training:"Formation",registre:"Registre HACCP",gbph:"Guide des bonnes pratiques",manual:"Notice d'utilisation",recipes:"Recettes",shopping:"À commander",margins:"Marges",planning:"Planning",tasks:"Mise en place",more:"Plus",settings:"Paramètres"};
 const ROOT_PAGES=["home","haccp","recipes","tasks","more"];
 const HACCP_PAGES=["temps","reception","cooling","reheating","oils","trace","labels","clean","pests","training","registre","gbph"];
 const MORE_PAGES=["margins","planning","settings"];
@@ -6170,6 +6319,7 @@ export default function App(){
     cooling:<Cooling {...props}/>,reheating:<Reheating {...props}/>,
     oils:<Oils {...props}/>,trace:<Traceability {...props}/>,
     labels:<Labels {...props}/>,
+    nonconformities:<NonConformites {...props}/>,
     clean:<Cleaning {...props}/>,pests:<Pests {...props}/>,
     training:<Training data={data} go={go} setData={setData} db={DB} reload={reload} markLocalWrite={markLocalWrite} user={user} lang={lang}/>,registre:<Registre data={data} db={DB}/>,gbph:<GbphGuide initialSection={gbphSection}/>,manual:<ManualGuide user={user}/>,
     recipes:<Recipes data={data} setData={setData} db={DB} reload={reload} user={user} markLocalWrite={markLocalWrite} lang={lang}/>,
