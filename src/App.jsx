@@ -377,6 +377,10 @@ const DB = {
     return sbPost("fridge_releves",{fridge_id:fridgeId,date,period,temp,time,operator_id:operatorId});
   },
   async addReception(r){return sbPost("reception",{date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,temp_ok:r.tempOk,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed,decision:r.decision,motif:r.motif});},
+  // Correction d'une fiche déjà enregistrée — typiquement une erreur de
+  // saisie repérée après coup, pas une nouvelle réception.
+  async updateReception(id,r){return sbPatch("reception",{supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,temp_ok:r.tempOk,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,decision:r.decision,motif:r.motif},qs(`id=eq.${id}`));},
+  async deleteReception(id){return sbDelete("reception",qs(`id=eq.${id}`));},
   // mode manquait aussi ici : reprendre un refroidissement actif (voir
   // resumeActive) serait retombé sur "Refroidissement" par défaut, même
   // pour une surgélation en cours.
@@ -390,7 +394,13 @@ const DB = {
   // en statut terminé, pas de passage par "active". Marqué manual:true pour
   // rester honnête sur la façon dont la donnée a été obtenue.
   async logCoolingRetroactive(c){return sbPost("cooling",{product:c.product,qty:c.qty,start_temp:c.startTemp,end_temp:c.endTemp,duration:c.duration,status:c.status,dlc:c.dlc,mode:c.mode,operator:c.operator,date:c.date,manual:true});},
+  // Correction d'une fiche déjà enregistrée (terminée) — typiquement une
+  // erreur de saisie repérée après coup, pas un nouveau passage en cellule.
+  async updateCoolingEntry(id,c){return sbPatch("cooling",{product:c.product,qty:c.qty,start_temp:c.startTemp,end_temp:c.endTemp,duration:c.duration,status:c.status,dlc:c.dlc,mode:c.mode},qs(`id=eq.${id}`));},
+  async deleteCoolingEntry(id){return sbDelete("cooling",qs(`id=eq.${id}`));},
   async addReheating(r){return sbPost("reheating",{product:r.product,end_temp:r.endTemp,duration:r.duration,operator:r.operator,status:r.status,date:r.date});},
+  async updateReheating(id,r){return sbPatch("reheating",{product:r.product,end_temp:r.endTemp,duration:r.duration,status:r.status},qs(`id=eq.${id}`));},
+  async deleteReheating(id){return sbDelete("reheating",qs(`id=eq.${id}`));},
   async addOil(o){return sbPost("oils",{name:o.name,type:o.type,date_install:todayStr(),last_test:todayStr(),polaires:0,operator:o.operator});},
   async deleteOil(id){return sbDelete("oils",qs(`id=eq.${id}`));},
   // Formation HACCP : aucune fonction n'existait ici avant — l'écran ne
@@ -436,6 +446,12 @@ const DB = {
     const testRes=await sbPost("oil_tests",{oil_id:id,date:todayStr(),polaires,operator,changed:!!changed,action:action||"none"});
     return {...res, testResult:testRes};
   },
+  // Corriger ou retirer UN test précis dans l'historique — typiquement
+  // quand quelqu'un s'est trompé de friteuse au moment de la saisie. Ne
+  // touche jamais à oils.polaires (l'état courant) : seule la fiche Huiles
+  // recalcule ça elle-même à partir du test le plus récent restant.
+  async updateOilTestEntry(id,{polaires,action,changed}){return sbPatch("oil_tests",{polaires,action,changed:!!changed},qs(`id=eq.${id}`));},
+  async deleteOilTestEntry(id){return sbDelete("oil_tests",qs(`id=eq.${id}`));},
   async toggleCleaning(id,done,operator){return sbPatch("cleaning",{done,done_at:done?new Date().toISOString():null,operator:done?(operator||null):null},qs(`id=eq.${id}`));},
   // Historique permanent d'un nettoyage — jamais réinitialisé, contrairement
   // à la case à cocher (cleaning.done) qui, elle, repart à zéro. C'est cette
@@ -539,6 +555,11 @@ const DB = {
   },
   async addTask(t){return sbPost("tasks",{category_id:t.categoryId,task:t.task,resp:t.resp,qty:t.qty,prio:t.prio,done:false,date:t.date||todayStr(),service:t.service||"midi"});},
   async toggleTask(id,done){return sbPatch("tasks",{done},qs(`id=eq.${id}`));},
+  // Report automatique d'une tâche non cochée vers le créneau en cours —
+  // déplacement réel (pas juste un affichage à part) : la tâche change de
+  // date/service et apparaît normalement dans le nouveau créneau, comme si
+  // elle y avait été créée directement.
+  async moveTaskToSlot(id,date,service){return sbPatch("tasks",{date,service},qs(`id=eq.${id}`));},
   async clearTasks(dateStr,service){
     if(dateStr&&service)return sbDelete("tasks",qs(`date=eq.${dateStr}`,`service=eq.${service}`));
     return sbDelete("tasks",qs("id=not.is.null")); // fallback : tout (ne devrait plus servir)
@@ -569,11 +590,9 @@ const DB = {
   // "Quotidien" est géré à part (remise à zéro à chaque changement de service).
   // "Après usage" n'expire jamais tout seul : c'est ponctuel, décoché à la main.
   // Nettoyage quotidien : remis à zéro à chaque changement de service.
-  // (Les tâches de Mise en place ne sont plus "réinitialisées" ici — elles
-  // sont désormais supprimées automatiquement par closeSlot() quand leur
-  // créneau se termine, ce qui est plus juste : avant, cette fonction
-  // décochait TOUTES les tâches faites de TOUS les jours, pas seulement
-  // celles du créneau qui vient de finir.)
+  // (Les tâches de Mise en place ne sont plus "réinitialisées" ici — les
+  // non cochées sont désormais reportées automatiquement au créneau suivant
+  // par un effet dédié dans App, plutôt que d'être décochées ou perdues.)
   // Les zones quotidiennes n'ont plus besoin d'être réinitialisées ici : leur
   // état (fait ou pas) se déduit désormais directement de la présence d'un
   // passage dans l'historique pour AUJOURD'HUI + le créneau (matin/soir) —
@@ -2798,6 +2817,13 @@ function HaccpHub({data,go,lang}){
 function Temperatures({data,setData,user,db,reload,go,markLocalWrite,lang}){
   const[editing,setEditing]=useState(null);const[pickedTemp,setPickedTemp]=useState(null);
   const[tempTab,setTempTab]=useState("positif"); // positif = frigos, negatif = congélateurs
+  // Quand un relevé enregistré est hors norme, une fiche de non-conformité
+  // est proposée tout de suite — plutôt que l'anomalie ne reste visible que
+  // comme un badge rouge que personne ne traite vraiment. Toujours possible
+  // de passer ("Plus tard"), jamais bloquant.
+  const[ncPrompt,setNcPrompt]=useState(null); // {description, sourceModule}
+  const[ncOutcome,setNcOutcome]=useState("");
+  const[ncBusy,setNcBusy]=useState(false);
   function openSlot(f,p){const e=getReleve(data,f.id,p);setEditing({fridge:f,period:p});setPickedTemp(e?e.temp:tempCenter(f.target));}
   async function save(){
     if(!editing||pickedTemp===null)return;
@@ -2819,7 +2845,25 @@ function Temperatures({data,setData,user,db,reload,go,markLocalWrite,lang}){
         : [...d.fridgeReleves,entry];
       return {...d,fridgeReleves:next};
     });
+    // Anomalie détectée sur ce relevé précis -> proposer une fiche tout de
+    // suite, une fois la fenêtre de saisie refermée.
+    if(tempStatus(pickedTemp,editing.fridge.target)==="bad"){
+      setNcPrompt({description:`${editing.fridge.name} à ${pickedTemp}°C — cible ${editing.fridge.target}°C`,sourceModule:"Températures"});
+      setNcOutcome("");
+    }
     setEditing(null);setPickedTemp(null);
+  }
+  async function createNcFromPrompt(){
+    if(!ncPrompt||ncBusy)return;
+    setNcBusy(true);
+    const res=await db.addNonConformity({description:ncPrompt.description,operator:user.name,sourceModule:ncPrompt.sourceModule,productOutcome:ncOutcome||null,closedBy:ncOutcome?user.name:null});
+    setNcBusy(false);
+    if(res?.error||!res?.data){alert("La fiche n'a pas été enregistrée. Vérifie la connexion Supabase.");return;}
+    markLocalWrite?.();
+    const r=res.data;
+    setData(d=>({...d,nonConformites:[{id:r.id,description:r.description,productOutcome:r.product_outcome,cause:r.cause,correctiveAction:r.corrective_action,sourceModule:r.source_module,closedBy:r.closed_by,closedAt:r.closed_at,operator:r.operator,createdAt:r.created_at},...(d.nonConformites||[])]}));
+    setNcPrompt(null);setNcOutcome("");
+    haptic.success();
   }
   function cancel(){setEditing(null);setPickedTemp(null);}
   const userById=id=>data.users.find(u=>u.id===id);
@@ -2858,6 +2902,21 @@ function Temperatures({data,setData,user,db,reload,go,markLocalWrite,lang}){
       <button className="btn btn-primary mb8" onClick={save}>✓ {t("temp_save",lang)}</button>
       <button className="btn btn-ghost" onClick={cancel}>{t("temp_cancel",lang)}</button>
     </div></div>}
+
+    {/* Anomalie tout juste enregistrée : proposée tout de suite, jamais
+        bloquant — "Plus tard" ferme sans rien perdre, la carte accueil
+        continuera de signaler l'anomalie de toute façon. */}
+    {ncPrompt&&<div className="overlay" onClick={()=>!ncBusy&&setNcPrompt(null)}><div className="sheet" onClick={e=>e.stopPropagation()}>
+      <div className="sheet-handle"></div>
+      <div className="sheet-title">🚨 Anomalie détectée</div>
+      <div className="text-sm text-dim mb14" style={{lineHeight:1.5}}>{ncPrompt.description}</div>
+      <div className="text-xs text-dim mb6">Qu'est devenu le produit ? (facultatif — tu peux clôturer plus tard)</div>
+      <div className="row gap6 mb14" style={{flexWrap:"wrap"}}>
+        {NC_OUTCOMES.map(o=><button key={o} className={`chip ${ncOutcome===o?"sel":""}`} onClick={()=>setNcOutcome(o)}>{o}</button>)}
+      </div>
+      <button className="btn btn-primary mb8" disabled={ncBusy} onClick={createNcFromPrompt}>{ncBusy?"Enregistrement…":"📋 Créer la fiche de non-conformité"}</button>
+      <button className="btn btn-ghost" onClick={()=>setNcPrompt(null)} disabled={ncBusy}>Plus tard</button>
+    </div></div>}
   </div>);
 }
 
@@ -2868,6 +2927,43 @@ function Temperatures({data,setData,user,db,reload,go,markLocalWrite,lang}){
 // corrective restent facultatives, ajoutées après coup si besoin — pas une
 // fiche à 8 champs que personne ne remplira en plein service.
 const NC_OUTCOMES=["Jeté","Consommé sur place","Retourné fournisseur","Autre"];
+// Fiche ouverte : appui long pour supprimer (typiquement une fiche créée
+// par erreur) — composant à part pour utiliser le hook d'appui long
+// correctement (pas dans une boucle).
+function NcOpenCard({n,closing,outcome,setOutcome,onStartClose,onCloseConfirm,onDelete}){
+  const lp=useLongPress(()=>{ haptic.medium(); onDelete(n); });
+  return(
+    <div className="card" {...lp.handlers}>
+      <div className="item-title" style={{marginBottom:4}}>{n.description}</div>
+      <div className="text-xs text-dim mb10">{n.sourceModule?`${n.sourceModule} · `:""}{n.operator} · {new Date(n.createdAt).toLocaleDateString("fr-FR",{day:"2-digit",month:"short"})}</div>
+      {closing ? (
+        <>
+          <div className="text-xs text-dim mb6">Qu'est devenu le produit ?</div>
+          <div className="row gap6 mb8" style={{flexWrap:"wrap"}}>
+            {NC_OUTCOMES.map(o=><button key={o} className={`chip ${outcome===o?"sel":""}`} onClick={()=>setOutcome(o)}>{o}</button>)}
+          </div>
+          <button className="btn btn-primary btn-sm" disabled={!outcome} onClick={()=>{if(!lp.didFire())onCloseConfirm();}}>✓ Clôturer</button>
+        </>
+      ) : (
+        <button className="btn btn-ghost btn-sm" onClick={()=>{if(!lp.didFire())onStartClose();}}>Clôturer cette fiche</button>
+      )}
+    </div>
+  );
+}
+// Fiche clôturée : tap pour rien (juste consultative), appui long pour
+// supprimer.
+function NcClosedRow({n,onDelete}){
+  const lp=useLongPress(()=>{ haptic.medium(); onDelete(n); });
+  return(
+    <div className="row-line" {...lp.handlers}>
+      <div className="item-body">
+        <div className="item-title" style={{fontSize:13}}>{n.description}</div>
+        <div className="item-sub">{n.productOutcome} · clôturé par {n.closedBy}</div>
+      </div>
+    </div>
+  );
+}
+
 function NonConformites({data,setData,user,db,reload,go,markLocalWrite,lang}){
   const[show,setShow]=useState(false);
   const[desc,setDesc]=useState("");
@@ -2898,6 +2994,14 @@ function NonConformites({data,setData,user,db,reload,go,markLocalWrite,lang}){
     haptic.success();
   }
 
+  async function deleteNc(n){
+    if(!window.confirm("Supprimer cette fiche de non-conformité ? C'est définitif."))return;
+    const res=await db.deleteNonConformity(n.id);
+    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload({force:true});return;}
+    markLocalWrite?.();
+    setData(d=>({...d,nonConformites:d.nonConformites.filter(x=>x.id!==n.id)}));
+  }
+
   const list=data.nonConformites||[];
   const open=list.filter(n=>!n.closedAt);
   const closed=list.filter(n=>n.closedAt);
@@ -2912,35 +3016,15 @@ function NonConformites({data,setData,user,db,reload,go,markLocalWrite,lang}){
       <div style={{marginBottom:16}}>
         <div className="group-label">🔴 En cours ({open.length})</div>
         {open.map(n=>(
-          <div key={n.id} className="card">
-            <div className="item-title" style={{marginBottom:4}}>{n.description}</div>
-            <div className="text-xs text-dim mb10">{n.sourceModule?`${n.sourceModule} · `:""}{n.operator} · {new Date(n.createdAt).toLocaleDateString("fr-FR",{day:"2-digit",month:"short"})}</div>
-            {closingId===n.id ? (
-              <>
-                <div className="text-xs text-dim mb6">Qu'est devenu le produit ?</div>
-                <div className="row gap6 mb8" style={{flexWrap:"wrap"}}>
-                  {NC_OUTCOMES.map(o=><button key={o} className={`chip ${outcome===o?"sel":""}`} onClick={()=>setOutcome(o)}>{o}</button>)}
-                </div>
-                <button className="btn btn-primary btn-sm" disabled={!outcome} onClick={closeNc}>✓ Clôturer</button>
-              </>
-            ) : (
-              <button className="btn btn-ghost btn-sm" onClick={()=>{setClosingId(n.id);setOutcome("");}}>Clôturer cette fiche</button>
-            )}
-          </div>
+          <NcOpenCard key={n.id} n={n} closing={closingId===n.id} outcome={outcome} setOutcome={setOutcome}
+            onStartClose={()=>{setClosingId(n.id);setOutcome("");}} onCloseConfirm={closeNc} onDelete={deleteNc}/>
         ))}
       </div>
     )}
 
     {closed.length>0 && (
       <CollapsibleSection title="Clôturées" icon="✓" count={closed.length}>
-        {closed.map(n=>(
-          <div key={n.id} className="row-line">
-            <div className="item-body">
-              <div className="item-title" style={{fontSize:13}}>{n.description}</div>
-              <div className="item-sub">{n.productOutcome} · clôturé par {n.closedBy}</div>
-            </div>
-          </div>
-        ))}
+        {closed.map(n=><NcClosedRow key={n.id} n={n} onDelete={deleteNc}/>)}
       </CollapsibleSection>
     )}
 
@@ -2965,6 +3049,22 @@ function NonConformites({data,setData,user,db,reload,go,markLocalWrite,lang}){
   </div>);
 }
 
+// Une fiche de réception : tap pour corriger, appui long pour supprimer —
+// composant à part (pas de hook dans une boucle), même règle que partout
+// ailleurs dans l'app.
+function ReceptionCard({r,onEdit,onDelete}){
+  const lp=useLongPress(()=>{ haptic.medium(); onDelete(r); });
+  const decisionLabel={accepted:{l:"✓ Accepté",c:"b-good"},reserve:{l:"⚠ Sous réserve",c:"b-warn"},refused:{l:"✗ Refusé",c:"b-bad"}}[r.decision||"accepted"];
+  return(
+    <div className="card" {...lp.handlers} style={{cursor:"pointer"}} onClick={()=>{ if(!lp.didFire()) onEdit(r); }}>
+      <div className="between mb6"><div><div className="item-title">{r.product}</div><div className="item-sub">{r.supplier} · {r.qty}</div></div><span className={`badge ${r.tempOk?"b-good":"b-bad"} tabular`}>{r.temp}°C</span></div>
+      <div className="row gap6 mb6" style={{flexWrap:"wrap"}}><span className={`badge ${r.aspect==="OK"?"b-good":"b-bad"}`}>Aspect {r.aspect}</span><span className={`badge ${r.emballage==="OK"?"b-good":"b-bad"}`}>Emb. {r.emballage}</span><span className={`badge ${decisionLabel.c}`}>{decisionLabel.l}</span><span className="badge b-mute">{r.signed}</span></div>
+      {r.motif && <div className="text-xs" style={{color:T.warn,marginBottom:4}}>Motif : {r.motif}</div>}
+      <div className="text-xs text-dim">DLC {r.dlc} · Lot {r.lot}</div>
+    </div>
+  );
+}
+
 function Reception({data,setData,user,db,reload,go,markLocalWrite,lang}){
   const[show,setShow]=useState(false);const[temp,setTemp]=useState(3);const[aspect,setAspect]=useState("OK");const[emb,setEmb]=useState("OK");
   const[form,setForm]=useState({supplier:"",product:"",qty:"",dlc:"",lot:""});
@@ -2973,18 +3073,52 @@ function Reception({data,setData,user,db,reload,go,markLocalWrite,lang}){
   // accepté, accepté sous réserve, ou carrément refusé.
   const[decision,setDecision]=useState("accepted");
   const[motif,setMotif]=useState("");
+  // Correction d'une fiche déjà enregistrée — pas une nouvelle réception.
+  // Réutilise le même formulaire, juste pré-rempli et avec un PATCH au lieu
+  // d'un POST à l'enregistrement.
+  const[editingId,setEditingId]=useState(null);
+
+  function openEdit(r){
+    setEditingId(r.id);
+    setForm({supplier:r.supplier||"",product:r.product||"",qty:r.qty||"",dlc:r.dlc||"",lot:r.lot||""});
+    setTemp(r.temp??3);setAspect(r.aspect||"OK");setEmb(r.emballage||"OK");
+    setDecision(r.decision||"accepted");setMotif(r.motif||"");
+    setShow(true);
+  }
+  function openNew(){
+    setEditingId(null);
+    setForm({supplier:"",product:"",qty:"",dlc:"",lot:""});
+    setTemp(3);setAspect("OK");setEmb("OK");setDecision("accepted");setMotif("");
+    setShow(true);
+  }
+  async function deleteReception(r){
+    if(!window.confirm(`Supprimer la fiche de réception "${r.product}" ? C'est définitif.`))return;
+    const res=await db.deleteReception(r.id);
+    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload({force:true});return;}
+    markLocalWrite?.();
+    setData(d=>({...d,reception:d.reception.filter(x=>x.id!==r.id)}));
+  }
+
   async function save(){
     if(!form.product)return;
-    const res=await db.addReception({date:todayStr(),supplier:form.supplier,product:form.product,qty:form.qty,dlc:form.dlc,lot:form.lot,temp,tempOk:temp<=4,aspect,emballage:emb,signed:user.name,decision,motif:decision!=="accepted"?motif:null});
-    if(res?.error){alert("La réception n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload({force:true});return;}
-    // Mise à jour locale immédiate à partir de la ligne réellement créée
-    // (avec son vrai id Supabase) — pas de reload complet des 20 tables.
-    if(res?.data){
-      const r=res.data;
+    const payload={supplier:form.supplier,product:form.product,qty:form.qty,dlc:form.dlc,lot:form.lot,temp,tempOk:temp<=4,aspect,emballage:emb,decision,motif:decision!=="accepted"?motif:null};
+    if(editingId){
+      const res=await db.updateReception(editingId,payload);
+      if(res?.error){alert("La correction n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload({force:true});return;}
       markLocalWrite?.();
-      setData(d=>({...d,reception:[{id:r.id,date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,tempOk:r.temp_ok,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed,decision:r.decision,motif:r.motif},...d.reception]}));
+      setData(d=>({...d,reception:d.reception.map(r=>r.id===editingId?{...r,...payload}:r)}));
+    }else{
+      const res=await db.addReception({date:todayStr(),signed:user.name,...payload});
+      if(res?.error){alert("La réception n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload({force:true});return;}
+      // Mise à jour locale immédiate à partir de la ligne réellement créée
+      // (avec son vrai id Supabase) — pas de reload complet des 20 tables.
+      if(res?.data){
+        const r=res.data;
+        markLocalWrite?.();
+        setData(d=>({...d,reception:[{id:r.id,date:r.date,supplier:r.supplier,product:r.product,qty:r.qty,temp:r.temp,tempOk:r.temp_ok,dlc:r.dlc,lot:r.lot,aspect:r.aspect,emballage:r.emballage,signed:r.signed,decision:r.decision,motif:r.motif},...d.reception]}));
+      }
     }
-    setShow(false);setTemp(3);setAspect("OK");setEmb("OK");setForm({supplier:"",product:"",qty:"",dlc:"",lot:""});setDecision("accepted");setMotif("");
+    setShow(false);setEditingId(null);setTemp(3);setAspect("OK");setEmb("OK");setForm({supplier:"",product:"",qty:"",dlc:"",lot:""});setDecision("accepted");setMotif("");
   }
   return(<div className="page">
     <GbphHelpButton section="trace" go={go}/>
@@ -3010,21 +3144,15 @@ function Reception({data,setData,user,db,reload,go,markLocalWrite,lang}){
       return dateKeys.map((date,idx)=>(
         <div key={date} style={{marginBottom:10}}>
           <CollapsibleSection title={date} icon="📅" count={byDate[date].length} defaultOpen={idx===0}>
-            {byDate[date].map(r=>{
-              const decisionLabel={accepted:{l:"✓ Accepté",c:"b-good"},reserve:{l:"⚠ Sous réserve",c:"b-warn"},refused:{l:"✗ Refusé",c:"b-bad"}}[r.decision||"accepted"];
-              return(<div key={r.id} className="card">
-              <div className="between mb6"><div><div className="item-title">{r.product}</div><div className="item-sub">{r.supplier} · {r.qty}</div></div><span className={`badge ${r.tempOk?"b-good":"b-bad"} tabular`}>{r.temp}°C</span></div>
-              <div className="row gap6 mb6" style={{flexWrap:"wrap"}}><span className={`badge ${r.aspect==="OK"?"b-good":"b-bad"}`}>Aspect {r.aspect}</span><span className={`badge ${r.emballage==="OK"?"b-good":"b-bad"}`}>Emb. {r.emballage}</span><span className={`badge ${decisionLabel.c}`}>{decisionLabel.l}</span><span className="badge b-mute">{r.signed}</span></div>
-              {r.motif && <div className="text-xs" style={{color:T.warn,marginBottom:4}}>Motif : {r.motif}</div>}
-              <div className="text-xs text-dim">DLC {r.dlc} · Lot {r.lot}</div>
-            </div>);})}
+            {byDate[date].map(r=><ReceptionCard key={r.id} r={r} onEdit={openEdit} onDelete={deleteReception}/>)}
           </CollapsibleSection>
         </div>
       ));
     })()}
-    <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
+    <div className="fab-anchor"><button className="btn-fab" onClick={openNew}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
-      <div className="sheet-handle"></div><div className="sheet-title">{t("recv_new",lang)}</div>
+      <div className="sheet-handle"></div><div className="sheet-title">{editingId?"Corriger la réception":t("recv_new",lang)}</div>
+      {editingId && <div className="text-xs text-dim mb14">Correction d'une fiche déjà enregistrée — l'appui long sur une fiche permet de la supprimer entièrement.</div>}
       <div className="field"><label className="label">{t("recv_product",lang)}</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})} placeholder="ex : Saumon frais"/></div>
       <div className="field"><label className="label">{t("recv_supplier",lang)}</label><input className="input" value={form.supplier} onChange={e=>setForm({...form,supplier:e.target.value})}/></div>
       <div className="row gap8 mb14"><div style={{flex:1}}><label className="label">{t("recv_qty",lang)}</label><input className="input input-sm" value={form.qty} onChange={e=>setForm({...form,qty:e.target.value})}/></div><div style={{flex:1}}><label className="label">{t("recv_lot",lang)}</label><input className="input input-sm" value={form.lot} onChange={e=>setForm({...form,lot:e.target.value})}/></div></div>
@@ -3042,7 +3170,8 @@ function Reception({data,setData,user,db,reload,go,markLocalWrite,lang}){
       {decision!=="accepted" && (
         <div className="field"><label className="label">Motif</label><input className="input" value={motif} onChange={e=>setMotif(e.target.value)} placeholder="ex : emballage abîmé, température trop haute…"/></div>
       )}
-      <button className="btn btn-primary mt8" onClick={save} disabled={!form.product}>{t("recv_save",lang)}</button>
+      <button className="btn btn-primary mt8" onClick={save} disabled={!form.product}>{editingId?"Enregistrer la correction":t("recv_save",lang)}</button>
+      {editingId && <button className="btn btn-ghost mt8" onClick={()=>setShow(false)}>Annuler</button>}
     </div></div>}
   </div>);
 }
@@ -3052,6 +3181,22 @@ const CELL_MODES = {
   refroid: { key:"refroid", label:"Refroidissement", icon:"❄️", sub:"63°C → 10°C à cœur", targetEnd:10, startCenter:65, endCenter:8, dlcMonths:0 },
   surgel:  { key:"surgel",  label:"Surgélation",     icon:"🧊", sub:"jusqu'à −18°C à cœur", targetEnd:-18, startCenter:65, endCenter:-18, dlcMonths:6 },
 };
+// Une fiche de refroidissement/surgélation terminée : tap pour corriger,
+// appui long pour supprimer — composant à part (pas de hook dans une
+// boucle), même règle que partout ailleurs dans l'app.
+function CoolingCard({c,maxMin,onEdit,onDelete}){
+  const lp=useLongPress(()=>{ haptic.medium(); onDelete(c); });
+  const cm=CELL_MODES[c.mode||"refroid"];
+  const okTemp=(c.mode==="surgel")?c.endTemp<=-18:c.endTemp<=10;
+  return(
+    <div className="card" {...lp.handlers} style={{cursor:"pointer"}} onClick={()=>{ if(!lp.didFire()) onEdit(c); }}>
+      <div className="between mb6"><div><div className="item-title">{cm.icon} {c.product}{c.manual&&<span className="badge b-mute" style={{marginLeft:6,fontSize:9}}>saisi après coup</span>}</div><div className="item-sub">{cm.label} · {c.qty}</div></div><span className={`badge ${c.status==="ok"?"b-good":"b-bad"}`}>{c.status==="ok"?"✓ OK":"⚠"}</span></div>
+      <div className="row gap12" style={{flexWrap:"wrap"}}><div><div className="text-xs text-dim">Départ</div><div className="text-sm fw7 tabular">{c.startTemp}°C</div></div><div><div className="text-xs text-dim">Arrivée</div><div className="text-sm fw7 tabular" style={{color:okTemp?T.good:T.bad}}>{c.endTemp}°C</div></div><div><div className="text-xs text-dim">Durée</div><div className="text-sm fw7 tabular" style={{color:c.duration<=maxMin?T.good:T.bad}}>{c.duration} min</div></div></div>
+      <div className="text-xs text-dim mt6">DLC : {c.dlc} · {c.operator}</div>
+    </div>
+  );
+}
+
 function Cooling({data,setData,user,db,reload,go,markLocalWrite,lang}){
   const[show,setShow]=useState(false);const[step,setStep]=useState(0);
   const[mode,setMode]=useState("refroid");
@@ -3061,6 +3206,10 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite,lang}){
   const[showManual,setShowManual]=useState(false);
   const[manualForm,setManualForm]=useState(null);
   const[manualBusy,setManualBusy]=useState(false);
+  // Correction d'une fiche déjà enregistrée — réutilise le même formulaire
+  // "refroidissement passé" que la saisie rétroactive, juste pré-rempli et
+  // avec un PATCH au lieu d'un POST à l'enregistrement.
+  const[editingCoolingId,setEditingCoolingId]=useState(null);
   const M=CELL_MODES[mode];
   // freezingMax n'a jamais été vraiment câblé (pas de colonne en base, pas de
   // champ dans les Paramètres) — il n'existait que dans les données de démo,
@@ -3111,14 +3260,35 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite,lang}){
     setManualBusy(true);
     const [y,mo,da]=manualForm.date.split("-");
     const dateStr=`${da}/${mo}`;
-    const res=await db.logCoolingRetroactive({product:manualForm.product.trim(),qty:manualForm.qty,startTemp:manualForm.startTemp,endTemp:manualForm.endTemp,duration:dur,status,dlc,mode:manualForm.mode,operator:user?.name,date:dateStr});
-    setManualBusy(false);
-    if(res?.error||!res?.data){alert("Le refroidissement n'a pas été enregistré. Vérifie la connexion Supabase.");await reload?.({force:true});return;}
-    markLocalWrite?.();
-    const r=res.data;
-    setData(d=>({...d,cooling:[{id:r.id,product:r.product,qty:r.qty,startTemp:r.start_temp,endTemp:r.end_temp,duration:r.duration,status:r.status,dlc:r.dlc,mode:r.mode,manual:true,operator:r.operator,date:r.date,createdAt:r.created_at},...d.cooling]}));
-    setShowManual(false);
+    const payload={product:manualForm.product.trim(),qty:manualForm.qty,startTemp:manualForm.startTemp,endTemp:manualForm.endTemp,duration:dur,status,dlc,mode:manualForm.mode};
+    if(editingCoolingId){
+      const res=await db.updateCoolingEntry(editingCoolingId,payload);
+      setManualBusy(false);
+      if(res?.error){alert("La correction n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload({force:true});return;}
+      markLocalWrite?.();
+      setData(d=>({...d,cooling:d.cooling.map(c=>c.id===editingCoolingId?{...c,...payload}:c)}));
+    }else{
+      const res=await db.logCoolingRetroactive({...payload,operator:user?.name,date:dateStr});
+      setManualBusy(false);
+      if(res?.error||!res?.data){alert("Le refroidissement n'a pas été enregistré. Vérifie la connexion Supabase.");await reload?.({force:true});return;}
+      markLocalWrite?.();
+      const r=res.data;
+      setData(d=>({...d,cooling:[{id:r.id,product:r.product,qty:r.qty,startTemp:r.start_temp,endTemp:r.end_temp,duration:r.duration,status:r.status,dlc:r.dlc,mode:r.mode,manual:true,operator:r.operator,date:r.date,createdAt:r.created_at},...d.cooling]}));
+    }
+    setShowManual(false);setEditingCoolingId(null);
     haptic.success();
+  }
+  function openEditCooling(c){
+    setEditingCoolingId(c.id);
+    setManualForm({product:c.product,qty:c.qty,mode:c.mode||"refroid",startTemp:c.startTemp,endTemp:c.endTemp,duration:c.duration,date:isoDate(new Date())});
+    setShowManual(true);
+  }
+  async function deleteCoolingEntry(c){
+    if(!window.confirm(`Supprimer la fiche "${c.product}" ? C'est définitif.`))return;
+    const res=await db.deleteCoolingEntry(c.id);
+    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload({force:true});return;}
+    markLocalWrite?.();
+    setData(d=>({...d,cooling:d.cooling.filter(x=>x.id!==c.id)}));
   }
   const coolingDone=data.cooling.filter(c=>c.status!=="active");
   // Refroidissement en cours quelque part (même si on a quitté l'écran, swipe,
@@ -3164,16 +3334,12 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite,lang}){
       return dateKeys.map((date,idx)=>(
         <div key={date} style={{marginBottom:10}}>
           <CollapsibleSection title={date} icon="📅" count={byDate[date].length} defaultOpen={idx===0}>
-            {byDate[date].map(c=>{const cm=CELL_MODES[c.mode||"refroid"];const okTemp=(c.mode==="surgel")?c.endTemp<=-18:c.endTemp<=10;return(<div key={c.id} className="card">
-              <div className="between mb6"><div><div className="item-title">{cm.icon} {c.product}{c.manual&&<span className="badge b-mute" style={{marginLeft:6,fontSize:9}}>saisi après coup</span>}</div><div className="item-sub">{cm.label} · {c.qty}</div></div><span className={`badge ${c.status==="ok"?"b-good":"b-bad"}`}>{c.status==="ok"?"✓ OK":"⚠"}</span></div>
-              <div className="row gap12" style={{flexWrap:"wrap"}}><div><div className="text-xs text-dim">Départ</div><div className="text-sm fw7 tabular">{c.startTemp}°C</div></div><div><div className="text-xs text-dim">Arrivée</div><div className="text-sm fw7 tabular" style={{color:okTemp?T.good:T.bad}}>{c.endTemp}°C</div></div><div><div className="text-xs text-dim">Durée</div><div className="text-sm fw7 tabular" style={{color:c.duration<=maxMin?T.good:T.bad}}>{c.duration} min</div></div></div>
-              <div className="text-xs text-dim mt6">DLC : {c.dlc} · {c.operator}</div>
-            </div>);})}
+            {byDate[date].map(c=><CoolingCard key={c.id} c={c} maxMin={maxMin} onEdit={openEditCooling} onDelete={deleteCoolingEntry}/>)}
           </CollapsibleSection>
         </div>
       ));
     })()}
-    <button className="btn btn-ghost mb8" onClick={()=>{setManualForm({product:"",qty:"",mode:"refroid",startTemp:65,endTemp:8,duration:60,date:isoDate(new Date())});setShowManual(true);}}>🕐 Enregistrer un refroidissement passé</button>
+    <button className="btn btn-ghost mb8" onClick={()=>{setEditingCoolingId(null);setManualForm({product:"",qty:"",mode:"refroid",startTemp:65,endTemp:8,duration:60,date:isoDate(new Date())});setShowManual(true);}}>🕐 Enregistrer un refroidissement passé</button>
     <div className="fab-anchor"><button className="btn-fab" onClick={()=>{setStep(0);setMode("refroid");setShow(true);}}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div>
@@ -3221,36 +3387,76 @@ function Cooling({data,setData,user,db,reload,go,markLocalWrite,lang}){
 
     {showManual&&manualForm&&<div className="overlay" onClick={()=>!manualBusy&&setShowManual(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
       <div className="sheet-handle"></div>
-      <div className="sheet-title">🕐 Refroidissement passé</div>
-      <div className="text-xs text-dim mb14" style={{lineHeight:1.5}}>À utiliser quand le chrono n'a pas été lancé sur le moment, mais que le refroidissement a bien eu lieu — reste apparent dans l'historique comme "saisi après coup", pour rester honnête en cas de contrôle.</div>
+      <div className="sheet-title">{editingCoolingId?"Corriger le refroidissement":"🕐 Refroidissement passé"}</div>
+      {!editingCoolingId && <div className="text-xs text-dim mb14" style={{lineHeight:1.5}}>À utiliser quand le chrono n'a pas été lancé sur le moment, mais que le refroidissement a bien eu lieu — reste apparent dans l'historique comme "saisi après coup", pour rester honnête en cas de contrôle.</div>}
+      {editingCoolingId && <div className="text-xs text-dim mb14">Correction d'une fiche déjà enregistrée — l'appui long sur une fiche permet de la supprimer entièrement.</div>}
       <div className="field"><label className="label">Type</label><SegmentedControl value={manualForm.mode} onChange={v=>setManualForm(f=>({...f,mode:v,endTemp:CELL_MODES[v].endCenter}))} options={[{value:"refroid",label:t("cool_mode_refroid",lang)},{value:"surgel",label:t("cool_mode_surgel",lang)}]}/></div>
       <div className="field"><label className="label">Produit</label><input className="input" value={manualForm.product} onChange={e=>setManualForm(f=>({...f,product:e.target.value}))}/></div>
       <div className="field"><label className="label">Quantité</label><input className="input" value={manualForm.qty} onChange={e=>setManualForm(f=>({...f,qty:e.target.value}))}/></div>
       <div className="row gap8 mb14">
-        <div style={{flex:1}}><label className="label">Date</label><input className="input input-sm" type="date" value={manualForm.date} onChange={e=>setManualForm(f=>({...f,date:e.target.value}))}/></div>
-        <div style={{flex:1}}><label className="label">Durée (min)</label><input className="input input-sm" type="number" value={manualForm.duration} onChange={e=>setManualForm(f=>({...f,duration:e.target.value}))}/></div>
+        {/* min-width:0 est nécessaire ici : un champ type="date" a une
+            largeur intrinsèque que flex:1 seul ne suffit pas à faire
+            rétrécir sur iOS Safari, ce qui le faisait chevaucher son voisin. */}
+        {!editingCoolingId && <div style={{flex:1,minWidth:0}}><label className="label">Date</label><input className="input input-sm" type="date" value={manualForm.date} onChange={e=>setManualForm(f=>({...f,date:e.target.value}))}/></div>}
+        <div style={{flex:1,minWidth:0}}><label className="label">Durée (min)</label><input className="input input-sm" type="number" value={manualForm.duration} onChange={e=>setManualForm(f=>({...f,duration:e.target.value}))}/></div>
       </div>
       <div className="field"><label className="label">Température de départ</label><TapDial value={manualForm.startTemp} onChange={v=>setManualForm(f=>({...f,startTemp:v}))} center={65} step={2} colorFn={v=>v>=63?"good":"warn"}/></div>
       {manualForm.mode==="surgel"
         ? <div className="field"><label className="label">{t("cool_core_temp_surgel",lang)}</label><TapDial value={manualForm.endTemp} onChange={v=>setManualForm(f=>({...f,endTemp:v}))} center={-18} step={2} colorFn={v=>v<=-18?"good":"bad"}/></div>
         : <div className="field"><label className="label">{t("cool_core_temp_refroid",lang)}</label><TapDial value={manualForm.endTemp} onChange={v=>setManualForm(f=>({...f,endTemp:v}))} center={8} colorFn={v=>v<=10?"good":"bad"}/></div>}
-      <button className="btn btn-primary mt8" onClick={saveManualCooling} disabled={!manualForm.product.trim()||manualBusy}>{manualBusy?"Enregistrement…":"Enregistrer"}</button>
-      <button className="btn btn-ghost mt8" onClick={()=>setShowManual(false)} disabled={manualBusy}>Annuler</button>
+      <button className="btn btn-primary mt8" onClick={saveManualCooling} disabled={!manualForm.product.trim()||manualBusy}>{manualBusy?"Enregistrement…":(editingCoolingId?"Enregistrer la correction":"Enregistrer")}</button>
+      <button className="btn btn-ghost mt8" onClick={()=>{setShowManual(false);setEditingCoolingId(null);}} disabled={manualBusy}>Annuler</button>
     </div></div>}
   </div>);
 }
 
+// Une fiche de remise en température : tap pour corriger, appui long pour
+// supprimer — composant à part (pas de hook dans une boucle), même règle
+// que partout ailleurs dans l'app.
+function ReheatingCard({r,reheatMin,reheatMaxTime,onEdit,onDelete}){
+  const lp=useLongPress(()=>{ haptic.medium(); onDelete(r); });
+  return(
+    <div className="card" {...lp.handlers} style={{cursor:"pointer"}} onClick={()=>{ if(!lp.didFire()) onEdit(r); }}>
+      <div className="between mb6"><div><div className="item-title">{r.product}</div><div className="item-sub">{r.operator}</div></div><span className={`badge ${r.status==="ok"?"b-good":"b-bad"}`}>{r.status==="ok"?"✓":"⚠"}</span></div>
+      <div className="row gap12" style={{flexWrap:"wrap"}}><div><div className="text-xs text-dim">Temp. à cœur</div><div className="text-sm fw7 tabular" style={{color:r.endTemp>=reheatMin?T.good:T.bad}}>{r.endTemp}°C</div></div><div><div className="text-xs text-dim">Durée</div><div className="text-sm fw7 tabular" style={{color:r.duration<=reheatMaxTime?T.good:T.bad}}>{r.duration} min</div></div></div>
+    </div>
+  );
+}
+
 function Reheating({data,setData,user,db,reload,go,markLocalWrite,lang}){
   const[show,setShow]=useState(false);const[form,setForm]=useState({product:""});const[endTemp,setEndTemp]=useState(65);const[duration,setDuration]=useState(30);
+  const[editingId,setEditingId]=useState(null);
   const{reheatMin,reheatMaxTime}=data.haccpSettings;
+  function openEdit(r){
+    setEditingId(r.id);
+    setForm({product:r.product});setEndTemp(r.endTemp);setDuration(r.duration);
+    setShow(true);
+  }
+  function openNew(){
+    setEditingId(null);setForm({product:""});setEndTemp(65);setDuration(30);setShow(true);
+  }
+  async function deleteReheatingEntry(r){
+    if(!window.confirm(`Supprimer la fiche "${r.product}" ? C'est définitif.`))return;
+    const res=await db.deleteReheating(r.id);
+    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload({force:true});return;}
+    markLocalWrite?.();
+    setData(d=>({...d,reheating:d.reheating.filter(x=>x.id!==r.id)}));
+  }
   async function save(){
     if(!form.product)return;
     const status=endTemp>=reheatMin&&duration<=reheatMaxTime?"ok":"alert";
-    const res=await db.addReheating({product:form.product,endTemp,duration,operator:user.name,status,date:todayStr()});
-    if(res?.error){alert("La remise en température n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload({force:true});return;}
-    // Mise à jour locale immédiate — évite de recharger les 20 tables.
-    if(res?.data){const r=res.data;markLocalWrite?.();setData(d=>({...d,reheating:[{id:r.id,product:r.product,endTemp:r.end_temp,duration:r.duration,operator:r.operator,status:r.status,date:r.date},...d.reheating]}));}
-    setShow(false);setForm({product:""});setEndTemp(65);setDuration(30);
+    if(editingId){
+      const res=await db.updateReheating(editingId,{product:form.product,endTemp,duration,status});
+      if(res?.error){alert("La correction n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload({force:true});return;}
+      markLocalWrite?.();
+      setData(d=>({...d,reheating:d.reheating.map(r=>r.id===editingId?{...r,product:form.product,endTemp,duration,status}:r)}));
+    }else{
+      const res=await db.addReheating({product:form.product,endTemp,duration,operator:user.name,status,date:todayStr()});
+      if(res?.error){alert("La remise en température n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload({force:true});return;}
+      // Mise à jour locale immédiate — évite de recharger les 20 tables.
+      if(res?.data){const r=res.data;markLocalWrite?.();setData(d=>({...d,reheating:[{id:r.id,product:r.product,endTemp:r.end_temp,duration:r.duration,operator:r.operator,status:r.status,date:r.date},...d.reheating]}));}
+    }
+    setShow(false);setEditingId(null);setForm({product:""});setEndTemp(65);setDuration(30);
   }
   return(<div className="page">
     <GbphHelpButton section="temp" go={go}/>
@@ -3267,30 +3473,83 @@ function Reheating({data,setData,user,db,reload,go,markLocalWrite,lang}){
       return dateKeys.map((date,idx)=>(
         <div key={date} style={{marginBottom:10}}>
           <CollapsibleSection title={date} icon="📅" count={byDate[date].length} defaultOpen={idx===0}>
-            {byDate[date].map(r=><div key={r.id} className="card">
-              <div className="between mb6"><div><div className="item-title">{r.product}</div><div className="item-sub">{r.operator}</div></div><span className={`badge ${r.status==="ok"?"b-good":"b-bad"}`}>{r.status==="ok"?"✓":"⚠"}</span></div>
-              <div className="row gap12" style={{flexWrap:"wrap"}}><div><div className="text-xs text-dim">{t("reheat_final_temp",lang)}</div><div className="text-sm fw7 tabular" style={{color:r.endTemp>=reheatMin?T.good:T.bad}}>{r.endTemp}°C</div></div><div><div className="text-xs text-dim">{t("reheat_duration",lang)}</div><div className="text-sm fw7 tabular" style={{color:r.duration<=reheatMaxTime?T.good:T.bad}}>{r.duration} min</div></div></div>
-            </div>)}
+            {byDate[date].map(r=><ReheatingCard key={r.id} r={r} reheatMin={reheatMin} reheatMaxTime={reheatMaxTime} onEdit={openEdit} onDelete={deleteReheatingEntry}/>)}
           </CollapsibleSection>
         </div>
       ));
     })()}
-    <div className="fab-anchor"><button className="btn-fab" onClick={()=>setShow(true)}>+</button></div>
+    <div className="fab-anchor"><button className="btn-fab" onClick={openNew}>+</button></div>
     {show&&<div className="overlay" onClick={()=>setShow(false)}><div className="sheet" onClick={e=>e.stopPropagation()}>
-      <div className="sheet-handle"></div><div className="sheet-title">{t("reheat_new",lang)}</div>
+      <div className="sheet-handle"></div><div className="sheet-title">{editingId?"Corriger la remise en température":t("reheat_new",lang)}</div>
+      {editingId && <div className="text-xs text-dim mb14">Correction d'une fiche déjà enregistrée — l'appui long sur une fiche permet de la supprimer entièrement.</div>}
       <div className="field"><label className="label">{t("reheat_product",lang)}</label><input className="input" value={form.product} onChange={e=>setForm({...form,product:e.target.value})}/></div>
       <div className="field"><label className="label">{t("reheat_core_temp",lang)}</label><TapDial value={endTemp} onChange={setEndTemp} center={65} colorFn={v=>v>=reheatMin?"good":"bad"}/></div>
       <div className="field"><label className="label">{t("reheat_duration_min",lang)}</label><TapDial value={duration} onChange={setDuration} center={30} step={5} colorFn={v=>v<=reheatMaxTime?"good":"bad"} format={v=>`${v}'`}/></div>
       {endTemp>=reheatMin&&duration<=reheatMaxTime&&<div className="banner banner-good mb8"><span>✓</span><div><b>{t("reheat_conform",lang)}</b></div></div>}
-      <button className="btn btn-primary mt8" onClick={save} disabled={!form.product}>{t("reheat_save",lang)}</button>
+      <button className="btn btn-primary mt8" onClick={save} disabled={!form.product}>{editingId?"Enregistrer la correction":t("reheat_save",lang)}</button>
+      {editingId && <button className="btn btn-ghost mt8" onClick={()=>setShow(false)}>Annuler</button>}
     </div></div>}
   </div>);
+}
+
+// Une ligne de l'historique des tests d'huile : tap pour corriger,
+// appui long pour supprimer — typiquement quand quelqu'un s'est trompé de
+// friteuse au moment de la saisie. Composant à part (pas de hook dans une
+// boucle), même règle que partout ailleurs dans l'app.
+function OilTestRow({t,onEdit,onDelete}){
+  const lp=useLongPress(()=>{ haptic.medium(); onDelete(t); });
+  const actionLabel={changed:"Changée",filtered:"Filtrée",none:null}[t.action||"none"];
+  return(
+    <div className="row-line" {...lp.handlers} style={{cursor:"pointer"}} onClick={()=>{ if(!lp.didFire()) onEdit(t); }}>
+      <div className="item-body"><div className="item-title" style={{fontSize:13}}>{t.date} · {t.polaires}%{actionLabel?` · ${actionLabel}`:""}</div><div className="item-sub">{t.operator}</div></div>
+      <span className="item-arrow">›</span>
+    </div>
+  );
 }
 
 function Oils({data,setData,user,db,reload,go,markLocalWrite,lang}){
   const[selOil,setSelOil]=useState(null);const[polaires,setPolaires]=useState(15);const[action,setAction]=useState("filtered");
   const[showAdd,setShowAdd]=useState(false);const[newOil,setNewOil]=useState({name:"",type:"Tournesol"});
+  // Correction d'un test précis dans l'historique (pas un nouveau test) —
+  // typiquement une friteuse mal sélectionnée par erreur.
+  const[editingTest,setEditingTest]=useState(null);
+  const[editPolaires,setEditPolaires]=useState(15);
+  const[editAction,setEditAction]=useState("none");
   const max=data.haccpSettings.oilPolarMax;
+
+  // Après avoir corrigé ou retiré un test, l'état "actuel" affiché sur la
+  // fiche (oils.polaires/lastTest) doit refléter le test le plus récent
+  // restant — sinon la fiche continuerait d'afficher une valeur qui n'existe
+  // plus dans l'historique.
+  function recomputeCurrentOil(oilId,tests){
+    const forOil=tests.filter(t=>t.oilId===oilId).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+    if(forOil.length===0)return;
+    const latest=forOil[0];
+    setData(d=>({...d,oils:d.oils.map(o=>o.id===oilId?{...o,polaires:latest.polaires,lastTest:latest.date}:o)}));
+    db.updateOil(oilId,{polaires:latest.polaires,operator:latest.operator,changed:false,action:latest.action}).catch(()=>{});
+  }
+
+  async function saveTestEdit(){
+    if(!editingTest)return;
+    const res=await db.updateOilTestEntry(editingTest.id,{polaires:editPolaires,action:editAction,changed:editAction==="changed"});
+    if(res?.error){alert("La correction n'a pas été enregistrée. Vérifie la connexion Supabase.");await reload({force:true});return;}
+    markLocalWrite?.();
+    const updatedTests=data.oilTests.map(t=>t.id===editingTest.id?{...t,polaires:editPolaires,action:editAction,changed:editAction==="changed"}:t);
+    setData(d=>({...d,oilTests:updatedTests}));
+    recomputeCurrentOil(editingTest.oilId,updatedTests);
+    setEditingTest(null);
+    haptic.success();
+  }
+
+  async function deleteTest(t){
+    if(!window.confirm("Retirer ce test de l'historique ? C'est définitif."))return;
+    const res=await db.deleteOilTestEntry(t.id);
+    if(res?.error){alert("La suppression a échoué. Vérifie la connexion Supabase.");await reload({force:true});return;}
+    markLocalWrite?.();
+    const updatedTests=data.oilTests.filter(x=>x.id!==t.id);
+    setData(d=>({...d,oilTests:updatedTests}));
+    recomputeCurrentOil(t.oilId,updatedTests);
+  }
 
   async function save(){
     const oilId=selOil.id, changed=action==="changed", today=todayStr();
@@ -3352,6 +3611,16 @@ function Oils({data,setData,user,db,reload,go,markLocalWrite,lang}){
           </div>
           <div className="pbar mb10"><div className="pfill" style={{width:`${safePct(o.polaires,max)}%`,background:danger?T.bad:warn?T.warn:T.good}}></div></div>
           <div className="row gap6 mb10"><span className={`badge ${danger?"b-bad":warn?"b-warn":"b-good"}`}>{danger?"🚨 Changer":warn?"⚠ Surveiller":"✓ OK"}</span><span className="badge b-mute">Test {o.lastTest}</span></div>
+          {(() => {
+            const history=(data.oilTests||[]).filter(t=>t.oilId===o.id).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+            return history.length>0 && (
+              <div className="mb10">
+                <CollapsibleSection title="Historique" icon="🕐" count={history.length}>
+                  {history.map(t=><OilTestRow key={t.id} t={t} onEdit={test=>{setEditingTest(test);setEditPolaires(test.polaires);setEditAction(test.action||"none");}} onDelete={deleteTest}/>)}
+                </CollapsibleSection>
+              </div>
+            );
+          })()}
           {selOil?.id===o.id?<>
             <div className="field">
               <label className="label">Action</label>
@@ -3398,6 +3667,17 @@ function Oils({data,setData,user,db,reload,go,markLocalWrite,lang}){
         ]}/>
       </div>
       <button className="btn btn-primary mt8" onClick={addOil} disabled={!newOil.name.trim()}>Ajouter</button>
+    </div></div>}
+
+    {editingTest&&<div className="overlay" onClick={()=>setEditingTest(null)}><div className="sheet" onClick={e=>e.stopPropagation()}>
+      <div className="sheet-handle"></div>
+      <div className="sheet-title">Corriger ce test</div>
+      <div className="text-xs text-dim mb14">{editingTest.date} · {editingTest.operator}</div>
+      <div className="field"><label className="label">Action</label>
+        <SegmentedControl value={editAction} onChange={setEditAction} options={[{value:"none",label:"Aucune"},{value:"filtered",label:"Filtrée"},{value:"changed",label:"Changée"}]}/>
+      </div>
+      <div className="field"><label className="label">Composés polaires</label><TapDial value={editPolaires} onChange={setEditPolaires} center={15} step={1} colorFn={v=>v<max-5?"good":v<max?"warn":"bad"} format={v=>`${v}%`}/></div>
+      <div className="row gap6 mt8"><button className="btn btn-ghost btn-sm" style={{flex:1}} onClick={()=>setEditingTest(null)}>Annuler</button><button className="btn btn-primary btn-sm" style={{flex:2}} onClick={saveTestEdit}>Enregistrer</button></div>
     </div></div>}
   </div>);
 }
@@ -4751,10 +5031,9 @@ function Tasks({data,setData,db,reload,user,lang}){
     if(res?.error){alert("Impossible d'ajouter la tâche. Vérifie la connexion Supabase.");return;}
     await reload({force:true});setShow(false);setForm({task:"",resp:"",qty:"",prio:"med",categoryId:null});
   }
-  // endService() supprimé : la clôture des créneaux est désormais entièrement
-  // automatique (voir closeSlot() dans App, déclenché au changement de
-  // service). Plus de bouton manuel — personne ne peut clôturer par erreur
-  // ou oublier de le faire.
+  // endService() supprimé : la fermeture d'un créneau n'a plus besoin de
+  // bouton manuel — les tâches non cochées sont reportées automatiquement
+  // au créneau suivant par un effet dédié dans App.
   async function removeTask(t){
     // Ouvert à toute l'équipe : la confirmation reste le seul garde-fou
     // contre une suppression accidentelle.
@@ -5366,7 +5645,11 @@ function SettingsHaccp({data,setData,db,reload}){
     ].map(([l,k,u,hint])=>(
       <div key={k} className="row-line">
         <div className="between">
-          <div><div className="item-title" style={{fontSize:13}}>{l}</div><div className="text-xs text-mute">{hint}</div></div>
+          {/* flex:1 + minWidth:0 laisse le texte s'adapter et passer à la
+              ligne si besoin, plutôt que de rester à sa largeur naturelle et
+              chevaucher la case à droite (qui, elle, ne doit jamais
+              rétrécir — flexShrink:0). */}
+          <div style={{flex:1,minWidth:0,paddingRight:10}}><div className="item-title" style={{fontSize:13}}>{l}</div><div className="text-xs text-mute">{hint}</div></div>
           <div className="row gap6" style={{flexShrink:0}}>
             <input type="number" value={seuils[k]} onChange={e=>setSeuils({...seuils,[k]:e.target.value})} onBlur={commitSeuils}
               style={{width:56,padding:"6px 8px",background:T.bg3,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,fontSize:16,fontWeight:700,textAlign:"center",fontFamily:"inherit"}}/>
@@ -6122,6 +6405,42 @@ export default function App(){
     if(total>0) navigator.setAppBadge(total).catch(()=>{});
     else navigator.clearAppBadge?.().catch(()=>{});
   },[data,user]);
+
+  // ── Report automatique des tâches de Mise en place ──────────────────────
+  // Une tâche non cochée à la fin de son créneau ne doit jamais rester
+  // bloquée dans le passé, invisible : elle est physiquement déplacée vers
+  // le créneau en cours (sa date/service changent) dès que l'app détecte
+  // qu'un nouveau créneau a démarré. Un ancien commentaire faisait référence
+  // à une fonction "closeSlot()" censée s'en charger — jamais réellement
+  // écrite (introuvable dans le code), d'où la tâche perdue remontée.
+  useEffect(()=>{
+    if(!data||!user||!data.tasks) return;
+    const RESET_MIDI = data?.haccpSettings?.resetMidi ?? (16*60+30);
+    const RESET_SOIR = Math.min(data?.haccpSettings?.resetSoir ?? (3*60), 9*60);
+    const n=new Date(); const mins=n.getHours()*60+n.getMinutes();
+    const d=new Date();
+    let curDate, curService;
+    if(mins < RESET_SOIR){ d.setDate(d.getDate()-1); curDate=isoDate(d); curService="soir"; }
+    else if(mins < RESET_MIDI){ curDate=isoDate(d); curService="midi"; }
+    else { curDate=isoDate(d); curService="soir"; }
+
+    const slotKey=(date,svc)=>`${date}_${svc==="midi"?0:1}`;
+    const curKey=slotKey(curDate,curService);
+    // Seulement les tâches strictement avant le créneau en cours, jamais
+    // cochées — une tâche déjà faite reste sur son créneau d'origine
+    // (traçabilité de quand elle a réellement été accomplie).
+    const toMove=data.tasks.filter(t=>!t.done && slotKey(t.date,t.service||"midi")<curKey);
+    if(toMove.length===0) return;
+
+    (async()=>{
+      for(const t of toMove){
+        const res=await DB.moveTaskToSlot(t.id,curDate,curService);
+        if(!res?.error){
+          setData(d2=>({...d2,tasks:d2.tasks.map(x=>x.id===t.id?{...x,date:curDate,service:curService}:x)}));
+        }
+      }
+    })();
+  },[data?.tasks,user,data?.haccpSettings?.resetMidi,data?.haccpSettings?.resetSoir]);
 
   // Langue de l'équipe, choisie à la connexion et gardée sur cet appareil.
   // Phase 1 : ne couvre que les écrans du quotidien (connexion, nav,
