@@ -725,7 +725,7 @@ const S = `
   @keyframes orbSpin{to{transform:rotate(360deg);}}
   .voice-status{font-size:13px;color:#A0A0A0;text-transform:uppercase;letter-spacing:.12em;font-weight:600;}
   .voice-transcript{font-family:'Inter',sans-serif;font-size:24px;font-weight:600;color:#FFFFFF;text-align:center;min-height:60px;line-height:1.3;}
-  .voice-hint{font-size:13px;color:#606060;text-align:center;line-height:1.6;}
+  .voice-hint{font-size:13px;color:#8C8C8C;text-align:center;line-height:1.6;}
   .voice-result{padding:14px 20px;border-radius:14px;font-size:15px;font-weight:600;text-align:center;max-width:320px;}
   .voice-result.ok{background:#0F2018;color:#5FB075;border:1px solid #5FB075;}
   .voice-result.err{background:#251010;color:#D55C5C;border:1px solid #D55C5C;}
@@ -755,7 +755,7 @@ const S = `
   .greet-line{display:flex;align-items:center;gap:8px;color:${T.textDim};font-size:13px;margin-bottom:2px;}
   .greet-dot{width:6px;height:6px;border-radius:50%;background:#FF6B00;box-shadow:0 0 8px rgba(255,107,0,.6);}
   .greet-name{font-family:'Inter',sans-serif;font-size:28px;font-weight:800;color:${T.text};line-height:1.05;letter-spacing:-.02em;}
-  .greet-context{font-size:12px;color:#606060;margin-top:2px;text-transform:capitalize;letter-spacing:.02em;}
+  .greet-context{font-size:12px;color:#8C8C8C;margin-top:2px;text-transform:capitalize;letter-spacing:.02em;}
 
   .section-title{font-family:'Inter',sans-serif;font-size:24px;font-weight:800;color:${T.text};margin-bottom:4px;line-height:1.08;letter-spacing:-.02em;}
   .section-sub{font-size:13px;color:#A0A0A0;margin-bottom:20px;letter-spacing:.01em;}
@@ -768,7 +768,7 @@ const S = `
   .urgent-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.14em;opacity:.9;margin-bottom:6px;display:flex;align-items:center;gap:6px;}
   .urgent-title{font-family:'Inter',sans-serif;font-size:17px;font-weight:800;line-height:1.25;margin-bottom:4px;letter-spacing:-.01em;}
   .urgent-sub{font-size:12px;opacity:.85;margin-bottom:14px;}
-  .urgent-cta{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.2);color:white;padding:10px 18px;border-radius:10px;font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:6px;}
+  .urgent-cta{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.2);color:white;padding:12px 18px;border-radius:10px;font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:6px;min-height:42px;}
   .urgent-cta:active{background:rgba(255,255,255,.25);}
 
   .live-widget{background:${T.bg2};border-radius:14px;padding:14px;margin-bottom:8px;border:1px solid ${T.borderHi};box-shadow:inset 0 1px 0 rgba(255,255,255,.04);position:relative;overflow:hidden;}
@@ -857,12 +857,12 @@ const S = `
   .binary-btn.sel.neutral{background:${T.bg3};border-color:${T.text};color:${T.text};}
 
   .seg{display:flex;background:${T.bg1};border-radius:10px;padding:3px;border:1px solid ${T.border};}
-  .seg-btn{flex:1;height:32px;border:none;background:transparent;border-radius:7px;color:${T.textDim};font-size:12px;font-weight:600;transition:all var(--dur-fast);}
+  .seg-btn{flex:1;height:38px;border:none;background:transparent;border-radius:7px;color:${T.textDim};font-size:12px;font-weight:600;transition:all var(--dur-fast);}
   .seg-btn.sel{background:#2D1208;color:#FF6B00;}
 
-  .chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;}
+  .chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;background-image:linear-gradient(to right,${T.bg0},${T.bg0}),linear-gradient(to left,${T.bg0},${T.bg0}),linear-gradient(to right,rgba(0,0,0,.55),rgba(0,0,0,0)),linear-gradient(to left,rgba(0,0,0,.55),rgba(0,0,0,0));background-position:left center,right center,left center,right center;background-repeat:no-repeat;background-size:22px 100%,22px 100%,14px 100%,14px 100%;background-attachment:local,local,scroll,scroll;}
   .chips::-webkit-scrollbar{display:none;}
-  .chip{flex-shrink:0;padding:7px 14px;border-radius:999px;background:${T.bg2};color:${T.textDim};border:1px solid ${T.border};font-size:13px;font-weight:600;white-space:nowrap;transition:all var(--dur-fast);}
+  .chip{flex-shrink:0;padding:10px 14px;border-radius:999px;background:${T.bg2};color:${T.textDim};border:1px solid ${T.border};font-size:13px;font-weight:600;white-space:nowrap;transition:all var(--dur-fast);}
   .chip.sel{background:#2D1208;color:#FF6B00;border-color:#5A2810;}
 
   .field{margin-bottom:14px;}
@@ -928,9 +928,9 @@ const S = `
   .profile-name{font-family:'Inter',sans-serif;font-size:20px;font-weight:700;text-align:center;margin-bottom:3px;}
   .profile-role{font-size:12px;color:${T.textDim};text-align:center;margin-bottom:18px;}
 
-  .tabs{display:flex;gap:6px;margin-bottom:14px;overflow-x:auto;padding-bottom:2px;}
+  .tabs{display:flex;gap:6px;margin-bottom:14px;overflow-x:auto;padding-bottom:2px;background-image:linear-gradient(to right,${T.bg0},${T.bg0}),linear-gradient(to left,${T.bg0},${T.bg0}),linear-gradient(to right,rgba(0,0,0,.55),rgba(0,0,0,0)),linear-gradient(to left,rgba(0,0,0,.55),rgba(0,0,0,0));background-position:left center,right center,left center,right center;background-repeat:no-repeat;background-size:22px 100%,22px 100%,14px 100%,14px 100%;background-attachment:local,local,scroll,scroll;}
   .tabs::-webkit-scrollbar{display:none;}
-  .tab{padding:8px 14px;border-radius:999px;background:${T.bg2};color:${T.textDim};border:1px solid ${T.border};font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0;}
+  .tab{padding:11px 14px;border-radius:999px;background:${T.bg2};color:${T.textDim};border:1px solid ${T.border};font-size:12px;font-weight:600;white-space:nowrap;flex-shrink:0;}
   .tab.active{background:#2D1208;color:#FF6B00;border-color:#5A2810;}
 
   .mult-row{display:flex;align-items:center;gap:10px;background:${T.bg1};border-radius:12px;padding:10px;margin-bottom:12px;border:1px solid ${T.border};}
@@ -2766,7 +2766,7 @@ function GbphHelpButton({section,go}){
   return(
     <button
       onClick={()=>go("gbph",{section})}
-      style={{display:"inline-flex",alignItems:"center",gap:5,padding:"6px 12px",borderRadius:20,background:T.bg2,border:`1px solid ${T.border}`,color:T.textDim,fontSize:12,fontWeight:600,marginBottom:12}}
+      style={{display:"inline-flex",alignItems:"center",gap:5,padding:"9px 14px",minHeight:40,borderRadius:20,background:T.bg2,border:`1px solid ${T.border}`,color:T.textDim,fontSize:12,fontWeight:600,marginBottom:12}}
       aria-label="Aide GBPH"
     ><span style={{color:"#FF6B00",fontWeight:800}}>?</span> Aide</button>
   );
@@ -3037,7 +3037,7 @@ function NonConformites({data,setData,user,db,reload,go,markLocalWrite,lang}){
         <textarea className="input" rows={3} value={desc} onChange={e=>setDesc(e.target.value)} placeholder="ex : Frigo Entrées à 8°C ce matin, huile de friture au-dessus du seuil…"/>
       </div>
       {!showMore
-        ? <button className="text-xs text-dim mb14" style={{background:"none",border:"none",textAlign:"left",cursor:"pointer"}} onClick={()=>setShowMore(true)}>+ Ajouter une cause et une action corrective (facultatif)</button>
+        ? <button className="text-xs text-dim mb14" style={{background:"none",border:"none",textAlign:"left",cursor:"pointer",padding:"12px 0",minHeight:40,width:"100%"}} onClick={()=>setShowMore(true)}>+ Ajouter une cause et une action corrective (facultatif)</button>
         : <>
           <div className="field"><label className="label">Cause probable</label><input className="input" value={cause} onChange={e=>setCause(e.target.value)} placeholder="facultatif"/></div>
           <div className="field"><label className="label">Action pour que ça ne se reproduise pas</label><input className="input" value={correctiveAction} onChange={e=>setCorrectiveAction(e.target.value)} placeholder="facultatif"/></div>
@@ -3649,7 +3649,7 @@ function Oils({data,setData,user,db,reload,go,markLocalWrite,lang}){
           </>:(
             <div className="row gap6">
               <button className="btn btn-primary btn-sm" style={{flex:1}} onClick={()=>{setSelOil(o);setPolaires(15);setAction("filtered");}}>{t("oils_new_test",lang)}</button>
-              <button className="btn btn-ghost btn-sm" style={{flex:"0 0 auto",width:40,color:T.bad}} onClick={()=>removeOil(o)}>🗑</button>
+              <button className="btn btn-ghost btn-sm" style={{flex:"0 0 auto",width:44,color:T.bad}} onClick={()=>removeOil(o)}>🗑</button>
             </div>
           )}
         </div>);})}
@@ -4387,7 +4387,7 @@ function Labels({data,setData,user,db,reload,go,markLocalWrite,lang}){
     <div className="between" style={{marginBottom:8}}>
       <div className="bucket-label" style={{margin:0}}>{t("label_history",lang)}</div>
       {user?.isAdmin && data.labels.length>0 && (
-        <button onClick={purgeHistory} style={{background:"none",border:"none",color:T.textDim,fontSize:12,fontWeight:600,padding:"4px 8px"}}>{t("label_purge",lang)}</button>
+        <button onClick={purgeHistory} style={{background:"none",border:"none",color:T.textDim,fontSize:12,fontWeight:600,padding:"10px 12px",minHeight:40}}>{t("label_purge",lang)}</button>
       )}
     </div>
     {data.labels.length===0
@@ -4396,7 +4396,7 @@ function Labels({data,setData,user,db,reload,go,markLocalWrite,lang}){
         <div key={l.id} className="row-line">
           <div className="item-icon" style={{background:T.infoBg}}>{lt.icon}</div>
           <div className="item-body"><div className="item-title">{l.product}</div><div className="item-sub">{lt.verb} {l.dateProd} · DLC {l.dlc} · {l.operator||""}</div></div>
-          <button onClick={()=>reprint(l)} style={{background:T.bg3,border:`1px solid ${T.border}`,color:T.text,borderRadius:9,padding:"7px 11px",fontSize:13,flexShrink:0}}>🖨️</button>
+          <button onClick={()=>reprint(l)} style={{background:T.bg3,border:`1px solid ${T.border}`,color:T.text,borderRadius:9,fontSize:15,flexShrink:0,width:44,height:44,display:"flex",alignItems:"center",justifyContent:"center"}}>🖨️</button>
         </div>
       );})}
 
@@ -5070,7 +5070,7 @@ function Tasks({data,setData,db,reload,user,lang}){
       border: `1px solid ${isCurrentSlot ? T.border : T.warn+"66"}`,
     }}>
       <div className="between">
-        <button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={()=>setDayOffset(o=>Math.max(o-1,currentSlot.offset))} disabled={dayOffset<=currentSlot.offset}>‹</button>
+        <button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 16px",minWidth:44}} onClick={()=>setDayOffset(o=>Math.max(o-1,currentSlot.offset))} disabled={dayOffset<=currentSlot.offset}>‹</button>
         <div style={{textAlign:"center",flex:1}}>
           <div style={{fontWeight:800,fontSize:16,textTransform:"capitalize",lineHeight:1.2}}>
             {service==="midi"?"☀️":"🌙"} {dayLabel} · {service==="midi"?t("tasks_slot_midi",lang):t("tasks_slot_soir",lang)}
@@ -5079,7 +5079,7 @@ function Tasks({data,setData,db,reload,user,lang}){
             {isCurrentSlot ? `● ${t("tasks_current_service",lang)}` : `◆ ${t("tasks_other_slot",lang)}`}
           </div>
         </div>
-        <button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 10px"}} onClick={()=>setDayOffset(o=>o+1)}>›</button>
+        <button className="btn btn-ghost btn-sm" style={{width:"auto",padding:"6px 16px",minWidth:44}} onClick={()=>setDayOffset(o=>o+1)}>›</button>
       </div>
 
       <div style={{height:12}}></div>
